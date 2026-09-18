@@ -1603,6 +1603,69 @@ Then('the menu is still there', async ({ page }) => {
   await expect(page.getByTestId('nav-tasks')).toBeVisible()
 })
 
+When("the root element's data-theme becomes {string}", async ({ page }, value: string) => {
+  await page.evaluate((v) => {
+    document.documentElement.dataset.theme = v
+  }, value)
+})
+
+Then('the page background is the light base color', async ({ page }) => {
+  const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor)
+  expect(background).toBe('rgb(246, 246, 248)')
+})
+
+When('I open the settings page', async ({ page }) => {
+  await page.getByTestId('nav-settings').click()
+})
+
+When('I choose the {string} theme', async ({ page }, label: string) => {
+  await page.getByTestId(`theme-${label.toLowerCase()}`).click()
+})
+
+Then('the page uses the {string} theme', async ({ page }, value: string) => {
+  // Polled rather than read once: `emulateMedia` acknowledges over CDP before
+  // the renderer has necessarily dispatched the `change` event to script, so
+  // the very next assertion can otherwise read the DOM a beat before the
+  // store's listener has run.
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.dataset.theme))
+    .toBe(value)
+})
+
+When('the page is reloaded', async ({ page }) => {
+  await page.reload()
+})
+
+Given('the browser prefers a light color scheme', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' })
+})
+
+When('the browser starts preferring a dark color scheme', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+})
+
+Then('the veil tokens are black-based', async ({ page }) => {
+  const value = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--color-veil-strong').trim(),
+  )
+  expect(value).toBe('rgba(0, 0, 0, 0.07)')
+})
+
+Then('the veil tokens are white-based', async ({ page }) => {
+  const value = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--color-veil-strong').trim(),
+  )
+  expect(value).toBe('rgba(255, 255, 255, 0.06)')
+})
+
+Then("the draft badge's background is the light veil-strong color", async ({ page }) => {
+  const color = await page
+    .getByTestId('state-draft')
+    .first()
+    .evaluate((el) => getComputedStyle(el).backgroundColor)
+  expect(color).toBe('rgba(0, 0, 0, 0.07)')
+})
+
 
 // ---------------------------------------------------------------- security
 

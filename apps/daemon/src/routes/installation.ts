@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify'
-import { MAX_UI_SCALE } from '@factory/config'
+import { MAX_UI_SCALE, UI_THEMES, isUiTheme } from '@factory/config'
 import {
   DISCLAIMER,
   DISCLAIMER_VERSION,
@@ -153,42 +153,52 @@ export function registerInstallationRoutes(app: FastifyInstance, runtime: Runtim
    * are checked before the file is touched so a refusal reads as a refusal
    * rather than as a save that quietly did nothing.
    */
-  app.patch<{ Body: { ui?: { scale?: unknown }; security?: { profile?: unknown } } }>(
-    '/api/settings',
-    async (request, reply) => {
-      const scale = request.body?.ui?.scale
-      const profile = request.body?.security?.profile
-      if (scale === undefined && profile === undefined) {
+  app.patch<{
+    Body: { ui?: { scale?: unknown; theme?: unknown }; security?: { profile?: unknown } }
+  }>('/api/settings', async (request, reply) => {
+    const scale = request.body?.ui?.scale
+    const theme = request.body?.ui?.theme
+    const profile = request.body?.security?.profile
+    if (scale === undefined && theme === undefined && profile === undefined) {
+      return reply
+        .code(400)
+        .send({ error: 'Send { ui: { scale } }, { ui: { theme } }, or { security: { profile } }.' })
+    }
+    if (scale !== undefined) {
+      if (typeof scale !== 'number' || !Number.isFinite(scale)) {
+        return reply.code(400).send({ error: 'scale is a number.' })
+      }
+      if (scale < 1 || scale > MAX_UI_SCALE) {
         return reply
           .code(400)
-          .send({ error: 'Send { ui: { scale } } or { security: { profile } }.' })
+          .send({ error: `scale is between 1 and ${MAX_UI_SCALE}.` })
       }
-      if (scale !== undefined) {
-        if (typeof scale !== 'number' || !Number.isFinite(scale)) {
-          return reply.code(400).send({ error: 'scale is a number.' })
-        }
-        if (scale < 1 || scale > MAX_UI_SCALE) {
-          return reply
-            .code(400)
-            .send({ error: `scale is between 1 and ${MAX_UI_SCALE}.` })
-        }
-      }
-      if (profile !== undefined && !isExecutionProfile(profile)) {
-        return reply
-          .code(400)
-          .send({ error: `profile is one of ${EXECUTION_PROFILES.join(', ')}.` })
-      }
+    }
+    if (theme !== undefined && !isUiTheme(theme)) {
+      return reply.code(400).send({ error: `theme is one of ${UI_THEMES.join(', ')}.` })
+    }
+    if (profile !== undefined && !isExecutionProfile(profile)) {
+      return reply
+        .code(400)
+        .send({ error: `profile is one of ${EXECUTION_PROFILES.join(', ')}.` })
+    }
 
-      // One update, so a patch carrying both cannot half-apply — and so the
-      // read-back through the schema happens once.
-      const saved = runtime.settings.update({
-        ...(scale === undefined ? {} : { ui: { scale } }),
-        ...(profile === undefined ? {} : { security: { profile } }),
-      })
-      if (saved.problems.length > 0) {
-        return reply.code(500).send({ error: saved.problems[0]?.message, problems: saved.problems })
-      }
-      return { settings: saved.settings, file: runtime.settings.file }
-    },
-  )
+    // One update, so a patch carrying all three cannot half-apply — and so the
+    // read-back through the schema happens once.
+    const saved = runtime.settings.update({
+      ...(scale === undefined && theme === undefined
+        ? {}
+        : {
+            ui: {
+              ...(scale === undefined ? {} : { scale }),
+              ...(theme === undefined ? {} : { theme }),
+            },
+          }),
+      ...(profile === undefined ? {} : { security: { profile } }),
+    })
+    if (saved.problems.length > 0) {
+      return reply.code(500).send({ error: saved.problems[0]?.message, problems: saved.problems })
+    }
+    return { settings: saved.settings, file: runtime.settings.file }
+  })
 }

@@ -19,3 +19,6 @@ build/
 logs/
 .env
 .env.*
+
+# Scratch mockups from the brainstorming skill's visual companion.
+.superpowers/

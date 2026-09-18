@@ -6,6 +6,7 @@ import {
   type Disclaimer,
   type ExecutionProfile,
   type FactorySettings,
+  type UiTheme,
 } from '../api/client.js'
 
 /**
@@ -69,6 +70,7 @@ export const useSettings = defineStore('settings', () => {
   // component update with it. Degrade by absence applies to a payload as much
   // as to a capability.
   const scale = computed(() => settings.value?.ui?.scale ?? 1)
+  const theme = computed<UiTheme>(() => settings.value?.ui?.theme ?? 'system')
   const profile = computed<ExecutionProfile>(() => settings.value?.security?.profile ?? 'default')
   /** Whether to draw the Full Access marker. Read by the shell on every page. */
   const unconfined = computed(() => profile.value === 'full-access')
@@ -91,6 +93,42 @@ export const useSettings = defineStore('settings', () => {
     root.style.setProperty('--app-zoom', String(value))
   }
 
+  /** Whichever of `light`/`dark` is currently applied, so the `system` listener below knows what it's following. */
+  let appliedTheme: UiTheme = 'system'
+  let media: MediaQueryList | undefined
+
+  const resolveTheme = (value: UiTheme): 'light' | 'dark' =>
+    value === 'system'
+      ? window.matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark'
+      : value
+
+  /**
+   * Set the `data-theme` attribute `tokens.css` switches on.
+   *
+   * `system` is resolved here, not in CSS: the attribute is always `light` or
+   * `dark`, so the stylesheet never has to know a third value exists.
+   */
+  const applyTheme = (value: UiTheme): void => {
+    appliedTheme = value
+    document.documentElement.dataset.theme = resolveTheme(value)
+  }
+
+  /**
+   * Follow the OS while the stored preference is `system`.
+   *
+   * Attached once, on the first successful load: a second load attaching a
+   * second listener would apply the same OS change twice.
+   */
+  const watchSystemTheme = (): void => {
+    if (media !== undefined) return
+    media = window.matchMedia('(prefers-color-scheme: light)')
+    media.addEventListener('change', () => {
+      if (appliedTheme === 'system') applyTheme('system')
+    })
+  }
+
   async function load(): Promise<void> {
     loading.value = true
     try {
@@ -102,6 +140,8 @@ export const useSettings = defineStore('settings', () => {
       // Through the guarded computed, so an older payload with no ui group
       // falls back to 1 rather than throwing here.
       apply(answer.settings.ui?.scale ?? 1)
+      applyTheme(answer.settings.ui?.theme ?? 'system')
+      watchSystemTheme()
       error.value = undefined
     } catch (caught) {
       error.value = caught instanceof ApiError ? caught.message : String(caught)
@@ -121,6 +161,21 @@ export const useSettings = defineStore('settings', () => {
     } catch (caught) {
       error.value = caught instanceof ApiError ? caught.message : String(caught)
       apply(scale.value)
+    }
+  }
+
+  async function setTheme(value: UiTheme): Promise<void> {
+    // Same optimistic pattern as setScale: applied immediately, rolled back to
+    // whatever was applied before if the daemon refuses it.
+    const previous = theme.value
+    applyTheme(value)
+    try {
+      const answer = await api.saveSettings({ ui: { theme: value } })
+      settings.value = answer.settings
+      error.value = undefined
+    } catch (caught) {
+      error.value = caught instanceof ApiError ? caught.message : String(caught)
+      applyTheme(previous)
     }
   }
 
@@ -209,6 +264,7 @@ export const useSettings = defineStore('settings', () => {
     loading,
     error,
     scale,
+    theme,
     profile,
     unconfined,
     disclaimer,
@@ -216,6 +272,7 @@ export const useSettings = defineStore('settings', () => {
     needsAcceptance,
     load,
     setScale,
+    setTheme,
     setProfile,
     accept,
     dismiss,

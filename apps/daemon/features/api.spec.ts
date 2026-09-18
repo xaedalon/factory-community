@@ -636,6 +636,58 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('the appearance theme is a setting too', ({ RuleScenario }) => {
+    const theme = () =>
+      (response.body as { settings?: { ui: { theme: string } } }).settings?.ui.theme
+    const scaleValue = () =>
+      (response.body as { settings?: { ui: { scale: number } } }).settings?.ui.scale
+    const setTheme = (value: unknown) => () =>
+      call('PATCH', '/api/settings', { ui: { theme: value } })
+    const setScale = (value: unknown) => () => call('PATCH', '/api/settings', { ui: { scale: value } })
+
+    RuleScenario('It starts at "system"', ({ When, Then }) => {
+      When('I ask for the settings', () => call('GET', '/api/settings'))
+      Then('the theme is "system"', () => expect(theme()).toBe('system'))
+    })
+
+    RuleScenario('A new theme is saved and read back', ({ When, Then, And }) => {
+      When('I set the theme to "light"', setTheme('light'))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('asking again reports the theme "light"', async () => {
+        await call('GET', '/api/settings')
+        expect(theme()).toBe('light')
+      })
+    })
+
+    RuleScenario('A theme that is not light, dark or system is refused', ({ When, Then, And }) => {
+      When('I set the theme to "sepia"', setTheme('sepia'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the error names the themes', () =>
+        expect(String((response.body as { error?: string }).error)).toContain('light, dark, system'),
+      )
+    })
+
+    RuleScenario('Changing the theme leaves the scale alone', ({ Given, When, Then, And }) => {
+      Given('the interface scale is 2', setScale(2))
+      When('I set the theme to "light"', setTheme('light'))
+      Then('asking again reports the theme "light"', async () => {
+        await call('GET', '/api/settings')
+        expect(theme()).toBe('light')
+      })
+      And('the interface scale is still 2', () => expect(scaleValue()).toBe(2))
+    })
+
+    RuleScenario('Changing the scale leaves the theme alone', ({ Given, When, Then, And }) => {
+      Given('the theme is "light"', setTheme('light'))
+      When('I set the interface scale to 2', setScale(2))
+      Then('the interface scale is 2', () => expect(scaleValue()).toBe(2))
+      And('asking again reports the theme "light"', async () => {
+        await call('GET', '/api/settings')
+        expect(theme()).toBe('light')
+      })
+    })
+  })
+
   Rule('the disclaimer is recorded once, and the profile is a setting', ({ RuleScenario }) => {
     const settings = (): Record<string, Record<string, unknown>> =>
       (response.body as { settings?: Record<string, Record<string, unknown>> }).settings ?? {}

@@ -14,6 +14,7 @@ Feature: Settings Factory owns
     Given a user scope with no settings file
     When the settings are read
     Then the interface scale is 1
+    And the theme is "system"
     And no plugins are switched off
     And nothing is reported
     And no file was created
@@ -38,6 +39,20 @@ Feature: Settings Factory owns
     Given a user scope with no settings file
     When the interface scale is set to 2
     Then the file on disk names the settings kind
+
+  Scenario: A theme is saved and read back
+    Given a user scope with no settings file
+    When the theme is set to "light"
+    And the settings are read
+    Then the theme is "light"
+
+  Scenario: Saving the theme does not drop the scale
+    Given a user scope with no settings file
+    When the interface scale is set to 2
+    And the theme is set to "light"
+    And the settings are read
+    Then the interface scale is 2
+    And the theme is "light"
 
   Rule: a file that will not load leaves the tool working
 
@@ -64,9 +79,21 @@ Feature: Settings Factory owns
       Then a problem names the field "ui.scale"
       And the interface scale is 1
 
+    Scenario: A theme nobody recognises is refused
+      Given a settings file asking for the theme "sepia"
+      When the settings are read
+      Then a problem names the field "ui.theme"
+      And the theme is "system"
+
     Scenario: A write that would not load back is refused before it lands
       Given a user scope with no settings file
       When a scale of 40 is saved
+      Then it is refused
+      And no file was created
+
+    Scenario: A write with an unrecognised theme is refused before it lands
+      Given a user scope with no settings file
+      When the theme is set to "sepia"
       Then it is refused
       And no file was created
 

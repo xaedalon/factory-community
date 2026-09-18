@@ -249,7 +249,7 @@ onMounted(load)
           </span>
           <span
             v-if="!project.usesWorktrees"
-            class="rounded-md bg-white/[0.06] px-2 py-0.5 font-mono text-[10px] text-[var(--color-ink-muted)]"
+            class="rounded-md bg-[var(--color-veil-strong)] px-2 py-0.5 font-mono text-[10px] text-[var(--color-ink-muted)]"
             :data-testid="`shared-checkout-${project.name}`"
           >
             in the repository · one task at a time

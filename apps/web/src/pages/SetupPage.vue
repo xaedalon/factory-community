@@ -101,7 +101,7 @@ onMounted(load)
             <button
               v-if="action.command"
               type="button"
-              class="mt-1 block w-full rounded-md bg-[var(--color-base)] px-3 py-2 text-left font-mono text-[11px] text-[var(--color-ink)] hover:bg-white/[0.04]"
+              class="mt-1 block w-full rounded-md bg-[var(--color-base)] px-3 py-2 text-left font-mono text-[11px] text-[var(--color-ink)] hover:bg-[var(--color-veil)]"
               :data-testid="`command-${item.id}-${index}`"
               @click="copy(action.command)"
             >

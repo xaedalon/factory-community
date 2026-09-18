@@ -2,7 +2,7 @@
 import { onMounted } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import { SCALES, useSettings } from '../stores/settings.js'
-import type { ExecutionProfile } from '../api/client.js'
+import type { ExecutionProfile, UiTheme } from '../api/client.js'
 
 /**
  * Preferences, kept in a file Factory owns.
@@ -12,6 +12,18 @@ import type { ExecutionProfile } from '../api/client.js'
  * and is therefore per-repository rather than per-person.
  */
 const settings = useSettings()
+
+/**
+ * The three choices, with the names a person reads.
+ *
+ * Spelled here for the same reason `PROFILES` is below: the board offers a
+ * choice the daemon has not been told about yet.
+ */
+const THEMES: readonly { value: UiTheme; label: string }[] = [
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+  { value: 'system', label: 'System' },
+]
 
 /**
  * The two profiles, with the names a person reads.
@@ -44,8 +56,31 @@ onMounted(() => {
 
     <section data-testid="appearance">
       <h2 class="mb-3 font-mono text-[11px] tracking-widest text-[var(--color-ink-faint)] uppercase">
-        Interface size
+        Appearance
       </h2>
+      <div class="flex flex-wrap items-center gap-2">
+        <button
+          v-for="option in THEMES"
+          :key="option.value"
+          type="button"
+          class="rounded-md border px-3 py-1.5 text-sm"
+          :class="
+            settings.theme === option.value
+              ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
+              : 'border-[var(--color-line-strong)] text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+          "
+          :data-testid="`theme-${option.value}`"
+          @click="settings.setTheme(option.value)"
+        >
+          {{ option.label }}
+        </button>
+      </div>
+      <p class="mt-2 text-xs text-[var(--color-ink-faint)]">
+        System follows whatever your browser reports, and keeps following it if
+        that changes.
+      </p>
+
+      <p class="mt-6 mb-2 text-xs text-[var(--color-ink-faint)]">Interface size</p>
       <div class="flex flex-wrap items-center gap-2">
         <button
           v-for="value in SCALES"

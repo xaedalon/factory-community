@@ -699,6 +699,67 @@ Feature: The task board
       And I set the interface size to 1
       Then the project rail is shown
 
+  Rule: the theme is applied through tokens, not hard-coded colors
+
+    Background:
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+
+    Scenario: Setting data-theme to light switches the page to the light palette
+      When the root element's data-theme becomes "light"
+      Then the page background is the light base color
+
+    Scenario: The veil tokens flip from a white tint to a black tint under light
+      When the root element's data-theme becomes "light"
+      Then the veil tokens are black-based
+      When the root element's data-theme becomes "dark"
+      Then the veil tokens are white-based
+
+    Scenario: A draft badge's fill follows the tokens, not a fixed white tint
+      When the root element's data-theme becomes "light"
+      Then the draft badge's background is the light veil-strong color
+
+  Rule: the theme is remembered, and system means the browser decides
+
+    Background:
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+
+    Scenario: Choosing light applies it and it survives a reload
+      When I open the settings page
+      And I choose the "Light" theme
+      Then the page uses the "light" theme
+      When the page is reloaded
+      Then the page uses the "light" theme
+
+    Scenario: Choosing dark applies it and it survives a reload
+      When I open the settings page
+      And I choose the "Dark" theme
+      Then the page uses the "dark" theme
+      When the page is reloaded
+      Then the page uses the "dark" theme
+
+    Scenario: System follows what the browser reports
+      Given the browser prefers a light color scheme
+      When I open the settings page
+      And I choose the "System" theme
+      Then the page uses the "light" theme
+
+    Scenario: And keeps following it after the browser changes its mind
+      Given the browser prefers a light color scheme
+      When I open the settings page
+      And I choose the "System" theme
+      And the browser starts preferring a dark color scheme
+      Then the page uses the "dark" theme
+
+    Scenario: Choosing light on the settings page actually repaints a formerly white-tinted element
+      When I open the settings page
+      And I choose the "Light" theme
+      And I open the tasks page
+      Then the draft badge's background is the light veil-strong color
+
   Rule: nobody starts an agent without being told what one can reach
 
     Factory coordinates other people's coding agents against real repositories.

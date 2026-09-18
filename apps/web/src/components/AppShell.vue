@@ -107,7 +107,7 @@ const current = computed(() => route.path)
               :class="
                 current.startsWith(item.to)
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
-                  : 'text-[var(--color-ink-muted)] hover:bg-white/[0.03] hover:text-[var(--color-ink)]'
+                  : 'text-[var(--color-ink-muted)] hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]'
               "
             >
               {{ item.label }}

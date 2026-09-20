@@ -940,7 +940,12 @@ Then('the page says Factory cannot run work yet', async ({ page }) => {
 })
 
 Then('a setup step offers a command to copy', async ({ page }) => {
-  await expect(page.getByTestId('command-a-project-1')).toContainText('api/projects')
+  // The command, not a URL. This asserted `api/projects` until the hint stopped
+  // being a curl against a hardcoded port — see the engine's own scenario, "its
+  // terminal hint is a command, not a port" (packages/engine/features/doctor.feature).
+  // The two suites asserted opposite things for two days, and the browser one
+  // was the stale half.
+  await expect(page.getByTestId('command-a-project-1')).toContainText('factory project add')
 })
 
 When(

@@ -53,7 +53,7 @@ const when = (iso: string): string => new Date(iso).toLocaleString()
   <div class="px-8 py-6">
     <RouterLink
       :to="`/tasks/${taskId}`"
-      class="mb-4 inline-block font-mono text-[11px] text-[var(--color-accent)] hover:underline"
+      class="mb-4 inline-block font-mono text-[11px] text-[var(--color-accent-text)] hover:underline"
       data-testid="back-to-task"
     >
       ← back to the task

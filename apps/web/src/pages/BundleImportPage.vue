@@ -197,7 +197,7 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
 
     <div v-if="imported" class="text-sm text-[var(--color-ok)]" data-testid="imported">
       Wrote {{ result?.written.length ?? 0 }} file(s).
-      <RouterLink to="/workflows" class="ml-2 text-[var(--color-accent)] hover:underline">
+      <RouterLink to="/workflows" class="ml-2 text-[var(--color-accent-text)] hover:underline">
         Back to workflows
       </RouterLink>
     </div>

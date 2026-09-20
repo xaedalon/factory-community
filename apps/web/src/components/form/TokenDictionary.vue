@@ -90,7 +90,7 @@ const { copied, copy } = useClipboard()
           >
             <button
               type="button"
-              class="shrink-0 rounded px-1 font-mono text-[11px] text-[var(--color-accent)] hover:bg-white/[0.06]"
+              class="shrink-0 rounded px-1 font-mono text-[11px] text-[var(--color-accent-text)] hover:bg-white/[0.06]"
               :data-testid="`token-${section.namespace}-${entry.key}`"
               :title="copied === token(section.namespace, entry.key) ? 'Copied' : 'Copy'"
               @click="copy(token(section.namespace, entry.key))"

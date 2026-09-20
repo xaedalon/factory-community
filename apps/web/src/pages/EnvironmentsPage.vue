@@ -90,7 +90,7 @@ async function teardown(taskId: string): Promise<void> {
       No project uses environments yet. Turn them on for a project and Factory copies in the
       <code class="value">environment-create</code>, <code class="value">environment-update</code> and
       <code class="value">environment-delete</code> workflows for you to write.
-      <RouterLink to="/projects" class="text-[var(--color-accent)] hover:underline">
+      <RouterLink to="/projects" class="text-[var(--color-accent-text)] hover:underline">
         Projects
       </RouterLink>
     </p>

@@ -100,7 +100,7 @@ const fieldsOf = (step: Step): Record<string, unknown> => {
         >
           {{ open === index ? '▾' : '▸' }}
         </button>
-        <span class="font-mono text-[10px] tracking-widest text-[var(--color-accent)] uppercase">
+        <span class="font-mono text-[10px] tracking-widest text-[var(--color-accent-text)] uppercase">
           {{ step.uses }}
         </span>
         <span class="value min-w-0 flex-1 truncate text-[var(--color-ink-muted)]">

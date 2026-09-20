@@ -23,17 +23,45 @@
   --color-line: #252525;
   --color-line-strong: #34343c;
 
-  /* Text. Three weights is enough; a fourth just makes things muddy. */
+  /*
+   * Text. Three weights is enough; a fourth just makes things muddy.
+   *
+   * `ink-faint` was #5c5c66, which is 2.9:1 on `surface` — under WCAG AA's
+   * 4.5:1, and under even the 3:1 large-text floor, at the 11px it is always
+   * used at. It sets every table column header, all seven section headings on
+   * the task page and the nav tagline, so the whole labelling layer of the app
+   * was below the line. #7a7a86 is 4.6:1 and reads the same.
+   */
   --color-ink: #f0f0f0;
   --color-ink-muted: #9a9aa4;
-  --color-ink-faint: #5c5c66;
+  --color-ink-faint: #7a7a86;
 
-  /* The one accent. */
+  /*
+   * The one accent — and the one thing it cannot do.
+   *
+   * #6d5cf5 is 4.7:1 behind white, so it is a sound *fill*: buttons, the active
+   * nav row. As *ink* on `surface` it is 4.1:1 and fails, which is what it was
+   * doing on every task name's hover in the board table and in the project
+   * scope badge. So the fill and the ink are two tokens now. Reach for
+   * `accent-text` whenever the accent is the colour of letters.
+   */
   --color-accent: #6d5cf5;
+  --color-accent-text: #8f83f7;
   --color-accent-soft: #6d5cf526;
 
 
-  /* Status. Also used for scope badges, so they read consistently. */
+  /*
+   * Status. Also used for scope badges, so they read consistently.
+   *
+   * `pending` is the sixth: queued work, which the interface reference draws
+   * purple and which had no token at all, so four files spelled it #a78bfa by
+   * hand. It is deliberately *not* `accent` — colour means status here and
+   * interaction there, and one hue doing both is how the two meanings blur.
+   *
+   * All six are ≥4.5:1 on `surface`; `danger` is the closest at 4.9:1, so it
+   * is the one to re-measure if these surfaces are ever lightened.
+   */
+  --color-pending: #a78bfa;
   --color-ok: #18b870;
   --color-info: #00c8d8;
   --color-warn: #f0a020;

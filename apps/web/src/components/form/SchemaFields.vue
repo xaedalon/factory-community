@@ -199,7 +199,7 @@ const asList = (key: string) =>
     <template v-else>Anything left empty comes from the agent.</template>
     <button
       type="button"
-      class="text-[var(--color-accent)] hover:underline"
+      class="text-[var(--color-accent-text)] hover:underline"
       data-testid="override-superseded"
       @click="overriding = !overriding"
     >

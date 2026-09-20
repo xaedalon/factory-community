@@ -50,7 +50,9 @@ const html = computed(() =>
  * Ported from the prototype's `.prose-content`, onto this project's tokens
  * rather than its own hard-coded colours: `--text-primary` became
  * `--color-ink`, `--bg-elevated` became `--color-surface`, and the cyan it
- * spelled `#06b6d4` in six places is `var(--color-accent)`.
+ * spelled `#06b6d4` in six places is the accent — as `--color-accent-text`
+ * where it colours letters (inline code, links) and `--color-accent` where it
+ * only draws a rule, since the fill value is too dark to read on `surface`.
  */
 .prose {
   color: var(--color-ink);
@@ -94,7 +96,7 @@ const html = computed(() =>
   border: 1px solid var(--color-line);
   border-radius: 3px;
   padding: 0.1em 0.4em;
-  color: var(--color-accent);
+  color: var(--color-accent-text);
 }
 .prose :deep(pre) {
   background: var(--color-surface);
@@ -119,7 +121,7 @@ const html = computed(() =>
   border-radius: 0 var(--radius-md) var(--radius-md) 0;
   color: var(--color-ink-faint);
 }
-.prose :deep(a) { color: var(--color-accent); text-decoration: underline; }
+.prose :deep(a) { color: var(--color-accent-text); text-decoration: underline; }
 /* Wide tables scroll rather than pushing the page sideways. */
 .prose :deep(table) {
   width: 100%;

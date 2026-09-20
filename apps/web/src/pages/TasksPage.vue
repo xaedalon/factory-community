@@ -158,8 +158,8 @@ onUnmounted(() => store.disconnect())
       <div
         v-for="card in [
           { key: 'total', label: 'Total tasks', value: summary.total, tone: 'text-[var(--color-ink)]' },
-          { key: 'running', label: 'Running', value: summary.running, tone: 'text-[#38bdf8]' },
-          { key: 'waiting', label: 'Awaiting approval', value: summary.waiting, tone: 'text-[#fbbf24]' },
+          { key: 'running', label: 'Running', value: summary.running, tone: 'text-[var(--color-info)]' },
+          { key: 'waiting', label: 'Awaiting approval', value: summary.waiting, tone: 'text-[var(--color-warn)]' },
           { key: 'blocked', label: 'Blocked', value: summary.blocked, tone: 'text-[var(--color-danger)]' },
         ]"
         :key="card.key"
@@ -303,7 +303,7 @@ onUnmounted(() => store.disconnect())
           <td class="py-3 pr-4">
             <RouterLink
               :to="`/tasks/${task.id}`"
-              class="hover:text-[var(--color-accent)]"
+              class="hover:text-[var(--color-accent-text)]"
               :data-testid="`open-${task.name}`"
             >
               {{ task.name }}

@@ -228,7 +228,7 @@ watch(() => chosen.projectId, reload)
             <button
               v-if="kind === 'workflow'"
               type="button"
-              class="font-mono text-[10px] text-[var(--color-ink-faint)] hover:text-[var(--color-accent)]"
+              class="font-mono text-[10px] text-[var(--color-ink-faint)] hover:text-[var(--color-accent-text)]"
               :data-testid="`export-${item.name}`"
               @click="exportWorkflow(item.name)"
             >

@@ -65,7 +65,7 @@ async function accept(): Promise<void> {
           :key="point"
           class="flex gap-2 text-xs leading-relaxed text-[var(--color-ink-muted)]"
         >
-          <span aria-hidden="true" class="text-[var(--color-accent)]">·</span>
+          <span aria-hidden="true" class="text-[var(--color-accent-text)]">·</span>
           <span>{{ point }}</span>
         </li>
       </ul>

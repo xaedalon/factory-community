@@ -882,7 +882,7 @@ const stepTone: Record<string, string> = {
         <h2 class="mb-2 font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
           Steps
         </h2>
-        <ul class="divide-y divide-[var(--color-line)]/60 rounded-lg border border-[var(--color-line)]">
+        <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]">
           <li v-for="step in steps" :key="step.id" class="px-3 py-2">
             <button
               type="button"

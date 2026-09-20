@@ -7,6 +7,7 @@ import { useProjects } from '../stores/projects.js'
 import PageHeader from '../components/PageHeader.vue'
 import TaskStateBadge from '../components/TaskStateBadge.vue'
 import TaskActions from '../components/TaskActions.vue'
+import { toneFor } from '../states.js'
 import type { TaskListItem, TaskState } from '../api/client.js'
 
 /**
@@ -277,85 +278,117 @@ onUnmounted(() => store.disconnect())
 
     <!-- List: the default, because most questions are answered by reading down
          a column rather than by looking at where things sit. -->
-    <table v-else-if="view === 'list'" class="w-full text-sm" data-testid="task-table">
-      <thead>
-        <tr class="border-b border-[var(--color-line)] text-left font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
-          <th class="py-2 pr-4">Ticket</th>
-          <th class="py-2 pr-4">Task</th>
-          <th class="py-2 pr-4">Project</th>
-          <th class="py-2 pr-4">Workflow</th>
-          <th class="py-2 pr-4">Status</th>
-          <th class="py-2 pr-4">Progress</th>
-          <th class="py-2 pr-4">Updated</th>
-          <th class="py-2" />
-        </tr>
-      </thead>
-      <tbody>
-        <tr
-          v-for="task in visible"
-          :key="task.id"
-          class="border-b border-[var(--color-line)]/60"
-          :data-testid="`task-row-${task.name}`"
-        >
-          <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
-            {{ task.ticketId ?? '—' }}
-          </td>
-          <td class="py-3 pr-4">
-            <RouterLink
-              :to="`/tasks/${task.id}`"
-              class="hover:text-[var(--color-accent-text)]"
-              :data-testid="`open-${task.name}`"
-            >
-              {{ task.name }}
-            </RouterLink>
-            <p v-if="task.blockedReason" class="mt-0.5 text-xs text-[var(--color-danger)]">
-              {{ task.blockedReason }}
-            </p>
-            <!-- What it is still waiting for, in the same muted-subtitle idiom
-                 the blocked reason uses. Only the blockers that have not
-                 happened: a row listing what is already done would grow a line
-                 that never goes away. -->
-            <p
-              v-if="waitingFor(task).length > 0"
-              class="mt-0.5 text-xs text-[var(--color-ink-faint)]"
-              :data-testid="`waiting-${task.name}`"
-            >
-              waiting for {{ waitingFor(task).join(', ') }}
-            </p>
-          </td>
-          <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
-            {{ store.projectName(task) ?? '—' }}
-          </td>
-          <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
-            {{ store.currentWorkflow(task) ?? '—' }}
-          </td>
-          <td class="py-3 pr-4"><TaskStateBadge :state="task.state" /></td>
-          <td class="py-3 pr-4">
-            <div v-if="task.progress" class="flex items-center gap-2">
-              <span class="h-1 w-24 overflow-hidden rounded-full bg-white/10">
-                <span class="block h-full bg-[var(--color-accent)]" :style="{ width: `${percent(task)}%` }" />
-              </span>
-              <span
-                class="font-mono text-[11px] text-[var(--color-ink-muted)]"
-                :data-testid="`progress-${task.name}`"
+    <!-- Scrolls sideways rather than hiding the right-hand columns. Eight
+         columns need about a thousand pixels, and `main` clips rather than
+         scrolls, so under a window of roughly 1270 the status, progress and
+         actions were simply unreachable — no scrollbar, no hint they existed. -->
+    <div v-else-if="view === 'list'" class="overflow-x-auto">
+      <table class="w-full min-w-[56rem] text-sm" data-testid="task-table">
+        <thead>
+          <tr class="border-b border-[var(--color-line)] text-left font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
+            <th class="py-2 pr-4">Ticket</th>
+            <th class="py-2 pr-4">Task</th>
+            <th class="py-2 pr-4">Project</th>
+            <th class="py-2 pr-4">Workflow</th>
+            <th class="py-2 pr-4">Status</th>
+            <th class="py-2 pr-4">Progress</th>
+            <th class="py-2 pr-4">Updated</th>
+            <th class="py-2" />
+          </tr>
+        </thead>
+        <tbody>
+          <!-- A row lights up under the pointer. On these surfaces a border is
+               the only thing separating one row from the next, and 2% of white
+               is what tells you which one you are about to open. -->
+          <tr
+            v-for="task in visible"
+            :key="task.id"
+            class="border-b border-[var(--color-line)] transition-colors hover:bg-white/[0.02]"
+            :data-testid="`task-row-${task.name}`"
+          >
+            <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
+              {{ task.ticketId ?? '—' }}
+            </td>
+            <td class="py-3 pr-4">
+              <RouterLink
+                :to="`/tasks/${task.id}`"
+                class="hover:text-[var(--color-accent-text)]"
+                :data-testid="`open-${task.name}`"
               >
-                {{ task.progress.completed }}/{{ task.progress.total }} phases
-              </span>
-            </div>
-            <span v-else class="text-xs text-[var(--color-ink-faint)]">—</span>
-          </td>
-          <td class="py-3 pr-4 text-xs text-[var(--color-ink-muted)]">{{ ago(task.updatedAt) }}</td>
-          <td class="py-3">
-            <TaskActions
-              :actions="task.actions"
-              :busy="acting === task.id"
-              :only="['queue', 'retry', 'approve', 'reject', 'cancel']"
-              @act="(action) => store.act(task.id, action)"
-            />
-          </td>
-        </tr>
-      </tbody>
-    </table>
+                {{ task.name }}
+              </RouterLink>
+              <!-- One line, with the whole of it on hover and on the task's own
+                   page. A failing step's reason is the command it ran, which for
+                   a real agent invocation is several hundred characters: left to
+                   wrap it made one row four times the height of its neighbours
+                   and pushed the rest of the board off the screen. -->
+              <!-- `line-clamp-1`, not `truncate`. Both show one line, but
+                   truncate does it with `white-space: nowrap`, and an auto-layout
+                   table sizes a column to its widest content: a failing step's
+                   reason is the command it ran, so the column asked for all
+                   several hundred characters of it and took the table 400px past
+                   the pane. Clamping wraps and then hides, so it costs the
+                   column nothing. The whole of it is in the tooltip and on the
+                   task's own page. -->
+              <p
+                v-if="task.blockedReason"
+                class="mt-0.5 line-clamp-1 text-xs text-[var(--color-danger)]"
+                :title="task.blockedReason"
+              >
+                {{ task.blockedReason }}
+              </p>
+              <!-- What it is still waiting for, in the same muted-subtitle idiom
+                   the blocked reason uses. Only the blockers that have not
+                   happened: a row listing what is already done would grow a line
+                   that never goes away. -->
+              <p
+                v-if="waitingFor(task).length > 0"
+                class="mt-0.5 text-xs text-[var(--color-ink-faint)]"
+                :data-testid="`waiting-${task.name}`"
+              >
+                waiting for {{ waitingFor(task).join(', ') }}
+              </p>
+            </td>
+            <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
+              {{ store.projectName(task) ?? '—' }}
+            </td>
+            <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
+              {{ store.currentWorkflow(task) ?? '—' }}
+            </td>
+            <td class="py-3 pr-4"><TaskStateBadge :state="task.state" /></td>
+            <td class="py-3 pr-4">
+              <!-- Drawn in the state's own colour rather than the accent. A
+                   blocked task and a finished one had identical purple bars, on
+                   a board where colour means status everywhere else. -->
+              <div v-if="task.progress" class="flex items-center gap-2">
+                <span class="h-1 w-24 overflow-hidden rounded-full bg-white/10">
+                  <span
+                    class="block h-full transition-[width]"
+                    :style="{ width: `${percent(task)}%`, background: toneFor(task.state) }"
+                  />
+                </span>
+                <span
+                  class="font-mono text-[11px] text-[var(--color-ink-muted)]"
+                  :data-testid="`progress-${task.name}`"
+                >
+                  {{ task.progress.completed }}/{{ task.progress.total }} phases
+                </span>
+              </div>
+              <span v-else class="text-xs text-[var(--color-ink-faint)]">—</span>
+            </td>
+            <td class="py-3 pr-4 text-xs text-[var(--color-ink-muted)]">{{ ago(task.updatedAt) }}</td>
+            <td class="py-3">
+              <TaskActions
+                :actions="task.actions"
+                :busy="acting === task.id"
+                :only="['queue', 'retry', 'approve', 'reject', 'cancel']"
+                @act="(action) => store.act(task.id, action)"
+              />
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
 
     <!-- Board: the same tasks, arranged by where they are stuck. -->
     <div v-else class="grid grid-cols-2 gap-3 lg:grid-cols-6" data-testid="task-board">
@@ -398,8 +431,8 @@ onUnmounted(() => store.disconnect())
           >
             <span class="block h-1 overflow-hidden rounded-full bg-white/10">
               <span
-                class="block h-full bg-[var(--color-accent)]"
-                :style="{ width: `${percent(task)}%` }"
+                class="block h-full transition-[width]"
+                :style="{ width: `${percent(task)}%`, background: toneFor(task.state) }"
                 :data-testid="`card-progress-fill-${task.name}`"
               />
             </span>

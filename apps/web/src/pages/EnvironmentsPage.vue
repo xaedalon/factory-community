@@ -122,7 +122,7 @@ async function teardown(taskId: string): Promise<void> {
 
       <ul
         v-else
-        class="divide-y divide-[var(--color-line)]/60 rounded-lg border border-[var(--color-line)]"
+        class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]"
       >
         <li
           v-for="task in group.tasks"
@@ -154,7 +154,7 @@ async function teardown(taskId: string): Promise<void> {
       <h2 class="mb-2 font-mono text-[10px] tracking-wider text-[var(--color-warn)] uppercase">
         Holding an environment, in a project that says it has none
       </h2>
-      <ul class="divide-y divide-[var(--color-line)]/60 rounded-lg border border-[var(--color-warn)]/40">
+      <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-warn)]/40">
         <li
           v-for="task in stray"
           :key="task.id"

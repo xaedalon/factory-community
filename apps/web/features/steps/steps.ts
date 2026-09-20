@@ -725,11 +725,15 @@ Then('the card for {string} says {string}', async ({ page }, name: string, text:
  *
  * A bar rendered at 0% and a bar that was never drawn look identical on
  * screen, so asserting it exists would pass on either.
+ *
+ * Matched inside the attribute rather than against the whole of it. The bar
+ * also carries the state's colour now, and an equality check on `style` made
+ * this step fail over a second declaration it was never about.
  */
 Then('its bar is {int}% full', async ({ page }, percent: number) => {
   await expect(page.getByTestId(/^card-progress-fill-/)).toHaveAttribute(
     'style',
-    `width: ${percent}%;`,
+    new RegExp(`(^|;)\\s*width:\\s*${percent}%\\s*(;|$)`),
   )
 })
 

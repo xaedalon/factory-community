@@ -206,7 +206,7 @@ onMounted(load)
       No projects yet. Add the repository you want Factory to work in.
     </p>
 
-    <ul v-else class="divide-y divide-[var(--color-line)]/60 rounded-lg border border-[var(--color-line)]">
+    <ul v-else class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]">
       <!--
         Three groups, not nine siblings.
 

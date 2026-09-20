@@ -19,9 +19,24 @@
   --color-raised: #16161c;
   --color-overlay: #1d1d24;
 
-  /* Hairlines. Borders here are separators, not decoration. */
-  --color-line: #252525;
-  --color-line-strong: #34343c;
+  /*
+   * Hairlines. Borders here are separators, not decoration.
+   *
+   * They were decoration. On these surfaces a card's fill is 1.04:1 against the
+   * page behind it — invisible, by design, because the border was meant to do
+   * the separating. #252525 did it at 1.31:1, and the table rows that faded it
+   * to 60% separated at 1.14:1, which is nothing at all. "Elements have no
+   * clear distinction" was the most common piece of feedback on this interface,
+   * and this is the whole mechanism behind it.
+   *
+   * #35353f is 1.65:1 against `base` and 1.59:1 against `surface`. That is
+   * still a hairline and not a frame, and it is the cheapest available fix:
+   * lifting the *surfaces* instead would separate them the same amount and cost
+   * a second pass over every text colour, because `ink-faint` clears AA on
+   * `surface` by 0.05 and nothing else has much room either.
+   */
+  --color-line: #35353f;
+  --color-line-strong: #4a4a57;
 
   /*
    * Text. Three weights is enough; a fourth just makes things muddy.

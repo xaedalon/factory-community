@@ -2,6 +2,8 @@
 import { ref } from 'vue'
 import type { Problem } from '../../api/client.js'
 import ViewToggle from './ViewToggle.vue'
+import AppButton from '../AppButton.vue'
+import AppIcon from '../AppIcon.vue'
 
 /**
  * The split view every editor uses: form on the left, the file on the right.
@@ -33,9 +35,10 @@ const confirmingDelete = ref(false)
       <h1 class="text-base font-medium">{{ title }}</h1>
       <span
         v-if="dirty"
-        class="font-mono text-[10px] tracking-wide text-[var(--color-warn)]"
+        class="flex items-center gap-1 font-mono text-[10px] tracking-wide text-[var(--color-warn)]"
         data-testid="dirty"
       >
+        <AppIcon name="alert" :size="11" />
         unsaved
       </span>
       <div class="ml-auto flex items-center gap-2">
@@ -44,43 +47,37 @@ const confirmingDelete = ref(false)
         <!-- Two clicks, because a definition can be the only copy of something
              someone spent an afternoon on and there is no undo. -->
         <template v-if="deletable">
-          <button
+          <AppButton
             v-if="!confirmingDelete"
-            type="button"
-            class="rounded-md px-3 py-1.5 text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-danger)]"
+            label="Delete"
+            icon="remove"
+            tone="danger"
+            hint="Remove this file from its scope — there is no undo"
             data-testid="delete"
             @click="confirmingDelete = true"
-          >
-            Delete
-          </button>
+          />
           <button
             v-else
             type="button"
-            class="rounded-md border border-[var(--color-danger)]/50 px-3 py-1.5 text-sm text-[var(--color-danger)]"
+            class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-danger)]/60 px-3 py-1.5 text-sm text-[var(--color-danger)]"
             data-testid="delete-confirm"
             @click="$emit('remove')"
           >
+            <AppIcon name="remove" />
             Really delete?
           </button>
         </template>
 
-        <button
-          type="button"
-          class="rounded-md px-3 py-1.5 text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
-          data-testid="cancel"
-          @click="$emit('cancel')"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
+        <AppButton label="Cancel" data-testid="cancel" @click="$emit('cancel')" />
+        <AppButton
+          :label="saving ? 'Saving…' : (saveLabel ?? 'Save')"
+          icon="check"
+          tone="primary"
           :disabled="saving"
-          class="rounded-md bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-50"
+          hint="Write this definition to the scope it names"
           data-testid="save"
           @click="$emit('save')"
-        >
-          {{ saving ? 'Saving…' : (saveLabel ?? 'Save') }}
-        </button>
+        />
       </div>
     </header>
 

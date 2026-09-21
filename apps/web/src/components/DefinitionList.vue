@@ -8,6 +8,8 @@ import { useDefinitions } from '../stores/definitions.js'
 import { useProjects } from '../stores/projects.js'
 import ScopeBadge from './ScopeBadge.vue'
 import ShadowNotice from './ShadowNotice.vue'
+import AppIcon from './AppIcon.vue'
+import Tooltip from './Tooltip.vue'
 import PageHeader from './PageHeader.vue'
 
 const props = defineProps<{ kind: DefinitionKind; title: string; subtitle: string }>()
@@ -102,21 +104,26 @@ watch(() => chosen.projectId, reload)
   </p>
 
   <div class="flex items-center justify-end gap-3 px-8 pt-4">
-    <RouterLink
-      v-if="kind === 'workflow'"
-      to="/bundles/import"
-      class="text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
-      data-testid="go-import"
-    >
-      Import a bundle
-    </RouterLink>
-    <RouterLink
-      :to="`/${kind}s/new`"
-      class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white"
-      :data-testid="`new-${kind}`"
-    >
-      New {{ kind }}
-    </RouterLink>
+    <Tooltip v-if="kind === 'workflow'" label="Bring in workflows and phases from a shared bundle">
+      <RouterLink
+        to="/bundles/import"
+        class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]"
+        data-testid="go-import"
+      >
+        <AppIcon name="import" />
+        Import a bundle
+      </RouterLink>
+    </Tooltip>
+    <Tooltip :label="`Author a new ${kind} in a scope you choose`">
+      <RouterLink
+        :to="`/${kind}s/new`"
+        class="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent)]/85"
+        :data-testid="`new-${kind}`"
+      >
+        <AppIcon name="add" />
+        New {{ kind }}
+      </RouterLink>
+    </Tooltip>
   </div>
 
   <div class="px-8 py-6">
@@ -210,14 +217,18 @@ watch(() => chosen.projectId, reload)
                  it cannot do is be added to a task here, and a row that simply
                  vanished from the picker with no explanation is the kind of
                  thing you end up reading the daemon to understand. -->
-            <span
+            <Tooltip
               v-if="item.unavailable"
-              class="ml-2 font-mono text-[10px] text-[var(--color-ink-faint)]"
-              :data-testid="`unavailable-${item.name}`"
-              :title="`Nothing provides ${item.unavailable.flag} here.`"
+              :label="`Nothing provides ${item.unavailable.flag} here, so a task cannot pick this up.`"
             >
-              needs {{ item.unavailable.setting }}
-            </span>
+              <span
+                class="ml-2 inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-ink-faint)]"
+                :data-testid="`unavailable-${item.name}`"
+              >
+                <AppIcon name="alert" :size="10" />
+                needs {{ item.unavailable.setting }}
+              </span>
+            </Tooltip>
           </td>
           <td class="py-3 pr-4"><ScopeBadge :scope="item.winner.scope" /></td>
           <td class="py-3 pr-4"><ShadowNotice :shadowed="item.shadowed" /></td>
@@ -225,15 +236,17 @@ watch(() => chosen.projectId, reload)
             {{ item.winner.file }}
           </td>
           <td class="py-3 pl-4 text-right">
-            <button
-              v-if="kind === 'workflow'"
-              type="button"
-              class="font-mono text-[10px] text-[var(--color-ink-faint)] hover:text-[var(--color-accent-text)]"
-              :data-testid="`export-${item.name}`"
-              @click="exportWorkflow(item.name)"
-            >
-              export
-            </button>
+            <Tooltip v-if="kind === 'workflow'" label="Download this workflow and its phases as a bundle">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[10px] text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-accent-text)]"
+                :data-testid="`export-${item.name}`"
+                @click="exportWorkflow(item.name)"
+              >
+                <AppIcon name="export" :size="11" />
+                export
+              </button>
+            </Tooltip>
           </td>
         </tr>
       </tbody>

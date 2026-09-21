@@ -12,6 +12,7 @@ import {
   settingsPath,
   writeSettings,
   type FactorySettings,
+  type UiTheme,
 } from '../src/settings.js'
 import type { Scope, ScopeChain } from '../src/scopes.js'
 
@@ -49,6 +50,7 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
     problems = writeSettings(chain, patch).problems
   }
   const scaleIs = (n: number) => () => expect(settings.ui.scale).toBe(n)
+  const themeIs = (value: UiTheme) => () => expect(settings.ui.theme).toBe(value)
   const says = (needle: string) =>
     problems.some((problem) => problem.message.toLowerCase().includes(needle.toLowerCase()))
   const file = () => join(userRoot, SETTINGS_FILE)
@@ -57,6 +59,7 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
     Given('a user scope with no settings file', givenUserScope())
     When('the settings are read', read)
     Then('the interface scale is 1', scaleIs(1))
+    And('the theme is "system"', themeIs('system'))
     And('no plugins are switched off', () => expect(settings.plugins.disabled).toEqual([]))
     And('nothing is reported', () => expect(problems).toEqual([]))
     // Reading must not create. A file that appears because something looked at
@@ -90,6 +93,22 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
     Then('the file on disk names the settings kind', () =>
       expect(readFileSync(file(), 'utf8')).toContain(SETTINGS_KIND),
     )
+  })
+
+  Scenario('A theme is saved and read back', ({ Given, When, And, Then }) => {
+    Given('a user scope with no settings file', givenUserScope())
+    When('the theme is set to "light"', save({ ui: { theme: 'light' } }))
+    And('the settings are read', read)
+    Then('the theme is "light"', themeIs('light'))
+  })
+
+  Scenario('Saving the theme does not drop the scale', ({ Given, When, And, Then }) => {
+    Given('a user scope with no settings file', givenUserScope())
+    When('the interface scale is set to 2', save({ ui: { scale: 2 } }))
+    And('the theme is set to "light"', save({ ui: { theme: 'light' } }))
+    And('the settings are read', read)
+    Then('the interface scale is 2', scaleIs(2))
+    And('the theme is "light"', themeIs('light'))
   })
 
   Rule('a file that will not load leaves the tool working', ({ RuleScenario }) => {
@@ -137,6 +156,15 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
       And('the interface scale is 1', scaleIs(1))
     })
 
+    RuleScenario('A theme nobody recognises is refused', ({ Given, When, Then, And }) => {
+      Given('a settings file asking for the theme "sepia"', givenFile('{"ui":{"theme":"sepia"}}'))
+      When('the settings are read', read)
+      Then('a problem names the field "ui.theme"', () =>
+        expect(problems.some((problem) => problem.field === 'ui.theme')).toBe(true),
+      )
+      And('the theme is "system"', themeIs('system'))
+    })
+
     RuleScenario('A write that would not load back is refused before it lands', ({
       Given,
       When,
@@ -148,6 +176,20 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
       Then('it is refused', () => expect(problems.length).toBeGreaterThan(0))
       // Read back through the schema *before* the rename, so a refusal leaves
       // no file at all rather than one Factory cannot load.
+      And('no file was created', () => expect(existsSync(file())).toBe(false))
+    })
+
+    RuleScenario('A write with an unrecognised theme is refused before it lands', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a user scope with no settings file', givenUserScope())
+      // Off the wire this would just be a string; the cast stands in for that —
+      // `writeSettings` itself doesn't trust the type, only the schema does.
+      When('the theme is set to "sepia"', save({ ui: { theme: 'sepia' as UiTheme } }))
+      Then('it is refused', () => expect(problems.length).toBeGreaterThan(0))
       And('no file was created', () => expect(existsSync(file())).toBe(false))
     })
   })

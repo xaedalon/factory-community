@@ -185,7 +185,7 @@ watch(() => chosen.projectId, reload)
         <tr
           v-for="item in group.rows"
           :key="item.name"
-          class="border-b border-[var(--color-line)]/60 transition-colors hover:bg-white/[0.02]"
+          class="border-b border-[var(--color-line)]/60 transition-colors hover:bg-[var(--color-veil-weak)]"
           :data-testid="`row-${item.name}`"
         >
           <td class="py-3 pr-4">

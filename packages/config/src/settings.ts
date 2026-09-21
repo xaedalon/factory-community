@@ -34,6 +34,18 @@ export const SETTINGS_KIND = 'factory.settings/v1'
 /** The largest interface scale, so 3× is a promise rather than a slider's end. */
 export const MAX_UI_SCALE = 3
 
+/** Light, dark, or the OS's own preference — the board never sees a fourth. */
+export const UI_THEMES = ['light', 'dark', 'system'] as const
+
+export type UiTheme = (typeof UI_THEMES)[number]
+
+/** What a fresh installation follows until somebody chooses otherwise. */
+export const DEFAULT_UI_THEME: UiTheme = 'system'
+
+/** Whether a string off the wire is a theme. Routes need this before storing one. */
+export const isUiTheme = (value: unknown): value is UiTheme =>
+  typeof value === 'string' && (UI_THEMES as readonly string[]).includes(value)
+
 const shape = {
   kind: z.literal(SETTINGS_KIND).optional(),
   ui: closedWithExtensions({
@@ -45,7 +57,15 @@ const shape = {
      * by hand.
      */
     scale: z.number().min(1).max(MAX_UI_SCALE).default(1),
-  }).default({ scale: 1 }),
+    /**
+     * Light, dark, or the OS's own preference.
+     *
+     * `system` by default so a fresh installation follows whatever the browser
+     * already reports, the same way the browser's own chrome does, rather than
+     * forcing a choice on first run.
+     */
+    theme: z.enum(UI_THEMES).default(DEFAULT_UI_THEME),
+  }).default({ scale: 1, theme: DEFAULT_UI_THEME }),
   security: closedWithExtensions({
     /**
      * Which disclaimer this installation has accepted, if any.
@@ -83,7 +103,7 @@ const settingsSchema = closedWithExtensions(shape)
 export type FactorySettings = z.infer<typeof settingsSchema>
 
 export interface SettingsPatch {
-  readonly ui?: { readonly scale?: number }
+  readonly ui?: { readonly scale?: number; readonly theme?: UiTheme }
   readonly plugins?: { readonly disabled?: readonly string[] }
   readonly security?: {
     readonly acceptedVersion?: number

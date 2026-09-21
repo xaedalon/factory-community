@@ -3,6 +3,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { computed } from 'vue'
 import ProjectRail from './ProjectRail.vue'
 import DisclaimerPanel from './DisclaimerPanel.vue'
+import AppIcon, { type IconName } from './AppIcon.vue'
 import { useSettings } from '../stores/settings.js'
 
 const route = useRoute()
@@ -18,30 +19,30 @@ const settings = useSettings()
  * The first has no heading. It is what you open Factory to look at, and a
  * label above it would only name the obvious.
  */
-const nav: { heading?: string; items: { to: string; label: string }[] }[] = [
+const nav: { heading?: string; items: { to: string; label: string; icon: IconName }[] }[] = [
   {
     items: [
-      { to: '/tasks', label: 'Tasks' },
-      { to: '/environments', label: 'Environments' },
+      { to: '/tasks', label: 'Tasks', icon: 'tasks' },
+      { to: '/environments', label: 'Environments', icon: 'environment' },
     ],
   },
   {
     heading: 'Library',
     items: [
-      { to: '/workflows', label: 'Workflows' },
-      { to: '/phases', label: 'Phases' },
-      { to: '/agents', label: 'Agents' },
-      { to: '/bundles/import', label: 'Import' },
+      { to: '/workflows', label: 'Workflows', icon: 'play' },
+      { to: '/phases', label: 'Phases', icon: 'settings' },
+      { to: '/agents', label: 'Agents', icon: 'profile' },
+      { to: '/bundles/import', label: 'Import', icon: 'import' },
     ],
   },
   {
     heading: 'System',
     items: [
-      { to: '/projects', label: 'Projects' },
-      { to: '/scopes', label: 'Scopes' },
-      { to: '/plugins', label: 'Plugins' },
-      { to: '/settings', label: 'Settings' },
-      { to: '/setup', label: 'Setup' },
+      { to: '/projects', label: 'Projects', icon: 'project' },
+      { to: '/scopes', label: 'Scopes', icon: 'folder' },
+      { to: '/plugins', label: 'Plugins', icon: 'link' },
+      { to: '/settings', label: 'Settings', icon: 'settings' },
+      { to: '/setup', label: 'Setup', icon: 'check' },
     ],
   },
 ]
@@ -103,13 +104,14 @@ const current = computed(() => route.path)
             <RouterLink
               :to="item.to"
               :data-testid="`nav-${item.label.toLowerCase()}`"
-              class="block rounded-md px-3 py-2 text-sm transition-colors"
+              class="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors"
               :class="
                 current.startsWith(item.to)
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
                   : 'text-[var(--color-ink-muted)] hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]'
               "
             >
+              <AppIcon :name="item.icon" />
               {{ item.label }}
             </RouterLink>
           </li>

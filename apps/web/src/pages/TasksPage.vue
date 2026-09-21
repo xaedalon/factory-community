@@ -7,6 +7,9 @@ import { useProjects } from '../stores/projects.js'
 import PageHeader from '../components/PageHeader.vue'
 import TaskStateBadge from '../components/TaskStateBadge.vue'
 import TaskActions from '../components/TaskActions.vue'
+import AppButton from '../components/AppButton.vue'
+import AppIcon from '../components/AppIcon.vue'
+import Tooltip from '../components/Tooltip.vue'
 import { toneFor } from '../states.js'
 import type { TaskListItem, TaskState } from '../api/client.js'
 
@@ -122,33 +125,34 @@ onUnmounted(() => store.disconnect())
          queueing every task in every repository from one button is not
          something anybody means. -->
     <template v-if="chosenProject !== undefined" #actions>
-      <button
-        type="button"
+      <AppButton
+        label="Queue all"
+        icon="play"
+        tone="primary"
         :disabled="batching"
-        class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm text-white transition-colors hover:bg-[var(--color-accent)]/85 disabled:opacity-40"
+        hint="Queue every draft in this project; the graph decides what starts"
         data-testid="queue-all"
         @click="store.queueProject()"
-      >
-        Queue all
-      </button>
-      <button
+      />
+      <AppButton
         v-if="!confirmingStop"
-        type="button"
+        label="Stop all"
+        icon="stop"
+        tone="danger"
         :disabled="batching"
-        class="rounded-md border border-[var(--color-line-strong)] px-3 py-1.5 text-sm text-[var(--color-ink-muted)] transition-colors hover:text-[var(--color-danger)] disabled:opacity-40"
+        hint="Halt this project's work — agents are killed mid-sentence"
         data-testid="stop-all"
         @click="confirmingStop = true"
-      >
-        Stop all
-      </button>
+      />
       <button
         v-else
         type="button"
         :disabled="batching"
-        class="rounded-md border border-[var(--color-danger)]/50 px-3 py-1.5 text-sm text-[var(--color-danger)] disabled:opacity-40"
+        class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-danger)]/60 px-3 py-1.5 text-sm text-[var(--color-danger)] disabled:opacity-40"
         data-testid="stop-all-confirm"
         @click="stopAll()"
       >
+        <AppIcon name="stop" />
         Really stop everything?
       </button>
     </template>
@@ -173,12 +177,22 @@ onUnmounted(() => store.disconnect())
     </div>
 
     <div class="mb-4 flex flex-wrap items-center gap-2">
-      <input
-        v-model="filters.query"
-        data-testid="search"
-        placeholder="Search tasks…"
-        class="w-56 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm"
-      />
+      <!-- The icon is what makes this box recognisable as search before the
+           placeholder is read, which is the whole job of a search box. -->
+      <div class="relative">
+        <AppIcon
+          name="search"
+          class="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-[var(--color-ink-faint)]"
+        />
+        <input
+          v-model="filters.query"
+          type="search"
+          data-testid="search"
+          aria-label="Search tasks"
+          placeholder="Search tasks…"
+          class="w-56 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] py-1.5 pr-2.5 pl-8 text-sm"
+        />
+      </div>
       <select
         v-model="filters.state"
         data-testid="filter-state"
@@ -216,13 +230,16 @@ onUnmounted(() => store.disconnect())
           {{ option }}
         </button>
       </div>
-      <RouterLink
-        to="/tasks/new"
-        data-testid="new-task"
-        class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white"
-      >
-        New task
-      </RouterLink>
+      <Tooltip label="A piece of work, and the workflows that will do it">
+        <RouterLink
+          to="/tasks/new"
+          data-testid="new-task"
+          class="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent)]/85"
+        >
+          <AppIcon name="add" />
+          New task
+        </RouterLink>
+      </Tooltip>
     </div>
 
     <p

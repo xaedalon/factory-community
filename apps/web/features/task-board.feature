@@ -144,6 +144,61 @@ Feature: The task board
     And I switch "work" to working in the repository
     Then "work" says it works in the repository, one task at a time
 
+  Rule: a project is created and edited on a page, not in the row it lives in
+
+    The projects page carried a seven-control strip above the list and then the
+    same settings again inside every row — as buttons labelled with the state
+    they would move to, so "Use worktrees" meant worktrees were off. Nothing
+    said what a path was for, and Remove destroyed a project on one click.
+
+    Name and branch were the two fields nobody could change at all: the only
+    way was to remove the project and add it again, which leaves every task
+    that ever ran in it pointing at nothing. The path stays fixed for that same
+    reason, and the page says so rather than leaving a box that refuses.
+
+    Scenario: The list offers no way to change a project in place
+      Given the project "work" is registered
+      When I open the projects page
+      Then no project setting can be changed from the list
+
+    Scenario: Opening a project shows what it is for
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the name field explains what it is for
+      And the path is shown as fixed
+
+    Scenario: A project can be renamed
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I rename the project to "work-core"
+      Then "work-core" is listed as a project
+
+    Scenario: The branch work starts from can be re-pointed
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I point it at the branch "develop"
+      Then "work" starts work from "develop"
+
+    Scenario: A name already taken is refused against the field
+      Given the project "work" is registered
+      And the project "other" is registered
+      When I open the projects page
+      And I open the project "other"
+      And I rename the project to "work"
+      Then the name field says the name is taken
+
+    Scenario: Removing a project takes two clicks
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I press remove once
+      Then the project is still there
+      When I confirm the removal
+      Then no projects are listed
+
   Scenario: The daemon not running is explained
     Given the daemon is not running
     When I open the tasks page

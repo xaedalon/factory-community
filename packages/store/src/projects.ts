@@ -184,7 +184,48 @@ export class ProjectRepository {
     return this.#changed(id)
   }
 
-  /** Re-read and announce. Both setters end the same way. */
+  /**
+   * Call it something else.
+   *
+   * The alternative was remove-and-add-again, which nulls the `project_id` of
+   * every task that ever ran in the project: the record of the work survives,
+   * pointing at nothing. A rename is one column and keeps every reference.
+   *
+   * The unique check skips the project itself, so renaming something to what it
+   * is already called is a no-op rather than a collision with its own row.
+   */
+  rename(id: string, name: string): Project {
+    if (this.get(id) === undefined) throw new Error(`No project ${id}.`)
+    const trimmed = name.trim()
+    if (trimmed === '') throw new Error('A project needs a name.')
+    const existing = this.byName(trimmed)
+    if (existing !== undefined && existing.id !== id) {
+      throw new Error(`A project called "${trimmed}" already exists.`)
+    }
+    this.#db.run('UPDATE projects SET name = ? WHERE id = ?', trimmed, id)
+    return this.#changed(id)
+  }
+
+  /**
+   * Point the project at a different branch.
+   *
+   * Worth more than it looks: aiming Factory's merges somewhere other than the
+   * repository's published default is how a person keeps `main` clean, and
+   * until this existed that cost them every task in the project.
+   *
+   * Not checked against the repository. A branch that does not exist yet is a
+   * perfectly ordinary thing to point at — the workflow that creates it has not
+   * run — and the check would have to be redone at run time anyway.
+   */
+  setDefaultBranch(id: string, branch: string): Project {
+    if (this.get(id) === undefined) throw new Error(`No project ${id}.`)
+    const trimmed = branch.trim()
+    if (trimmed === '') throw new Error('A project needs a branch to start work from.')
+    this.#db.run('UPDATE projects SET default_branch = ? WHERE id = ?', trimmed, id)
+    return this.#changed(id)
+  }
+
+  /** Re-read and announce. Every setter ends the same way. */
   #changed(id: string): Project {
     const updated = this.get(id) as Project
     this.#events?.emit('project.changed', {

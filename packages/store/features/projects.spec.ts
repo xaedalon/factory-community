@@ -293,6 +293,99 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('it is refused', () => expect(failure).toBeDefined())
   })
 
+  Rule('a project can be renamed, and its branch re-pointed', ({ RuleScenario }) => {
+    const exists = (): void => add('factory')
+    const rename =
+      (to: string, which?: () => string) =>
+      (): void =>
+        attempt(() => {
+          project = projects.rename(which?.() ?? (project as Project).id, to)
+        })
+    const repoint =
+      (to: string) =>
+      (): void =>
+        attempt(() => {
+          project = projects.setDefaultBranch((project as Project).id, to)
+        })
+
+    RuleScenario('A project can be renamed', ({ Given, When, Then, And }) => {
+      Given('the project "factory" exists', exists)
+      When('I rename it to "factory-core"', rename('factory-core'))
+      Then("the project is called \"factory-core\"", () =>
+        expect(project?.name).toBe('factory-core'),
+      )
+      // The whole reason this is a rename and not remove-and-add-again.
+      And('its tasks still belong to it', () => {
+        const owned = tasks.create({ name: 'a task', projectId: (project as Project).id })
+        expect(tasks.get(owned.id)?.projectId).toBe((project as Project).id)
+      })
+    })
+
+    RuleScenario('Renaming is announced', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I rename it to "factory-core"', rename('factory-core'))
+      Then('a "project.changed" event says so', () => {
+        const changed = events.find((event) => event.name === 'project.changed')
+        expect(changed?.payload).toMatchObject({ name: 'factory-core' })
+      })
+    })
+
+    RuleScenario('A name still has to be unique', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('the project "notes" exists there', () => add('notes'))
+      When('I rename "notes" to "factory"', rename('factory'))
+      Then('it is refused', () => expect(failure).toBeDefined())
+    })
+
+    RuleScenario('A project keeps its name when renamed to what it already is', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', exists)
+      // The uniqueness check has to skip the project's own row, or this
+      // collides with itself.
+      When('I rename it to "factory"', rename('factory'))
+      Then("the project is called \"factory\"", () => expect(project?.name).toBe('factory'))
+    })
+
+    RuleScenario('An empty name is refused', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I rename it to ""', rename(''))
+      Then('it is refused', () => expect(failure).toBeDefined())
+    })
+
+    RuleScenario('The branch work starts from can be re-pointed', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I point it at the branch "develop"', repoint('develop'))
+      Then("the project's branch is \"develop\"", () =>
+        expect(project?.defaultBranch).toBe('develop'),
+      )
+    })
+
+    RuleScenario('Re-pointing the branch is announced', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I point it at the branch "develop"', repoint('develop'))
+      Then('a "project.changed" event says so', () => {
+        const changed = events.find((event) => event.name === 'project.changed')
+        expect(changed?.payload).toMatchObject({ name: 'factory' })
+      })
+    })
+
+    RuleScenario('An empty branch is refused', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I point it at the branch ""', repoint(''))
+      Then('it is refused', () => expect(failure).toBeDefined())
+    })
+
+    RuleScenario('Renaming a project that is not there is refused', ({ When, Then }) => {
+      When('I rename a project that does not exist', () =>
+        attempt(() => projects.rename('nope', 'anything')),
+      )
+      Then('it is refused', () => expect(failure).toBeDefined())
+    })
+  })
+
   Rule('a project says how much authority its runs get, and what else they may reach', ({
     RuleScenario,
   }) => {

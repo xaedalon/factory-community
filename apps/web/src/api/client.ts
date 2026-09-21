@@ -757,12 +757,20 @@ export const api = {
 
   projects: () => request<{ items: Project[] }>('/api/projects'),
 
-  /** Turn either project setting on or off. Both go through the same route. */
+  /**
+   * Change a project. Everything editable goes through the one route.
+   *
+   * `name` and `defaultBranch` are here because the alternative was removing
+   * the project and adding it again, which orphans every task that ever ran in
+   * it. `path` is not editable by design — see the route.
+   */
   setProjectSetting: (
     id: string,
     // `profile: null` clears it, which is how a project returns to following
     // the installation. Distinct from choosing `default`.
     setting: {
+      name?: string
+      defaultBranch?: string
       usesWorktrees?: boolean
       usesEnvironments?: boolean
       profile?: ExecutionProfile | null

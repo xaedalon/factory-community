@@ -120,6 +120,68 @@ Feature: Projects — the repositories Factory works in
     When I turn worktrees off on a project that does not exist
     Then it is refused
 
+  Rule: a project can be renamed, and its branch re-pointed
+
+    A project is identified by what it is, not by what it was called when
+    somebody typed it in. Renaming and re-pointing were the two fields a person
+    could only change by removing the project and adding it again — which nulls
+    the `project_id` of every task that ever ran in it, so the record of the
+    work survives pointing at nothing.
+
+    The branch matters more than it looks. Aiming Factory's merges somewhere
+    other than `main` is the obvious way to keep a published repository's
+    default branch clean, and until now that cost you every task in the project.
+
+    The path is deliberately not in this list. Worktree roots are derived from
+    it and every run that ever happened recorded it, so a project that moves is
+    a different project, and saying so is kinder than pretending otherwise.
+
+    Scenario: A project can be renamed
+      Given the project "factory" exists
+      When I rename it to "factory-core"
+      Then the project is called "factory-core"
+      And its tasks still belong to it
+
+    Scenario: Renaming is announced
+      Given the project "factory" exists
+      When I rename it to "factory-core"
+      Then a "project.changed" event says so
+
+    Scenario: A name still has to be unique
+      Given the project "factory" exists
+      And the project "notes" exists there
+      When I rename "notes" to "factory"
+      Then it is refused
+
+    Scenario: A project keeps its name when renamed to what it already is
+      Given the project "factory" exists
+      When I rename it to "factory"
+      Then the project is called "factory"
+
+    Scenario: An empty name is refused
+      Given the project "factory" exists
+      When I rename it to ""
+      Then it is refused
+
+    Scenario: The branch work starts from can be re-pointed
+      Given the project "factory" exists
+      When I point it at the branch "develop"
+      Then the project's branch is "develop"
+
+    Scenario: Re-pointing the branch is announced
+      Given the project "factory" exists
+      When I point it at the branch "develop"
+      Then a "project.changed" event says so
+
+    Scenario: An empty branch is refused
+      Given the project "factory" exists
+      When I point it at the branch ""
+      Then it is refused
+
+    Scenario: Renaming a project that is not there is refused
+      When I rename a project that does not exist
+      Then it is refused
+
 
   Rule: a project says how much authority its runs get, and what else they may reach
 

@@ -780,21 +780,26 @@ When('I open the projects page', async ({ world, page }) => {
   await page.goto('/projects')
 })
 
+// Adding is a page of its own now, reached from the list the same way a
+// person reaches it. The steps go through the button rather than jumping to
+// the URL, so a broken route fails here rather than silently passing.
 When(
   'I add the project {string} at the project directory',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(world.workDir)
-    await page.getByTestId('create-project').click()
+    await page.getByTestId('save-project').click()
   },
 )
 
 When(
   'I add the project {string} at a path that does not exist',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(`${world.root}/nowhere`)
-    await page.getByTestId('create-project').click()
+    await page.getByTestId('save-project').click()
   },
 )
 
@@ -813,8 +818,74 @@ Then('{string} is listed as a project', async ({ page }, name: string) => {
   await expect(page.getByTestId(`project-${name}`)).toBeVisible()
 })
 
+When('I open the project {string}', async ({ page }, name: string) => {
+  await page.getByTestId(`open-project-${name}`).click()
+  await expect(page.getByTestId('project-form')).toBeVisible()
+})
+
+When('I rename the project to {string}', async ({ page }, to: string) => {
+  await page.getByTestId('project-name').fill(to)
+  await page.getByTestId('save-project').click()
+})
+
+When('I point it at the branch {string}', async ({ page }, branch: string) => {
+  await page.getByTestId('project-branch').fill(branch)
+  await page.getByTestId('save-project').click()
+})
+
+Then('{string} starts work from {string}', async ({ page }, name: string, branch: string) => {
+  await expect(page.getByTestId(`project-${name}`)).toContainText(branch)
+})
+
+/**
+ * The list is a list.
+ *
+ * Asserting the absence of the old controls rather than the presence of the new
+ * ones: the failure this guards against is somebody adding a convenient toggle
+ * back into a row, which no positive assertion would ever notice.
+ */
+Then('no project setting can be changed from the list', async ({ page }) => {
+  await expect(page.getByTestId('add-project')).toHaveCount(0)
+  await expect(page.getByTestId(/^toggle-worktrees-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^toggle-environments-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^profile-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^remove-/)).toHaveCount(0)
+})
+
+Then('the name field explains what it is for', async ({ page }) => {
+  await expect(page.getByText('The rail derives its square')).toBeVisible()
+})
+
+Then('the path is shown as fixed', async ({ page }) => {
+  await expect(page.getByTestId('project-path-fixed')).toBeVisible()
+  await expect(page.getByTestId('project-path')).toHaveCount(0)
+})
+
+Then('the name field says the name is taken', async ({ page }) => {
+  await expect(page.getByTestId('field-error-name')).toContainText('already exists')
+})
+
+When('I press remove once', async ({ page }) => {
+  await page.getByTestId('remove-project').click()
+})
+
+Then('the project is still there', async ({ page }) => {
+  await expect(page.getByTestId('remove-project-confirm')).toBeVisible()
+  await expect(page.getByTestId('project-form')).toBeVisible()
+})
+
+When('I confirm the removal', async ({ page }) => {
+  await page.getByTestId('remove-project-confirm').click()
+})
+
+Then('no projects are listed', async ({ page }) => {
+  await expect(page.getByTestId('projects-empty')).toBeVisible()
+})
+
+// Against the path box, not in a banner at the top of the form. A refusal that
+// does not say which field it means makes you check all of them.
 Then('the page explains that there is nothing at that path', async ({ page }) => {
-  await expect(page.getByTestId('error')).toContainText('there is nothing at')
+  await expect(page.getByTestId('field-error-path')).toContainText('there is nothing at')
 })
 
 Then('{string} shows the project {string}', async ({ page }, task: string, project: string) => {
@@ -955,15 +1026,20 @@ Then('a setup step offers a command to copy', async ({ page }) => {
 When(
   'I add the project {string} at the project directory, without worktrees',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(world.workDir)
-    await page.getByTestId('project-worktrees').uncheck()
-    await page.getByTestId('create-project').click()
+    // The switch is a real checkbox behind a drawn one, so `uncheck` still
+    // works and the keyboard still does.
+    await page.getByTestId('project-worktrees-field').getByRole('checkbox').uncheck()
+    await page.getByTestId('save-project').click()
   },
 )
 
 When('I switch {string} to working in the repository', async ({ page }, name: string) => {
-  await page.getByTestId(`toggle-worktrees-${name}`).click()
+  await page.getByTestId(`open-project-${name}`).click()
+  await page.getByTestId('project-worktrees-field').getByRole('checkbox').uncheck()
+  await page.getByTestId('save-project').click()
 })
 
 Then(
@@ -1324,7 +1400,9 @@ When('I open the environments page', async ({ world, page }) => {
 })
 
 When('I turn environments on for {string}', async ({ page }, name: string) => {
-  await page.getByTestId(`toggle-environments-${name}`).click()
+  await page.getByTestId(`open-project-${name}`).click()
+  await page.getByTestId('project-environments-field').getByRole('checkbox').check()
+  await page.getByTestId('save-project').click()
 })
 
 Then('the environments page is empty', async ({ page }) => {

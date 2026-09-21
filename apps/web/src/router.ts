@@ -4,6 +4,7 @@ import NewTaskPage from './pages/NewTaskPage.vue'
 import TaskDetailPage from './pages/TaskDetailPage.vue'
 import ArtifactPage from './pages/ArtifactPage.vue'
 import ProjectsPage from './pages/ProjectsPage.vue'
+import ProjectEditPage from './pages/ProjectEditPage.vue'
 import SetupPage from './pages/SetupPage.vue'
 import WorkflowListPage from './pages/WorkflowListPage.vue'
 import PhaseListPage from './pages/PhaseListPage.vue'
@@ -33,6 +34,10 @@ export default createRouter({
     component: ArtifactPage,
   },
     { path: '/projects', name: 'projects', component: ProjectsPage },
+    // Before '/projects/:id', or "new" is read as a project id — the same
+    // ordering '/tasks/new' needs, and for the same reason.
+    { path: '/projects/new', name: 'project-new', component: ProjectEditPage },
+    { path: '/projects/:id', name: 'project-edit', component: ProjectEditPage },
     { path: '/setup', name: 'setup', component: SetupPage },
     { path: '/workflows', name: 'workflows', component: WorkflowListPage },
     { path: '/workflows/new', name: 'workflow-new', component: WorkflowEditPage },

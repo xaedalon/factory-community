@@ -332,7 +332,7 @@ onUnmounted(() => store.disconnect())
           <td class="py-3 pr-4"><TaskStateBadge :state="task.state" /></td>
           <td class="py-3 pr-4">
             <div v-if="task.progress" class="flex items-center gap-2">
-              <span class="h-1 w-24 overflow-hidden rounded-full bg-white/10">
+              <span class="h-1 w-24 overflow-hidden rounded-full bg-[var(--color-track)]">
                 <span class="block h-full bg-[var(--color-accent)]" :style="{ width: `${percent(task)}%` }" />
               </span>
               <span
@@ -396,7 +396,7 @@ onUnmounted(() => store.disconnect())
             class="mt-2 border-t border-[var(--color-line)] pt-1.5"
             :data-testid="`card-progress-${task.name}`"
           >
-            <span class="block h-1 overflow-hidden rounded-full bg-white/10">
+            <span class="block h-1 overflow-hidden rounded-full bg-[var(--color-track)]">
               <span
                 class="block h-full bg-[var(--color-accent)]"
                 :style="{ width: `${percent(task)}%` }"

@@ -19,3 +19,8 @@ build/
 logs/
 .env
 .env.*
+
+# One person's debugger configuration, not the project's. `.claude/skills/` is
+# committed on purpose — those runbooks are the product — so this ignores the
+# one file rather than the directory.
+.claude/launch.json

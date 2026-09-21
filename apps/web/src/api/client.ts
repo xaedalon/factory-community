@@ -397,6 +397,15 @@ export interface ArtifactDetail {
 export type ExecutionProfile = 'default' | 'full-access'
 
 /**
+ * Light, dark, or the OS's own preference.
+ *
+ * Declared here rather than imported from `@factory/config`, for the same
+ * reason `ExecutionProfile` is: the board talks HTTP, and this is the shape
+ * the daemon sends.
+ */
+export type UiTheme = 'light' | 'dark' | 'system'
+
+/**
  * What a person is shown before Factory runs an agent for them.
  *
  * Declared here rather than imported from core: the board talks HTTP, and this
@@ -414,7 +423,7 @@ export interface Disclaimer {
 
 /** What the person using Factory has chosen. Served by the daemon. */
 export interface FactorySettings {
-  ui: { scale: number }
+  ui: { scale: number; theme: UiTheme }
   plugins: { disabled: string[] }
   security: { acceptedVersion?: number; profile: ExecutionProfile }
 }
@@ -874,7 +883,7 @@ export const api = {
     }>('/api/settings'),
 
   saveSettings: (patch: {
-    ui?: { scale?: number }
+    ui?: { scale?: number; theme?: UiTheme }
     security?: { profile?: ExecutionProfile }
   }) =>
     request<{ settings: FactorySettings; file?: string }>('/api/settings', {

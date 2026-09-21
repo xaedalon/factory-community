@@ -265,6 +265,34 @@ Feature: The definitions API
       When I patch the settings with nothing
       Then the response is 400
 
+  Rule: the appearance theme is a setting too
+
+    Scenario: It starts at "system"
+      When I ask for the settings
+      Then the theme is "system"
+
+    Scenario: A new theme is saved and read back
+      When I set the theme to "light"
+      Then the response is 200
+      And asking again reports the theme "light"
+
+    Scenario: A theme that is not light, dark or system is refused
+      When I set the theme to "sepia"
+      Then the response is 400
+      And the error names the themes
+
+    Scenario: Changing the theme leaves the scale alone
+      Given the interface scale is 2
+      When I set the theme to "light"
+      Then asking again reports the theme "light"
+      And the interface scale is still 2
+
+    Scenario: Changing the scale leaves the theme alone
+      Given the theme is "light"
+      When I set the interface scale to 2
+      Then the interface scale is 2
+      And asking again reports the theme "light"
+
   Rule: the disclaimer is recorded once, and the profile is a setting
 
     Factory coordinates other people's coding agents against real repositories,

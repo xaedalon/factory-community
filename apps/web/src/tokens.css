@@ -70,10 +70,80 @@
   --color-project-4: #a05ac0;
   --color-project-5: #b07d24;
   --color-project-6: #3a8f5a;
+
+  /*
+   * Translucent tints over the current surface: a hover highlight, a flat
+   * badge fill, a progress-bar track. White-based here because the default
+   * surface is dark. `:root[data-theme='light']` below flips these to
+   * black-based, so the same tint still shows up instead of vanishing into a
+   * white surface — that's the whole reason these exist as tokens rather than
+   * a hard-coded tint utility at each call site.
+   */
+  --color-veil-weak: rgba(255, 255, 255, 0.03);
+  --color-veil: rgba(255, 255, 255, 0.045);
+  --color-veil-strong: rgba(255, 255, 255, 0.06);
+  --color-track: rgba(255, 255, 255, 0.1);
+}
+
+/**
+ * The light palette.
+ *
+ * Applied through `data-theme` rather than `prefers-color-scheme` directly: a
+ * Light/Dark/System choice made on the settings page has to be able to
+ * override what the OS reports, and a media query alone can't be told to lose
+ * to a stored preference. `settings.ts` resolves `system` to one of these two
+ * before it ever reaches the DOM.
+ *
+ * Raised and overlay collapse to `surface`'s white fill here, unlike the dark
+ * palette's monotonic elevation — there's nowhere lighter to go. Where that
+ * flatness would make an element illegible against its surface, the existing
+ * `--color-line` border is what carries the distinction instead; nothing in
+ * this feature draws a shadow.
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --color-base: #f6f6f8;
+  --color-surface: #ffffff;
+  --color-raised: #ffffff;
+  --color-overlay: #ffffff;
+
+  --color-line: #d4d4da;
+  --color-line-strong: #b4b4bf;
+
+  --color-ink: #101012;
+  --color-ink-muted: #4c4c56;
+  --color-ink-faint: #75757f;
+
+  --color-accent: #5231d6;
+  --color-accent-soft: #5231d61a;
+
+  --color-ok: #0f9d5e;
+  --color-info: #00647a;
+  --color-warn: #8f5308;
+  --color-danger: #b8262d;
+
+  --color-veil-weak: rgba(0, 0, 0, 0.035);
+  --color-veil: rgba(0, 0, 0, 0.05);
+  --color-veil-strong: rgba(0, 0, 0, 0.07);
+  --color-track: rgba(0, 0, 0, 0.08);
+}
+
+/**
+ * The explicit dark choice, mirroring the light block above.
+ *
+ * `html`'s `color-scheme: light dark` defers to the OS when neither value is
+ * a clear winner, so on a machine whose OS prefers light, picking Dark here
+ * would otherwise leave native chrome — scrollbar, form controls, caret,
+ * `::selection`, autofill — drawn light even though every `--color-*` token
+ * is dark.
+ */
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light dark;
   /* Nothing outside the app scrolls. The shell owns the viewport and its main
      pane is the scroller, so a second scrollbar here would carry the nav off
      the top — which is the bug this arrangement exists to fix. */

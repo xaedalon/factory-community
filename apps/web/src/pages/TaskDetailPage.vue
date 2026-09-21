@@ -451,7 +451,7 @@ const stepTone: Record<string, string> = {
         v-else-if="editable"
         type="button"
         data-testid="rename-task"
-        class="rounded-md px-1 text-left hover:bg-white/[0.04]"
+        class="rounded-md px-1 text-left hover:bg-[var(--color-veil)]"
         title="Rename"
         @click="startRename"
       >
@@ -488,7 +488,7 @@ const stepTone: Record<string, string> = {
         v-else-if="editable"
         type="button"
         data-testid="describe-task"
-        class="block max-w-3xl whitespace-pre-wrap rounded-md px-1 text-left text-sm hover:bg-white/[0.04]"
+        class="block max-w-3xl whitespace-pre-wrap rounded-md px-1 text-left text-sm hover:bg-[var(--color-veil)]"
         :class="
           (detail?.task.description ?? '') === ''
             ? 'text-[var(--color-ink-faint)] italic'
@@ -631,7 +631,7 @@ const stepTone: Record<string, string> = {
             class="flex items-center gap-2"
             data-testid="task-progress"
           >
-            <span class="h-1 w-20 overflow-hidden rounded-full bg-white/10">
+            <span class="h-1 w-20 overflow-hidden rounded-full bg-[var(--color-track)]">
               <span
                 class="block h-full bg-[var(--color-accent)]"
                 :style="{ width: `${percent}%` }"

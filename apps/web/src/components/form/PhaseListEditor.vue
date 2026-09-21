@@ -66,7 +66,7 @@ function move(index: number, delta: number): void {
           :href="`/phases/new?name=${encodeURIComponent(name)}`"
           target="_blank"
           rel="noopener"
-          class="font-mono text-[10px] text-[var(--color-accent)] hover:underline"
+          class="font-mono text-[10px] text-[var(--color-accent-text)] hover:underline"
           :data-testid="`phase-${name}-create`"
         >
           create

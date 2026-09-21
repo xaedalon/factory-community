@@ -420,8 +420,8 @@ watch(id, () => {
 })
 
 const stepTone: Record<string, string> = {
-  completed: 'text-[#34d399]',
-  running: 'text-[#38bdf8]',
+  completed: 'text-[var(--color-ok)]',
+  running: 'text-[var(--color-info)]',
   failed: 'text-[var(--color-danger)]',
   'timed-out': 'text-[var(--color-warn)]',
   skipped: 'text-[var(--color-ink-faint)]',
@@ -532,7 +532,7 @@ const stepTone: Record<string, string> = {
         }}</span>
         <RouterLink
           :to="`/projects`"
-          class="text-xs text-[var(--color-accent)] hover:underline"
+          class="text-xs text-[var(--color-accent-text)] hover:underline"
           data-testid="workspace-project"
         >
           {{ detail.workspace.project.name }}
@@ -542,7 +542,7 @@ const stepTone: Record<string, string> = {
              task in the project. -->
         <span
           v-if="detail.workspace.inWorktree"
-          class="rounded-md bg-[#34d399]/10 px-2 py-0.5 font-mono text-[10px] text-[#34d399]"
+          class="rounded-md bg-[var(--color-ok)]/10 px-2 py-0.5 font-mono text-[10px] text-[var(--color-ok)]"
           data-testid="workspace-worktree"
         >
           worktree
@@ -601,7 +601,7 @@ const stepTone: Record<string, string> = {
         <span
           v-for="flag in detail.task.flags"
           :key="flag"
-          class="rounded-md bg-[#34d399]/10 px-2 py-0.5 font-mono text-[11px] text-[#34d399]"
+          class="rounded-md bg-[var(--color-ok)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--color-ok)]"
           :data-testid="`flag-${flag}`"
         >
           {{ flag }}
@@ -713,7 +713,7 @@ const stepTone: Record<string, string> = {
             class="flex items-center gap-2 text-sm"
             :data-testid="`blocker-${blocker.name}`"
           >
-            <RouterLink :to="`/tasks/${blocker.id}`" class="hover:text-[var(--color-accent)]">
+            <RouterLink :to="`/tasks/${blocker.id}`" class="hover:text-[var(--color-accent-text)]">
               {{ blocker.name }}
             </RouterLink>
             <!-- The verdict, not the blocker's state: what matters here is
@@ -807,7 +807,7 @@ const stepTone: Record<string, string> = {
           class="mb-1.5 flex items-center gap-3 rounded-lg border border-[var(--color-line)] px-3 py-2 hover:border-[var(--color-line-strong)]"
           :data-testid="`artifact-${item.name}`"
         >
-          <span class="value flex-1 text-[var(--color-accent)]">{{ item.name }}</span>
+          <span class="value flex-1 text-[var(--color-accent-text)]">{{ item.name }}</span>
           <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">{{ item.phase }}</span>
           <span
             v-if="item.missing"
@@ -882,7 +882,7 @@ const stepTone: Record<string, string> = {
         <h2 class="mb-2 font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
           Steps
         </h2>
-        <ul class="divide-y divide-[var(--color-line)]/60 rounded-lg border border-[var(--color-line)]">
+        <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]">
           <li v-for="step in steps" :key="step.id" class="px-3 py-2">
             <button
               type="button"
@@ -944,7 +944,7 @@ const stepTone: Record<string, string> = {
                  the link to the readable version. -->
             <RouterLink
               :to="`/tasks/${id}/artifacts/${encodeURIComponent(item.name)}`"
-              class="truncate font-mono text-[11px] text-[var(--color-ink-muted)] hover:text-[var(--color-accent)] hover:underline"
+              class="truncate font-mono text-[11px] text-[var(--color-ink-muted)] hover:text-[var(--color-accent-text)] hover:underline"
               :title="`Read ${item.name}`"
               :data-testid="`evidence-${item.name}-open`"
             >

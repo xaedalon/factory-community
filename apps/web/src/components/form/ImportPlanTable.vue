@@ -40,7 +40,7 @@ const tone = (action: ImportItem['action']) =>
       <tr
         v-for="item in items"
         :key="`${item.kind}:${item.targetName}`"
-        class="border-b border-[var(--color-line)]/60"
+        class="border-b border-[var(--color-line)]"
         :data-testid="`plan-${item.targetName}`"
       >
         <td class="py-2 pr-4">

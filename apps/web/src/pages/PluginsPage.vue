@@ -89,7 +89,7 @@ onMounted(load)
             class="rounded-md px-2 py-0.5 font-mono text-[10px]"
             :class="
               entry.source === 'builtin'
-                ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent)]'
+                ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]'
                 : entry.source === 'scope'
                   ? 'bg-[var(--color-info)]/10 text-[var(--color-info)]'
                   : 'bg-[var(--color-warn)]/10 text-[var(--color-warn)]'

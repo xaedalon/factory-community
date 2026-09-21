@@ -19,21 +19,64 @@
   --color-raised: #16161c;
   --color-overlay: #1d1d24;
 
-  /* Hairlines. Borders here are separators, not decoration. */
-  --color-line: #252525;
-  --color-line-strong: #34343c;
+  /*
+   * Hairlines. Borders here are separators, not decoration.
+   *
+   * They were decoration. On these surfaces a card's fill is 1.04:1 against the
+   * page behind it — invisible, by design, because the border was meant to do
+   * the separating. #252525 did it at 1.31:1, and the table rows that faded it
+   * to 60% separated at 1.14:1, which is nothing at all. "Elements have no
+   * clear distinction" was the most common piece of feedback on this interface,
+   * and this is the whole mechanism behind it.
+   *
+   * #35353f is 1.65:1 against `base` and 1.59:1 against `surface`. That is
+   * still a hairline and not a frame, and it is the cheapest available fix:
+   * lifting the *surfaces* instead would separate them the same amount and cost
+   * a second pass over every text colour, because `ink-faint` clears AA on
+   * `surface` by 0.05 and nothing else has much room either.
+   */
+  --color-line: #35353f;
+  --color-line-strong: #4a4a57;
 
-  /* Text. Three weights is enough; a fourth just makes things muddy. */
+  /*
+   * Text. Three weights is enough; a fourth just makes things muddy.
+   *
+   * `ink-faint` was #5c5c66, which is 2.9:1 on `surface` — under WCAG AA's
+   * 4.5:1, and under even the 3:1 large-text floor, at the 11px it is always
+   * used at. It sets every table column header, all seven section headings on
+   * the task page and the nav tagline, so the whole labelling layer of the app
+   * was below the line. #7a7a86 is 4.6:1 and reads the same.
+   */
   --color-ink: #f0f0f0;
   --color-ink-muted: #9a9aa4;
-  --color-ink-faint: #5c5c66;
+  --color-ink-faint: #7a7a86;
 
-  /* The one accent. */
+  /*
+   * The one accent — and the one thing it cannot do.
+   *
+   * #6d5cf5 is 4.7:1 behind white, so it is a sound *fill*: buttons, the active
+   * nav row. As *ink* on `surface` it is 4.1:1 and fails, which is what it was
+   * doing on every task name's hover in the board table and in the project
+   * scope badge. So the fill and the ink are two tokens now. Reach for
+   * `accent-text` whenever the accent is the colour of letters.
+   */
   --color-accent: #6d5cf5;
+  --color-accent-text: #8f83f7;
   --color-accent-soft: #6d5cf526;
 
 
-  /* Status. Also used for scope badges, so they read consistently. */
+  /*
+   * Status. Also used for scope badges, so they read consistently.
+   *
+   * `pending` is the sixth: queued work, which the interface reference draws
+   * purple and which had no token at all, so four files spelled it #a78bfa by
+   * hand. It is deliberately *not* `accent` — colour means status here and
+   * interaction there, and one hue doing both is how the two meanings blur.
+   *
+   * All six are ≥4.5:1 on `surface`; `danger` is the closest at 4.9:1, so it
+   * is the one to re-measure if these surfaces are ever lightened.
+   */
+  --color-pending: #a78bfa;
   --color-ok: #18b870;
   --color-info: #00c8d8;
   --color-warn: #f0a020;
@@ -116,9 +159,22 @@
   --color-ink-faint: #75757f;
 
   --color-accent: #5231d6;
+  /*
+   * In light the accent is dark enough to be ink on its own, so the two are
+   * the same value here. The split exists because #6d5cf5 on a dark surface is
+   * 4.1:1; #5231d6 on white is 7.6:1 and needs no lighter twin.
+   */
+  --color-accent-text: #5231d6;
   --color-accent-soft: #5231d61a;
 
-  --color-ok: #0f9d5e;
+  /*
+   * Each status re-darkened for white. Without an entry here a token keeps its
+   * dark-palette value and is read on white: #a78bfa is 2.7:1 that way, which
+   * is how `pending` would have arrived — invisible — the moment the two
+   * palettes met.
+   */
+  --color-pending: #6d4fd8;
+  --color-ok: #087544;
   --color-info: #00647a;
   --color-warn: #8f5308;
   --color-danger: #b8262d;

@@ -46,7 +46,7 @@ onMounted(load)
       class="mb-6 rounded-lg border px-4 py-3 text-sm"
       :class="
         report.ready
-          ? 'border-[#34d399]/40 bg-[#34d399]/5 text-[#34d399]'
+          ? 'border-[var(--color-ok)]/40 bg-[var(--color-ok)]/5 text-[var(--color-ok)]'
           : 'border-[var(--color-warn)]/40 bg-[var(--color-warn)]/5 text-[var(--color-warn)]'
       "
       data-testid="setup-summary"
@@ -73,7 +73,7 @@ onMounted(load)
             class="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[10px]"
             :class="
               item.done
-                ? 'bg-[#34d399]/15 text-[#34d399]'
+                ? 'bg-[var(--color-ok)]/15 text-[var(--color-ok)]'
                 : 'bg-[var(--color-warn)]/15 text-[var(--color-warn)]'
             "
             >{{ item.done ? '✓' : '•' }}</span
@@ -120,7 +120,7 @@ onMounted(load)
             <RouterLink
               v-if="action.url && action.url.startsWith('/')"
               :to="action.url"
-              class="mt-1 inline-block text-xs text-[var(--color-accent)]"
+              class="mt-1 inline-block text-xs text-[var(--color-accent-text)]"
               :data-testid="`go-${item.id}-${index}`"
             >
               {{ action.url }} →
@@ -130,7 +130,7 @@ onMounted(load)
               :href="action.url"
               target="_blank"
               rel="noreferrer"
-              class="mt-1 inline-block text-xs text-[var(--color-accent)]"
+              class="mt-1 inline-block text-xs text-[var(--color-accent-text)]"
               >{{ action.url }} ↗</a
             >
           </div>

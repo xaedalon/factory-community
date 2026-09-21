@@ -90,7 +90,7 @@ async function teardown(taskId: string): Promise<void> {
       No project uses environments yet. Turn them on for a project and Factory copies in the
       <code class="value">environment-create</code>, <code class="value">environment-update</code> and
       <code class="value">environment-delete</code> workflows for you to write.
-      <RouterLink to="/projects" class="text-[var(--color-accent)] hover:underline">
+      <RouterLink to="/projects" class="text-[var(--color-accent-text)] hover:underline">
         Projects
       </RouterLink>
     </p>
@@ -122,7 +122,7 @@ async function teardown(taskId: string): Promise<void> {
 
       <ul
         v-else
-        class="divide-y divide-[var(--color-line)]/60 rounded-lg border border-[var(--color-line)]"
+        class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]"
       >
         <li
           v-for="task in group.tasks"
@@ -154,7 +154,7 @@ async function teardown(taskId: string): Promise<void> {
       <h2 class="mb-2 font-mono text-[10px] tracking-wider text-[var(--color-warn)] uppercase">
         Holding an environment, in a project that says it has none
       </h2>
-      <ul class="divide-y divide-[var(--color-line)]/60 rounded-lg border border-[var(--color-warn)]/40">
+      <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-warn)]/40">
         <li
           v-for="task in stray"
           :key="task.id"

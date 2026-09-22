@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from '../AppIcon.vue'
+import Tooltip from '../Tooltip.vue'
 import { ref } from 'vue'
 import TextInput from './TextInput.vue'
 
@@ -29,14 +31,20 @@ const remove = (index: number) =>
   <div class="space-y-1.5" :data-testid="testid">
     <div v-for="(item, index) in modelValue" :key="index" class="flex items-center gap-2">
       <span class="value flex-1 rounded-md bg-[var(--color-base)] px-3 py-1.5">{{ item }}</span>
-      <button
-        type="button"
-        class="px-1.5 text-[var(--color-ink-faint)] hover:text-[var(--color-danger)]"
-        :data-testid="testid ? `${testid}-remove-${index}` : undefined"
-        @click="remove(index)"
-      >
-        ×
-      </button>
+      <!-- A drawn mark with a name, not a "×" typed as text. A screen reader
+           read the old one as "times", and the target was the width of one
+           character. -->
+      <Tooltip :label="`Remove ${item}`">
+        <button
+          type="button"
+          class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-danger)]"
+          :aria-label="`Remove ${item}`"
+          :data-testid="testid ? `${testid}-remove-${index}` : undefined"
+          @click="remove(index)"
+        >
+          <AppIcon name="close" :size="13" />
+        </button>
+      </Tooltip>
     </div>
     <div class="flex gap-2">
       <TextInput
@@ -48,10 +56,11 @@ const remove = (index: number) =>
       />
       <button
         type="button"
-        class="rounded-md border border-[var(--color-line)] px-3 text-sm text-[var(--color-ink-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+        class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line)] px-3 text-sm text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
         :data-testid="testid ? `${testid}-add` : undefined"
         @click="add"
       >
+        <AppIcon name="add" :size="12" />
         Add
       </button>
     </div>

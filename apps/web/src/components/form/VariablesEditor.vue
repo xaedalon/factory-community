@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from '../AppIcon.vue'
+import Tooltip from '../Tooltip.vue'
 import { computed } from 'vue'
 import TextInput from './TextInput.vue'
 
@@ -41,20 +43,24 @@ const add = () => emit('update:modelValue', { ...props.modelValue, '': '' })
         mono
         @update:model-value="setValue(key, $event)"
       />
-      <button
-        type="button"
-        class="px-1.5 text-[var(--color-ink-faint)] hover:text-[var(--color-danger)]"
-        @click="remove(key)"
-      >
-        ×
-      </button>
+      <Tooltip :label="`Remove ${key}`">
+        <button
+          type="button"
+          class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-danger)]"
+          :aria-label="`Remove ${key}`"
+          @click="remove(key)"
+        >
+          <AppIcon name="close" :size="13" />
+        </button>
+      </Tooltip>
     </div>
     <button
       type="button"
-      class="rounded-md border border-[var(--color-line)] px-3 py-1 text-sm text-[var(--color-ink-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+      class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line)] px-3 py-1 text-sm text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
       data-testid="variables-add"
       @click="add"
     >
+      <AppIcon name="add" :size="12" />
       Add variable
     </button>
   </div>

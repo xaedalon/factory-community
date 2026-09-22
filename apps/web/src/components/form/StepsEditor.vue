@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from '../AppIcon.vue'
+import Tooltip from '../Tooltip.vue'
 import { computed, ref } from 'vue'
 import type { StepKindEntry, TokenNamespace } from '../../api/client.js'
 import SchemaFields from './SchemaFields.vue'
@@ -92,13 +94,18 @@ const fieldsOf = (step: Step): Record<string, unknown> => {
       :data-testid="`step-${index}`"
     >
       <div class="flex items-center gap-3 px-3 py-2">
+        <!-- A drawn chevron with a name. "▾" and "▸" are characters, so this
+             read as "black down-pointing small triangle" and had no state a
+             screen reader could report. -->
         <button
           type="button"
-          class="font-mono text-[10px] text-[var(--color-ink-faint)]"
+          class="rounded p-0.5 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]"
+          :aria-expanded="open === index"
+          :aria-label="open === index ? 'Hide this step' : 'Show this step'"
           :data-testid="`step-${index}-toggle`"
           @click="open = open === index ? undefined : index"
         >
-          {{ open === index ? '▾' : '▸' }}
+          <AppIcon :name="open === index ? 'down' : 'go'" :size="12" />
         </button>
         <span class="font-mono text-label text-[var(--color-accent-text)] uppercase">
           {{ step.uses }}
@@ -108,36 +115,52 @@ const fieldsOf = (step: Step): Record<string, unknown> => {
         </span>
         <span
           v-if="kindFor(step.uses)?.runnable === false"
-          class="font-mono text-[10px] text-[var(--color-warn)]"
+          class="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-warn)]"
           :data-testid="`step-${index}-not-runnable`"
         >
+          <AppIcon name="alert" :size="10" />
           not runnable
         </span>
         <div class="flex items-center gap-1">
-          <button
-            type="button"
-            class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
-            :data-testid="`step-${index}-up`"
-            @click="move(index, -1)"
+          <!-- Steps run top to bottom, so these two are the order of the
+               work. Disabled at the ends rather than silently doing nothing. -->
+          <Tooltip :label="index === 0 ? 'Already the first step' : 'Run this step earlier'">
+            <button
+              type="button"
+              class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:opacity-30"
+              aria-label="Move this step earlier"
+              :disabled="index === 0"
+              :data-testid="`step-${index}-up`"
+              @click="move(index, -1)"
+            >
+              <AppIcon name="up" :size="13" />
+            </button>
+          </Tooltip>
+          <Tooltip
+            :label="index === modelValue.length - 1 ? 'Already the last step' : 'Run this step later'"
           >
-            ↑
-          </button>
-          <button
-            type="button"
-            class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
-            :data-testid="`step-${index}-down`"
-            @click="move(index, 1)"
-          >
-            ↓
-          </button>
-          <button
-            type="button"
-            class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-danger)]"
-            :data-testid="`step-${index}-remove`"
-            @click="remove(index)"
-          >
-            ×
-          </button>
+            <button
+              type="button"
+              class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:opacity-30"
+              aria-label="Move this step later"
+              :disabled="index === modelValue.length - 1"
+              :data-testid="`step-${index}-down`"
+              @click="move(index, 1)"
+            >
+              <AppIcon name="down" :size="13" />
+            </button>
+          </Tooltip>
+          <Tooltip label="Take this step out of the phase">
+            <button
+              type="button"
+              class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-danger)]"
+              aria-label="Remove this step"
+              :data-testid="`step-${index}-remove`"
+              @click="remove(index)"
+            >
+              <AppIcon name="close" :size="13" />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -172,10 +195,11 @@ const fieldsOf = (step: Step): Record<string, unknown> => {
 
     <button
       type="button"
-      class="rounded-md border border-[var(--color-line)] px-3 py-1.5 text-sm text-[var(--color-ink-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+      class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line)] px-3 py-1.5 text-sm text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
       data-testid="step-add"
       @click="add"
     >
+      <AppIcon name="add" :size="12" />
       Add step
     </button>
 

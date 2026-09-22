@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from './AppIcon.vue'
+import Tooltip from './Tooltip.vue'
 import { computed, ref, watch } from 'vue'
 import { api, type DefinitionListing, type WorkflowChoice } from '../api/client.js'
 import ScopeBadge from './ScopeBadge.vue'
@@ -12,7 +14,8 @@ import ScopeBadge from './ScopeBadge.vue'
  * whatever order you happened to click in and nothing on screen said so — which
  * made the one thing that decides what happens the one thing that was invisible.
  *
- * So: numbered rows, and the same ↑ ↓ × idiom the phase editor uses, because a
+ * So: numbered rows, and the same reorder-and-remove idiom the phase editor
+ * uses, because a
  * person who has ordered phases in a workflow already knows how to do this.
  * Duplicates are allowed, unlike phases — running tests, fixing, then running
  * tests again is a real plan, not a mistake.
@@ -194,34 +197,46 @@ function move(index: number, delta: number): void {
         </span>
 
         <template v-if="editable">
-          <button
-            type="button"
-            class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
-            :data-testid="`workflow-${index}-up`"
-            @click="move(index, -1)"
+          <Tooltip :label="index === 0 ? 'Already first' : 'Run this workflow earlier'">
+            <button
+              type="button"
+              class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:opacity-30"
+              :aria-label="`Move ${entry.workflow} earlier`"
+              :disabled="index === 0"
+              :data-testid="`workflow-${index}-up`"
+              @click="move(index, -1)"
+            >
+              <AppIcon name="up" :size="13" />
+            </button>
+          </Tooltip>
+          <Tooltip
+            :label="index === modelValue.length - 1 ? 'Already last' : 'Run this workflow later'"
           >
-            ↑
-          </button>
-          <button
-            type="button"
-            class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
-            :data-testid="`workflow-${index}-down`"
-            @click="move(index, 1)"
-          >
-            ↓
-          </button>
+            <button
+              type="button"
+              class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:opacity-30"
+              :aria-label="`Move ${entry.workflow} later`"
+              :disabled="index === modelValue.length - 1"
+              :data-testid="`workflow-${index}-down`"
+              @click="move(index, 1)"
+            >
+              <AppIcon name="down" :size="13" />
+            </button>
+          </Tooltip>
           <!-- Gone once it has run: the daemon refuses the removal, and a
                button whose only outcome is a refusal is a worse way to learn
                that than not having the button. -->
-          <button
-            v-if="!entry.ran"
-            type="button"
-            class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-danger)]"
-            :data-testid="`workflow-${index}-remove`"
-            @click="remove(index)"
-          >
-            ×
-          </button>
+          <Tooltip v-if="!entry.ran" :label="`Take ${entry.workflow} out of this task`">
+            <button
+              type="button"
+              class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-danger)]"
+              :aria-label="`Remove ${entry.workflow}`"
+              :data-testid="`workflow-${index}-remove`"
+              @click="remove(index)"
+            >
+              <AppIcon name="close" :size="13" />
+            </button>
+          </Tooltip>
         </template>
       </li>
     </ol>

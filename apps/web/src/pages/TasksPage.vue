@@ -158,8 +158,8 @@ onUnmounted(() => store.disconnect())
     </template>
   </PageHeader>
 
-  <div class="px-8 py-6">
-    <div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="summary">
+  <div class="page-body">
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4" data-testid="summary">
       <div
         v-for="card in [
           { key: 'total', label: 'Total tasks', value: summary.total, tone: 'text-[var(--color-ink)]' },
@@ -176,7 +176,7 @@ onUnmounted(() => store.disconnect())
       </div>
     </div>
 
-    <div class="mb-4 flex flex-wrap items-center gap-2">
+    <div class="flex flex-wrap items-center gap-2">
       <!-- The icon is what makes this box recognisable as search before the
            placeholder is read, which is the whole job of a search box. -->
       <div class="relative">
@@ -249,7 +249,7 @@ onUnmounted(() => store.disconnect())
 
     <p
       v-if="error"
-      class="mb-4 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
+      class="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
       data-testid="error"
     >
       {{ error }}
@@ -260,7 +260,7 @@ onUnmounted(() => store.disconnect())
          somebody is reading must not vanish while they read it. -->
     <div
       v-if="batchSummary"
-      class="mb-4 flex items-start gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-raised)] px-4 py-3 text-sm"
+      class="flex items-start gap-3 rounded-lg border border-[var(--color-line)] bg-[var(--color-raised)] px-4 py-3 text-sm"
       data-testid="batch-report"
     >
       <div class="min-w-0 flex-1">
@@ -304,7 +304,7 @@ onUnmounted(() => store.disconnect())
          columns need about a thousand pixels, and `main` clips rather than
          scrolls, so under a window of roughly 1270 the status, progress and
          actions were simply unreachable — no scrollbar, no hint they existed. -->
-    <div v-else-if="view === 'list'" class="overflow-x-auto">
+    <div v-else-if="view === 'list'" class="min-w-0 overflow-x-auto">
       <table class="w-full min-w-[56rem] text-sm" data-testid="task-table">
         <thead>
           <tr class="border-b border-[var(--color-line)] text-left font-mono text-label text-[var(--color-ink-faint)] uppercase">

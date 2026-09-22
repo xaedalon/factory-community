@@ -103,7 +103,7 @@ watch(() => chosen.projectId, reload)
     </span>
   </p>
 
-  <div class="flex items-center justify-end gap-3 px-8 pt-4">
+  <div class="flex items-center justify-end gap-3 px-8 pt-6">
     <Tooltip v-if="kind === 'workflow'" label="Bring in workflows and phases from a shared bundle">
       <RouterLink
         to="/bundles/import"
@@ -126,7 +126,7 @@ watch(() => chosen.projectId, reload)
     </Tooltip>
   </div>
 
-  <div class="px-8 py-6">
+  <div class="page-body pt-4">
     <div
       v-if="exportError"
       class="mb-4 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"

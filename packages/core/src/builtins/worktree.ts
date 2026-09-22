@@ -91,17 +91,34 @@ function create(step: WorktreeStep): PlannedStep {
 }
 
 function remove(step: WorktreeStep): PlannedStep {
+  // This step almost always runs *inside* the worktree it is removing: the
+  // workspace is resolved when the plan is made, while the worktree is still
+  // there, and every step of the phase is spawned in it. Removing the
+  // directory a process is sitting in leaves git with no current directory to
+  // read — `fatal: Unable to read current working directory` — so the prune
+  // never ran and the workflow never completed, which meant `clears:
+  // [hasWorktree]` never took effect and the task kept a flag for a worktree
+  // that was gone.
+  //
+  // The step kind is given only a path, so the repository is found from the
+  // worktree while it still exists. `--git-common-dir` is the main
+  // repository's `.git` however deeply linked the worktree is, and
+  // `--path-format=absolute` (git 2.31) makes it an answer that survives the
+  // `cd`.
   const script = [
     'set -e',
     `dir=${quote(step.path)}`,
-    'if [ -d "$dir" ]; then',
+    'if [ ! -d "$dir" ]; then',
+    '  echo "no worktree at $dir"',
+    '  git worktree prune',
+    '  exit 0',
+    'fi',
+    'main=$(dirname "$(git -C "$dir" rev-parse --path-format=absolute --git-common-dir)")',
+    'cd "$main"',
     // --force because an agent leaves changes behind, and a remove that refuses
     // over an untracked file leaves the task unable to finish. The workflow
     // asked for this; anything worth keeping should have been committed.
-    '  git worktree remove --force "$dir"',
-    'else',
-    '  echo "no worktree at $dir"',
-    'fi',
+    'git worktree remove --force "$dir"',
     'git worktree prune',
   ].join('\n')
 

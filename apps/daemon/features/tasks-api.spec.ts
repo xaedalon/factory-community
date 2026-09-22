@@ -542,9 +542,10 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       git('add', '.')
       git('commit', '-m', 'first')
       await addProject('repo', repo)
+      const mine = projectId
       worktrees = ((await app.inject({ method: 'GET', url: '/api/projects' })).json() as {
-        items: { worktreesRoot: string }[]
-      }).items[0]?.worktreesRoot as string
+        items: { id: string; worktreesRoot: string }[]
+      }).items.find((item) => item.id === mine)?.worktreesRoot as string
     })
     And('the task "Add due dates" in it, on "worktree-create" and then "where"', async () => {
       // In the user scope, which every project can see. The daemon's own
@@ -585,6 +586,65 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       await call('GET', `/api/runs/${where?.id}/logs?step=${step?.id}`)
       const text = (response.body.lines as { text: string }[]).map((line) => line.text).join('')
       expect(text).toContain(join(worktrees, directory))
+    })
+  })
+
+  Scenario('A worktree is removed even though the step runs inside it', ({
+    Given,
+    And,
+    When,
+    Then,
+  }) => {
+    let worktrees = ''
+    let directory = ''
+    Given('a project that is a real git repository', async () => {
+      await addProject('repo', makeRepository(join(root, 'repo')))
+      const mine = projectId
+      worktrees = ((await app.inject({ method: 'GET', url: '/api/projects' })).json() as {
+        items: { id: string; worktreesRoot: string }[]
+      }).items.find((item) => item.id === mine)?.worktreesRoot as string
+    })
+    And(
+      'the task "Add due dates" in it, on "worktree-create" and then "worktree-delete"',
+      async () => {
+        await call('POST', '/api/tasks', {
+          name: 'Add due dates',
+          projectId,
+          branch: 'feature/due-dates',
+          workflows: ['worktree-create', 'worktree-delete'],
+        })
+        taskId = (response.body.task as { id: string }).id
+        directory = (response.body.task as { directory: string }).directory
+      },
+    )
+    When('I queue the task', () => call('POST', `/api/tasks/${taskId}/actions/queue`))
+    And('the work finishes', () =>
+      until(async () => {
+        await reload()
+        return stateOf() === 'done' || stateOf() === 'blocked'
+      }, 'the task to finish'),
+    )
+    Then('no worktree is left for the task', () =>
+      expect(existsSync(join(worktrees, directory))).toBe(false),
+    )
+    And('the task no longer has the flag "hasWorktree"', () =>
+      expect((response.body.task as { flags: string[] }).flags).not.toContain('hasWorktree'),
+    )
+    // The symptom, asserted as well as the outcome: the old script exited 0
+    // with this on stderr and the prune never ran, so a scenario watching only
+    // the exit code would have passed.
+    And('nothing in the run mentions being unable to read the current directory', async () => {
+      const runs = response.body.runs as { id: string; workflow: string }[]
+      const removal = runs.find((run) => run.workflow === 'worktree-delete')
+      await call('GET', `/api/runs/${removal?.id}`)
+      const steps = response.body.steps as { id: number }[]
+      for (const step of steps) {
+        await call('GET', `/api/runs/${removal?.id}/logs?step=${step.id}`)
+        const text = (response.body.lines as { text: string }[])
+          .map((line) => line.text)
+          .join('')
+        expect(text).not.toContain('Unable to read current working directory')
+      }
     })
   })
 

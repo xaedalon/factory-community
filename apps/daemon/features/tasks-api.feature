@@ -141,6 +141,18 @@ Feature: Tasks, runs and live updates over HTTP
     And a worktree exists for the task
     And the second workflow ran inside the worktree
 
+  Scenario: A worktree is removed even though the step runs inside it
+    Given a project that is a real git repository
+    And the task "Add due dates" in it, on "worktree-create" and then "worktree-delete"
+    When I queue the task
+    And the work finishes
+    # The workspace is resolved when the plan is made, so the removal step runs
+    # in the worktree it is about to remove. Git cannot read a current
+    # directory that has gone, and everything after it in the script is skipped.
+    Then no worktree is left for the task
+    And the task no longer has the flag "hasWorktree"
+    And nothing in the run mentions being unable to read the current directory
+
   Scenario: Setup says what is still missing
     Given no repositories have been added
     When I ask what setup is left

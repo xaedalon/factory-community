@@ -91,6 +91,17 @@ describeFeature(feature, ({ Scenario }) => {
     And('the script does nothing when the directory is already gone', () =>
       expect(script()).toContain('no worktree at'),
     )
+    And('the script leaves the worktree before removing it', () => {
+      const text = script()
+      // The repository is found from the worktree while it still exists, and
+      // the `cd` happens before the removal — an order this asserts, because
+      // either one on its own is no use.
+      expect(text).toContain('rev-parse --path-format=absolute --git-common-dir')
+      expect(text.indexOf('cd "$main"')).toBeGreaterThan(-1)
+      expect(text.indexOf('cd "$main"')).toBeLessThan(
+        text.indexOf('git worktree remove --force "$dir"'),
+      )
+    })
   })
 
   Scenario('An action the kind does not have is a validation error', ({ Given, When, Then, And }) => {

@@ -70,11 +70,18 @@ export function registerProjectRoutes(
    * read-only checkout, permissions, a `.factory` that is a file — is worth
    * reporting, not worth undoing their change over.
    */
-  const scaffold = (project: Project, setting: ProjectSetting) => {
+  const scaffold = async (project: Project, setting: ProjectSetting) => {
     const chain = chains.for(project.id)
     if (chain === undefined) return undefined
     try {
-      return scaffoldProjectDefinitions({ chain, host: runtime.host, setting })
+      return await scaffoldProjectDefinitions({
+        chain,
+        host: runtime.host,
+        // A plugin sees the copies a project is given, the same as any other
+        // write.
+        hooks: runtime.host.hooks,
+        setting,
+      })
     } catch (error) {
       return {
         written: [],
@@ -123,8 +130,8 @@ export function registerProjectRoutes(
         })
         // Whatever it was registered with, it gets the files for.
         const scaffolded = [
-          ...(project.usesWorktrees ? [scaffold(project, 'worktrees')] : []),
-          ...(project.usesEnvironments ? [scaffold(project, 'environments')] : []),
+          ...(project.usesWorktrees ? [await scaffold(project, 'worktrees')] : []),
+          ...(project.usesEnvironments ? [await scaffold(project, 'environments')] : []),
         ]
         return reply.code(201).send({ project, scaffolded: merge(scaffolded) })
       } catch (error) {
@@ -253,11 +260,11 @@ export function registerProjectRoutes(
         // Only on the way on. Turning a setting off leaves the files where they
         // are: they are the project's now, and deleting someone's committed
         // workflow because they flipped a checkbox would be unforgivable.
-        if (usesWorktrees) scaffolded.push(scaffold(project, 'worktrees'))
+        if (usesWorktrees) scaffolded.push(await scaffold(project, 'worktrees'))
       }
       if (usesEnvironments !== undefined) {
         project = projects.setEnvironments(request.params.id, usesEnvironments)
-        if (usesEnvironments) scaffolded.push(scaffold(project, 'environments'))
+        if (usesEnvironments) scaffolded.push(await scaffold(project, 'environments'))
       }
       if (settingProfile) {
         // Nothing is scaffolded for a profile: it changes what the next run is

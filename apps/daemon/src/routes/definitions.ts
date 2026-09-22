@@ -151,7 +151,7 @@ export function registerDefinitionRoutes(
     app.post<{ Body: WriteBody; Querystring: InProject }>(`/api/${plural}`, async (request, reply) => {
       const chain = chains.for(request.query.project)
       if (chain === undefined) return unknownProject(reply, request.query.project)
-      const outcome = write(kind, request.body, chain, runtime, { create: true })
+      const outcome = await write(kind, request.body, chain, runtime, { create: true })
       if (outcome.status === 'refused') return reply.code(400).send({ problems: outcome.problems })
       if (outcome.status === 'exists') {
         return reply
@@ -171,7 +171,7 @@ export function registerDefinitionRoutes(
             error: `The body names "${request.body?.definition?.name}" but the URL says "${request.params.name}".`,
           })
         }
-        const outcome = write(kind, request.body, chain, runtime, { create: false })
+        const outcome = await write(kind, request.body, chain, runtime, { create: false })
         if (outcome.status === 'refused') return reply.code(400).send({ problems: outcome.problems })
         if (outcome.status === 'stale') {
           // 409 with the current content, so the caller can show a diff instead
@@ -248,7 +248,7 @@ interface WriteBody {
   etag?: string
 }
 
-function write(
+async function write(
   kind: DefinitionKind,
   body: WriteBody | undefined,
   chain: ScopeChain,
@@ -264,6 +264,9 @@ function write(
   return writeDefinition({
     chain,
     host: runtime.host,
+    // What makes the two definition hooks real. The host is the only thing
+    // that has them, and this is the route every editor's save goes through.
+    hooks: runtime.host.hooks,
     kind,
     definition,
     ...(body?.scope === undefined ? {} : { scope: body.scope }),

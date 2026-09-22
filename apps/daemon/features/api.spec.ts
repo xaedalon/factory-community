@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { FastifyInstance } from 'fastify'
 import { DISCLAIMER_VERSION, parseWorkflowFile } from '@factory/core'
+import type { PluginContext } from '@factory/core'
 import { createRuntime } from '@factory/runtime'
 import { resolveScopes } from '@factory/config'
 import { buildServer } from '../src/server.js'
@@ -35,6 +36,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   let fetched: Record<string, unknown> = {}
   let bundleText = ''
   let runtimeForRebuild: Awaited<ReturnType<typeof createRuntime>> | undefined
+  let host: Awaited<ReturnType<typeof createRuntime>>['host']
   let rawResponse = ''
 
   AfterEachScenario(async () => {
@@ -82,6 +84,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       // Rebuilt by the "a built board" step when a scenario needs one: the
       // web root is fixed when the server is built.
       runtimeForRebuild = runtime
+      // Kept so a scenario can load a plugin into the host afterwards: hooks
+      // are read when a write happens, not when the server is built.
+      host = runtime.host
       app = buildServer(runtime)
       await app.ready()
     })
@@ -815,6 +820,121 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the response mentions the profile', () =>
         expect(String((response.body as { error?: string }).error)).toContain('profile'),
       )
+    })
+  })
+  Rule('a plugin can refuse a definition, or adjust it on its way to disk', ({ RuleScenario }) => {
+    const workflow = (name: string) => ({
+      definition: {
+        name,
+        mode: 'once',
+        scheduling: 'parallel',
+        description: '',
+        variables: {},
+        phases: [],
+        extensions: {},
+      },
+    })
+    const post = (name: string) => () => call('POST', '/api/workflows', workflow(name))
+    const notWritten = (name: string) => () =>
+      expect(existsSync(workflowFile(projectScope, name))).toBe(false)
+
+    /** A plugin carrying one hook, loaded after the server was built. */
+    const loading = (register: (context: PluginContext) => void) => async (): Promise<void> => {
+      await host.load({ name: 'stub-hooks', version: '1.0.0', register })
+    }
+
+    RuleScenario('A plugin can refuse a definition', ({ Given, When, Then, And }) => {
+      Given(
+        'a plugin that refuses any workflow called "forbidden"',
+        loading((context) => {
+          context.hook('validateDefinition', (input) =>
+            input.name === 'forbidden'
+              ? [{ severity: 'error', message: 'that name is spoken for', rule: 'stub.name' }]
+              : [],
+          )
+        }),
+      )
+      When('I POST a workflow named "forbidden"', post('forbidden'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And("the response carries the plugin's reason", () =>
+        expect(JSON.stringify(response.body)).toContain('that name is spoken for'),
+      )
+      And('the workflow "forbidden" was not written', notWritten('forbidden'))
+    })
+
+    RuleScenario('A plugin that refuses one name leaves the others alone', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given(
+        'a plugin that refuses any workflow called "forbidden"',
+        loading((context) => {
+          context.hook('validateDefinition', (input) =>
+            input.name === 'forbidden'
+              ? [{ severity: 'error', message: 'that name is spoken for', rule: 'stub.name' }]
+              : [],
+          )
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    })
+
+    RuleScenario('A plugin can adjust what is written', ({ Given, When, Then, And }) => {
+      Given(
+        'a plugin that describes every workflow it is shown',
+        loading((context) => {
+          context.hook('beforeDefinitionWrite', (value) => ({
+            action: 'continue',
+            value: {
+              ...value,
+              definition: { ...(value.definition as object), description: 'set by a plugin' },
+            },
+          }))
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('the stored workflow carries the description the plugin gave it', () =>
+        expect(readFileSync(workflowFile(projectScope, 'allowed'), 'utf8')).toContain(
+          'set by a plugin',
+        ),
+      )
+    })
+
+    RuleScenario('A plugin can refuse the write itself', ({ Given, When, Then, And }) => {
+      Given(
+        'a plugin that refuses to write anything',
+        loading((context) => {
+          context.hook('beforeDefinitionWrite', () => ({
+            action: 'reject',
+            problems: [{ severity: 'error', message: 'this scope is read-only today', rule: 'stub.write' }],
+          }))
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the workflow "allowed" was not written', notWritten('allowed'))
+    })
+
+    RuleScenario('A hook that throws refuses rather than writing half of it', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'a plugin whose write hook throws',
+        loading((context) => {
+          context.hook('beforeDefinitionWrite', () => {
+            throw new Error('the plugin fell over')
+          })
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the workflow "allowed" was not written', notWritten('allowed'))
     })
   })
 })

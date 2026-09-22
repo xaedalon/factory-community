@@ -355,3 +355,48 @@ Feature: The definitions API
       When I send an empty settings patch
       Then the response is 400
       And the response mentions the profile
+
+  Rule: a plugin can refuse a definition, or adjust it on its way to disk
+
+    Two hooks have been on the plugin SDK since the host was built —
+    `validateDefinition` and `beforeDefinitionWrite` — and neither was ever
+    called. A plugin could register one, see it counted in its own conformance
+    report, read it in the documentation, and have it never run: exactly the
+    shape this codebase keeps paying for, a seam that validates and lies.
+
+    They run where every write goes through, so the API, the CLI, a bundle
+    import and scaffolding a project all get the same answer. The file is still
+    read back afterwards, which is what stops a hook that adjusted a definition
+    into something Factory cannot load.
+
+    Scenario: A plugin can refuse a definition
+      Given a plugin that refuses any workflow called "forbidden"
+      When I POST a workflow named "forbidden"
+      Then the response is 400
+      And the response carries the plugin's reason
+      And the workflow "forbidden" was not written
+
+    Scenario: A plugin that refuses one name leaves the others alone
+      Given a plugin that refuses any workflow called "forbidden"
+      When I POST a workflow named "allowed"
+      Then the response is 201
+
+    Scenario: A plugin can adjust what is written
+      Given a plugin that describes every workflow it is shown
+      When I POST a workflow named "allowed"
+      Then the response is 201
+      And the stored workflow carries the description the plugin gave it
+
+    Scenario: A plugin can refuse the write itself
+      Given a plugin that refuses to write anything
+      When I POST a workflow named "allowed"
+      Then the response is 400
+      And the workflow "allowed" was not written
+
+    Scenario: A hook that throws refuses rather than writing half of it
+      Given a plugin whose write hook throws
+      When I POST a workflow named "allowed"
+      # A transform that threw was in the middle of deciding. Carrying on would
+      # write the value it may have been about to refuse.
+      Then the response is 400
+      And the workflow "allowed" was not written

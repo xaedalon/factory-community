@@ -190,28 +190,33 @@ onUnmounted(() => store.disconnect())
           data-testid="search"
           aria-label="Search tasks"
           placeholder="Search tasks…"
-          class="w-56 rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] py-1.5 pr-2.5 pl-8 text-sm"
+          class="w-56 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] py-1.5 pr-2.5 pl-8 text-sm placeholder:text-[var(--color-ink-faint)] focus:border-[var(--color-accent)] focus:outline-none"
         />
       </div>
-      <select
-        v-model="filters.state"
-        data-testid="filter-state"
-        class="rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm"
-      >
-        <option v-for="state in STATES" :key="state" :value="state">
-          {{ state === 'all' ? 'All statuses' : HEADINGS[state] ?? state }}
-        </option>
-      </select>
-      <select
-        v-model="filters.workflow"
-        data-testid="filter-workflow"
-        class="rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm"
-      >
-        <option value="all">All workflows</option>
-        <option v-for="workflow in workflows" :key="workflow" :value="workflow">
-          {{ workflow }}
-        </option>
-      </select>
+      <!-- `.field-control` in a fixed-width box rather than on a bare select.
+           The class sets `width: 100%`, and it is declared after Tailwind's
+           utilities in `tokens.css`, so a `w-40` on the select itself would
+           lose the cascade and stretch across the row. The wrapper is what
+           `width: 100%` resolves against. -->
+      <div class="w-40">
+        <select v-model="filters.state" data-testid="filter-state" class="field-control text-sm">
+          <option v-for="state in STATES" :key="state" :value="state">
+            {{ state === 'all' ? 'All statuses' : HEADINGS[state] ?? state }}
+          </option>
+        </select>
+      </div>
+      <div class="w-44">
+        <select
+          v-model="filters.workflow"
+          data-testid="filter-workflow"
+          class="field-control text-sm"
+        >
+          <option value="all">All workflows</option>
+          <option v-for="workflow in workflows" :key="workflow" :value="workflow">
+            {{ workflow }}
+          </option>
+        </select>
+      </div>
 
       <div class="ml-auto flex items-center gap-1 rounded-md border border-[var(--color-line-strong)] p-0.5">
         <button
@@ -323,7 +328,10 @@ onUnmounted(() => store.disconnect())
             class="border-b border-[var(--color-line)] transition-colors hover:bg-[var(--color-veil-weak)]"
             :data-testid="`task-row-${task.name}`"
           >
-            <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
+            <!-- One identifier, on one line. Auto table layout was breaking
+                 "LDG-104" at the hyphen and stacking it, which makes a column
+                 of tickets unreadable and every row taller than it needs. -->
+            <td class="py-3 pr-4 font-mono text-xs whitespace-nowrap text-[var(--color-ink-muted)]">
               {{ task.ticketId ?? '—' }}
             </td>
             <td class="py-3 pr-4">

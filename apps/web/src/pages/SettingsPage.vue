@@ -72,6 +72,13 @@ onMounted(() => {
       {{ settings.error }}
     </p>
 
+    <!-- One group, not four page-level blocks. A column of bordered cards sits
+         8px apart everywhere else in the app — the plugin list, the setup
+         steps, the scope chain — and these were inheriting the 24px that
+         separates unlike sections because they were direct children of
+         `.page-body`. -->
+    <div class="space-y-2">
+
     <!-- A card per setting. These were four unbounded stacks separated by
          whitespace, so a heading, its buttons and the paragraph explaining them
          had nothing saying they belonged together. -->
@@ -261,7 +268,7 @@ onMounted(() => {
       <Tooltip label="Copy the path">
         <button
           type="button"
-          class="flex w-full items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-2 text-left font-mono text-[11px] text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
+          class="flex w-full items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-2 text-left font-mono text-meta text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
           data-testid="copy-settings-file"
           @click="copy(settings.file)"
         >
@@ -271,5 +278,6 @@ onMounted(() => {
         </button>
       </Tooltip>
     </section>
+    </div>
   </div>
 </template>

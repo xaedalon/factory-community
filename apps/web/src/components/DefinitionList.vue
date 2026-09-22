@@ -208,7 +208,7 @@ watch(() => chosen.projectId, reload)
                  someone hunting for a file the tool can see and they cannot. -->
             <span
               v-if="!item.valid"
-              class="ml-2 font-mono text-[10px] text-[var(--color-danger)]"
+              class="ml-2 font-mono text-meta text-[var(--color-danger)]"
               :data-testid="`invalid-${item.name}`"
             >
               does not validate
@@ -222,7 +222,7 @@ watch(() => chosen.projectId, reload)
               :label="`Nothing provides ${item.unavailable.flag} here, so a task cannot pick this up.`"
             >
               <span
-                class="ml-2 inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-ink-faint)]"
+                class="ml-2 inline-flex items-center gap-1 font-mono text-meta text-[var(--color-ink-faint)]"
                 :data-testid="`unavailable-${item.name}`"
               >
                 <AppIcon name="alert" :size="10" />
@@ -232,14 +232,14 @@ watch(() => chosen.projectId, reload)
           </td>
           <td class="py-3 pr-4"><ScopeBadge :scope="item.winner.scope" /></td>
           <td class="py-3 pr-4"><ShadowNotice :shadowed="item.shadowed" /></td>
-          <td class="py-3 font-mono text-[11px] text-[var(--color-ink-faint)]">
+          <td class="py-3 font-mono text-meta text-[var(--color-ink-faint)]">
             {{ item.winner.file }}
           </td>
           <td class="py-3 pl-4 text-right">
             <Tooltip v-if="kind === 'workflow'" label="Download this workflow and its phases as a bundle">
               <button
                 type="button"
-                class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-[10px] text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-accent-text)]"
+                class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-meta text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-accent-text)]"
                 :data-testid="`export-${item.name}`"
                 @click="exportWorkflow(item.name)"
               >

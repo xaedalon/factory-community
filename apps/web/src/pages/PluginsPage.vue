@@ -95,11 +95,11 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
       >
         <div class="flex flex-wrap items-baseline gap-3">
           <span class="value flex-1 truncate" :title="entry.id">{{ entry.name ?? entry.id }}</span>
-          <span v-if="entry.version" class="font-mono text-[10px] text-[var(--color-ink-faint)]">
+          <span v-if="entry.version" class="font-mono text-meta text-[var(--color-ink-faint)]">
             {{ entry.version }}
           </span>
           <span
-            class="inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[10px]"
+            class="inline-flex items-center rounded-md px-2 py-0.5 font-mono text-meta"
             :class="
               entry.source === 'builtin'
                 ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]'
@@ -121,7 +121,7 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
             label="Nothing parses or runs without this, so there is no switch"
           >
             <span
-              class="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-ink-faint)]"
+              class="inline-flex items-center gap-1 font-mono text-meta text-[var(--color-ink-faint)]"
               :data-testid="`plugin-essential-${entry.id}`"
             >
               <AppIcon name="profile" :size="10" />
@@ -163,14 +163,14 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
 
         <p
           v-if="entry.error"
-          class="mt-1 font-mono text-[11px] text-[var(--color-danger)]"
+          class="mt-1 font-mono text-meta text-[var(--color-danger)]"
           :data-testid="`plugin-error-${entry.id}`"
         >
           {{ entry.error }}
         </p>
         <p
           v-else-if="entry.restartRequired"
-          class="mt-1 font-mono text-[10px] text-[var(--color-warn)]"
+          class="mt-1 font-mono text-meta text-[var(--color-warn)]"
           :data-testid="`plugin-restart-${entry.id}`"
         >
           off — restart to unload
@@ -185,7 +185,7 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
 
         <p
           v-if="entry.provides.length > 0"
-          class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-[var(--color-ink-muted)]"
+          class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-meta text-[var(--color-ink-muted)]"
         >
           <span
             v-for="given in entry.provides"
@@ -222,12 +222,12 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
           </span>
           <span
             v-if="provider.provisional"
-            class="font-mono text-[10px] text-[var(--color-warn)]"
+            class="font-mono text-meta text-[var(--color-warn)]"
             :data-testid="`provisional-${provider.id}`"
           >
             unverified descriptor
           </span>
-          <span class="ml-auto font-mono text-[10px] text-[var(--color-ink-faint)]">
+          <span class="ml-auto font-mono text-meta text-[var(--color-ink-faint)]">
             {{ Object.entries(provider.models).map(([role, id]) => `${role}=${id}`).join('  ') }}
           </span>
         </li>

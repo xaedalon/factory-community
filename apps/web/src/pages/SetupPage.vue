@@ -105,7 +105,7 @@ onMounted(load)
               {{ item.title }}
               <span
                 v-if="!item.done && item.essential"
-                class="ml-1.5 inline-flex items-center gap-1 rounded bg-[var(--color-danger)]/10 px-1.5 py-0.5 font-mono text-[10px] text-[var(--color-danger)]"
+                class="ml-1.5 inline-flex items-center gap-1 rounded bg-[var(--color-danger)]/10 px-1.5 py-0.5 font-mono text-meta text-[var(--color-danger)]"
                 ><AppIcon name="alert" :size="10" />essential</span
               >
             </p>
@@ -127,7 +127,7 @@ onMounted(load)
               <button
                 v-if="action.command"
                 type="button"
-                class="mt-1 flex w-full items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-2 text-left font-mono text-[11px] text-[var(--color-ink)] transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-veil)]"
+                class="mt-1 flex w-full items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-2 text-left font-mono text-meta text-[var(--color-ink)] transition-colors hover:border-[var(--color-line-strong)] hover:bg-[var(--color-veil)]"
                 :data-testid="`command-${item.id}-${index}`"
                 @click="copy(action.command)"
               >
@@ -145,7 +145,7 @@ onMounted(load)
 
             <pre
               v-if="action.config"
-              class="mt-1 overflow-x-auto rounded-md bg-[var(--color-base)] px-3 py-2 font-mono text-[11px] text-[var(--color-ink-muted)]"
+              class="mt-1 overflow-x-auto rounded-md bg-[var(--color-base)] px-3 py-2 font-mono text-meta text-[var(--color-ink-muted)]"
               :data-testid="`config-${item.id}-${index}`"
             >{{ action.config }}</pre>
 

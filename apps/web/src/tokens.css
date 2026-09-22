@@ -115,6 +115,25 @@
   --text-label--line-height: 1;
   --text-label--letter-spacing: 0.08em;
 
+  /*
+   * The other mono rank: facts *about* a thing rather than the thing itself.
+   *
+   * A version, a count, a byte size, a timestamp, a state. It was spelled
+   * `text-[10px]` forty-five times and `text-[11px]` twenty-three more — the
+   * same rank written two ways, which is the half of the audit's type finding
+   * that `--text-label` did not cover.
+   *
+   * Same size as `label` and deliberately not the same utility: a label is
+   * tracked and upper-cased because it names a column, and a version number
+   * spaced out like a heading is just harder to read.
+   *
+   * Above it sits `.value` at 13px, which is for text a person will later see
+   * in a file — a name, a path, a command. That distinction is worth keeping:
+   * one is content, this is the annotation beside it.
+   */
+  --text-meta: 11px;
+  --text-meta--line-height: 1.35;
+
   --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 

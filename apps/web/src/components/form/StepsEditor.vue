@@ -115,7 +115,7 @@ const fieldsOf = (step: Step): Record<string, unknown> => {
         </span>
         <span
           v-if="kindFor(step.uses)?.runnable === false"
-          class="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-warn)]"
+          class="inline-flex items-center gap-1 font-mono text-meta text-[var(--color-warn)]"
           :data-testid="`step-${index}-not-runnable`"
         >
           <AppIcon name="alert" :size="10" />

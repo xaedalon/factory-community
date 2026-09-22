@@ -144,7 +144,7 @@ onMounted(load)
           <div class="flex shrink-0 items-center gap-2">
             <Tooltip v-if="!project.isRepository" label="No .git directory, so it cannot use worktrees">
               <span
-                class="flex items-center gap-1 rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-[10px] text-[var(--color-warn)]"
+                class="flex items-center gap-1 rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-meta text-[var(--color-warn)]"
                 :data-testid="`not-a-repo-${project.name}`"
               >
                 <AppIcon name="alert" :size="10" />
@@ -157,7 +157,7 @@ onMounted(load)
               label="Work happens in the repository itself, so one task runs at a time"
             >
               <span
-                class="flex items-center gap-1 rounded-md bg-[var(--color-veil-strong)] px-2 py-0.5 font-mono text-[10px] text-[var(--color-ink-muted)]"
+                class="flex items-center gap-1 rounded-md bg-[var(--color-veil-strong)] px-2 py-0.5 font-mono text-meta text-[var(--color-ink-muted)]"
                 :data-testid="`shared-checkout-${project.name}`"
               >
                 <AppIcon name="folder" :size="10" />
@@ -170,7 +170,7 @@ onMounted(load)
               label="Environment workflows are copied in for this project to own"
             >
               <span
-                class="flex items-center gap-1 rounded-md bg-[var(--color-info)]/10 px-2 py-0.5 font-mono text-[10px] text-[var(--color-info)]"
+                class="flex items-center gap-1 rounded-md bg-[var(--color-info)]/10 px-2 py-0.5 font-mono text-meta text-[var(--color-info)]"
                 :data-testid="`environments-${project.name}`"
               >
                 <AppIcon name="environment" :size="10" />
@@ -183,7 +183,7 @@ onMounted(load)
               label="Agents here are not confined to the workspace"
             >
               <span
-                class="flex items-center gap-1 rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-[10px] text-[var(--color-warn)]"
+                class="flex items-center gap-1 rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-meta text-[var(--color-warn)]"
                 :data-testid="`full-access-${project.name}`"
               >
                 <AppIcon name="profile" :size="10" />
@@ -193,7 +193,7 @@ onMounted(load)
 
             <Tooltip label="The branch work starts from">
               <span
-                class="flex items-center gap-1 font-mono text-[11px] text-[var(--color-ink-faint)]"
+                class="flex items-center gap-1 font-mono text-meta text-[var(--color-ink-faint)]"
               >
                 <AppIcon name="branch" :size="11" />
                 {{ project.defaultBranch }}
@@ -202,7 +202,7 @@ onMounted(load)
 
             <!-- Fixed width, so the count sits in the same place in every row
                  rather than shifting with the number of digits. -->
-            <span class="w-16 text-right font-mono text-[11px] text-[var(--color-ink-faint)]">
+            <span class="w-16 text-right font-mono text-meta text-[var(--color-ink-faint)]">
               {{ project.tasks }} task{{ project.tasks === 1 ? '' : 's' }}
             </span>
           </div>

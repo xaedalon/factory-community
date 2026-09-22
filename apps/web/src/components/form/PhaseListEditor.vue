@@ -49,14 +49,14 @@ function move(index: number, delta: number): void {
       class="flex items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-1.5"
       :data-testid="`phase-${name}`"
     >
-      <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">{{ index + 1 }}</span>
+      <span class="font-mono text-meta text-[var(--color-ink-faint)]">{{ index + 1 }}</span>
       <span class="value flex-1">{{ name }}</span>
 
       <ScopeBadge v-if="known.get(name)" :scope="known.get(name)!.winner.scope" />
       <template v-else>
         <Tooltip label="Nothing in this project's scope chain defines it, so the workflow cannot run">
           <span
-            class="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-danger)]"
+            class="inline-flex items-center gap-1 font-mono text-meta text-[var(--color-danger)]"
             :data-testid="`phase-${name}-missing`"
           >
             <AppIcon name="alert" :size="10" />
@@ -71,7 +71,7 @@ function move(index: number, delta: number): void {
           :href="`/phases/new?name=${encodeURIComponent(name)}`"
           target="_blank"
           rel="noopener"
-          class="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-accent-text)] hover:underline"
+          class="inline-flex items-center gap-1 font-mono text-meta text-[var(--color-accent-text)] hover:underline"
           :data-testid="`phase-${name}-create`"
         >
           create

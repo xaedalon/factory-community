@@ -73,7 +73,7 @@ watch(() => chosen.projectId, load)
           "
         >
           <span
-            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--color-line)] font-mono text-[11px] text-[var(--color-ink-faint)]"
+            class="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-[var(--color-line)] font-mono text-meta text-[var(--color-ink-faint)]"
           >
             {{ index + 1 }}
           </span>
@@ -85,7 +85,7 @@ watch(() => chosen.projectId, load)
         >
           {{ scope.root }}
         </span>
-        <span class="flex shrink-0 gap-3 font-mono text-[11px]">
+        <span class="flex shrink-0 gap-3 font-mono text-meta">
           <Tooltip :label="scope.exists ? 'This directory is there' : 'Nothing at this path yet'">
             <span
               class="inline-flex items-center gap-1"

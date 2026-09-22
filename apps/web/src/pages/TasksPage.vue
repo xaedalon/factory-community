@@ -393,7 +393,7 @@ onUnmounted(() => store.disconnect())
                   />
                 </span>
                 <span
-                  class="font-mono text-[11px] text-[var(--color-ink-muted)]"
+                  class="font-mono text-meta text-[var(--color-ink-muted)]"
                   :data-testid="`progress-${task.name}`"
                 >
                   {{ task.progress.completed }}/{{ task.progress.total }} phases
@@ -427,7 +427,7 @@ onUnmounted(() => store.disconnect())
           <span class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
             {{ HEADINGS[column] }}
           </span>
-          <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">
+          <span class="font-mono text-meta text-[var(--color-ink-faint)]">
             {{ inColumn(column).length }}
           </span>
         </header>
@@ -439,7 +439,7 @@ onUnmounted(() => store.disconnect())
           :data-testid="`card-${task.name}`"
         >
           <p class="text-xs">{{ task.name }}</p>
-          <p class="mt-1 font-mono text-[10px] text-[var(--color-ink-faint)]">
+          <p class="mt-1 font-mono text-meta text-[var(--color-ink-faint)]">
             {{ store.currentWorkflow(task) ?? 'no workflow' }}
           </p>
           <!-- The interface reference ends every card with "0/7 phases  0%".
@@ -462,10 +462,10 @@ onUnmounted(() => store.disconnect())
               />
             </span>
             <div class="mt-1 flex items-center justify-between">
-              <span class="font-mono text-[10px] text-[var(--color-ink-muted)]">
+              <span class="font-mono text-meta text-[var(--color-ink-muted)]">
                 {{ task.progress.completed }}/{{ task.progress.total }} phases
               </span>
-              <span class="font-mono text-[10px] text-[var(--color-ink-muted)]">
+              <span class="font-mono text-meta text-[var(--color-ink-muted)]">
                 {{ percent(task) }}%
               </span>
             </div>

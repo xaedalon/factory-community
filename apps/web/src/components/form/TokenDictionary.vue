@@ -68,7 +68,7 @@ const { copied, copy } = useClipboard()
 
     <div class="border-t border-[var(--color-line)] px-3 py-2">
       <div v-for="section in sections" :key="section.namespace" class="mb-3 last:mb-0">
-        <p class="font-mono text-[11px] text-[var(--color-ink)]">
+        <p class="font-mono text-meta text-[var(--color-ink)]">
           {{ section.namespace }}.*
           <span class="font-sans text-[var(--color-ink-faint)]">— {{ section.summary }}</span>
         </p>
@@ -90,7 +90,7 @@ const { copied, copy } = useClipboard()
           >
             <button
               type="button"
-              class="shrink-0 rounded px-1 font-mono text-[11px] text-[var(--color-accent-text)] hover:bg-[var(--color-veil-strong)]"
+              class="shrink-0 rounded px-1 font-mono text-meta text-[var(--color-accent-text)] hover:bg-[var(--color-veil-strong)]"
               :data-testid="`token-${section.namespace}-${entry.key}`"
               :title="copied === token(section.namespace, entry.key) ? 'Copied' : 'Copy'"
               @click="copy(token(section.namespace, entry.key))"

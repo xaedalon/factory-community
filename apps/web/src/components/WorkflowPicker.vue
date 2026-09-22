@@ -170,7 +170,7 @@ function move(index: number, delta: number): void {
           :title="entry.enabled ? 'Still to run' : 'Not going to run'"
           @change="toggle(index)"
         />
-        <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">{{ index + 1 }}</span>
+        <span class="font-mono text-meta text-[var(--color-ink-faint)]">{{ index + 1 }}</span>
         <span class="value flex-1" :data-testid="`workflow-${index}-name`">{{ entry.workflow }}</span>
 
         <!-- Unticked-because-it-ran and unticked-because-I-unticked-it look
@@ -178,7 +178,7 @@ function move(index: number, delta: number): void {
              of the feature. -->
         <span
           v-if="entry.ran"
-          class="font-mono text-[10px] text-[var(--color-ink-faint)]"
+          class="font-mono text-meta text-[var(--color-ink-faint)]"
           :data-testid="`workflow-${index}-ran`"
           title="It has run, so it cannot be taken off the list"
         >
@@ -190,7 +190,7 @@ function move(index: number, delta: number): void {
              from here. Saying so now costs a span. -->
         <span
           v-else-if="available.length > 0"
-          class="font-mono text-[10px] text-[var(--color-danger)]"
+          class="font-mono text-meta text-[var(--color-danger)]"
           :data-testid="`workflow-${index}-missing`"
         >
           no such workflow

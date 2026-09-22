@@ -118,7 +118,7 @@ const current = computed(() => route.path)
         </ul>
       </div>
 
-      <div class="mt-auto px-5 py-4 font-mono text-[10px] text-[var(--color-ink-faint)]">
+      <div class="mt-auto px-5 py-4 font-mono text-meta text-[var(--color-ink-faint)]">
         Don't replace your tools.<br />Orchestrate them.
       </div>
     </nav>

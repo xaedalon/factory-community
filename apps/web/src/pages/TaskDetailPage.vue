@@ -692,7 +692,7 @@ const stepTone: Record<string, string> = {
             :label="`This task has earned the ${flag} condition`"
           >
             <span
-              class="rounded-md bg-[var(--color-ok)]/10 px-2 py-0.5 font-mono text-[11px] text-[var(--color-ok)]"
+              class="rounded-md bg-[var(--color-ok)]/10 px-2 py-0.5 font-mono text-meta text-[var(--color-ok)]"
               :data-testid="`flag-${flag}`"
             >
               {{ flag }}
@@ -739,14 +739,14 @@ const stepTone: Record<string, string> = {
               :data-testid="`evidence-${item.name}`"
             >
               <header class="flex items-center gap-2 px-3 py-2">
-                <span class="font-mono text-[11px]">{{ item.name }}</span>
-                <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">{{ item.phase }}</span>
+                <span class="font-mono text-meta">{{ item.name }}</span>
+                <span class="font-mono text-meta text-[var(--color-ink-faint)]">{{ item.phase }}</span>
                 <!-- Was inert truncated text. The path is the one thing in this
                      header that names something you might want to open, so it is
                      the link to the readable version. -->
                 <RouterLink
                   :to="`/tasks/${id}/artifacts/${encodeURIComponent(item.name)}`"
-                  class="truncate font-mono text-[11px] text-[var(--color-ink-muted)] hover:text-[var(--color-accent-text)] hover:underline"
+                  class="truncate font-mono text-meta text-[var(--color-ink-muted)] hover:text-[var(--color-accent-text)] hover:underline"
                   :title="`Read ${item.name}`"
                   :data-testid="`evidence-${item.name}-open`"
                 >
@@ -754,14 +754,14 @@ const stepTone: Record<string, string> = {
                 </RouterLink>
                 <span
                   v-if="item.missing"
-                  class="ml-auto rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-[10px] text-[var(--color-warn)]"
+                  class="ml-auto rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-meta text-[var(--color-warn)]"
                 >
                   never produced
                 </span>
               </header>
               <pre
                 v-if="item.content"
-                class="max-h-72 overflow-auto border-t border-[var(--color-line)] p-3 font-mono text-[11px] whitespace-pre-wrap text-[var(--color-ink-muted)]"
+                class="max-h-72 overflow-auto border-t border-[var(--color-line)] p-3 font-mono text-meta whitespace-pre-wrap text-[var(--color-ink-muted)]"
               >{{ item.content }}</pre>
               <p v-if="item.truncated" class="px-3 pb-2 text-[11px] text-[var(--color-warn)]">
                 Showing the first part; the file on disk is {{ item.bytes }} bytes.
@@ -784,7 +784,7 @@ const stepTone: Record<string, string> = {
                     :style="{ width: `${percent}%` }"
                   />
                 </span>
-                <span class="font-mono text-[10px] text-[var(--color-ink-muted)]">
+                <span class="font-mono text-meta text-[var(--color-ink-muted)]">
                   {{ detail.progress.completed }}/{{ detail.progress.total }} phases · {{ percent }}%
                 </span>
               </span>
@@ -852,16 +852,16 @@ const stepTone: Record<string, string> = {
                   :data-testid="`step-${step.describe}`"
                   @click="showLog(step.id)"
                 >
-                  <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">{{ step.phase }}</span>
+                  <span class="font-mono text-meta text-[var(--color-ink-faint)]">{{ step.phase }}</span>
                   <span class="text-xs">{{ step.describe }}</span>
                   <span
                     v-if="step.attempts > 1"
-                    class="font-mono text-[10px] text-[var(--color-warn)]"
+                    class="font-mono text-meta text-[var(--color-warn)]"
                     :data-testid="`attempts-${step.describe}`"
                   >
                     {{ step.attempts }} attempts
                   </span>
-                  <span class="ml-auto font-mono text-[10px]" :class="stepTone[step.state]">
+                  <span class="ml-auto font-mono text-meta" :class="stepTone[step.state]">
                     {{ step.state }}<template v-if="step.exitCode !== undefined && step.exitCode !== 0">
                       · exit {{ step.exitCode }}</template>
                   </span>
@@ -869,7 +869,7 @@ const stepTone: Record<string, string> = {
 
                 <div v-if="openStep === step.id && log" class="mt-2" :data-testid="`log-${step.describe}`">
                   <pre
-                    class="max-h-72 overflow-auto rounded-md bg-[var(--color-base)] p-3 font-mono text-[11px] whitespace-pre-wrap text-[var(--color-ink-muted)]"
+                    class="max-h-72 overflow-auto rounded-md bg-[var(--color-base)] p-3 font-mono text-meta whitespace-pre-wrap text-[var(--color-ink-muted)]"
                   ><template v-for="(line, index) in log.lines" :key="index"><span :class="line.stream === 'stderr' ? 'text-[var(--color-warn)]' : ''">{{ line.text }}</span></template></pre>
                   <p
                     v-if="log.dropped > 0"
@@ -921,7 +921,7 @@ const stepTone: Record<string, string> = {
                  task in the project. -->
             <span
               v-if="detail.workspace.inWorktree"
-              class="rounded-md bg-[var(--color-ok)]/10 px-2 py-0.5 font-mono text-[10px] text-[var(--color-ok)]"
+              class="rounded-md bg-[var(--color-ok)]/10 px-2 py-0.5 font-mono text-meta text-[var(--color-ok)]"
               data-testid="workspace-worktree"
             >
               worktree
@@ -931,7 +931,7 @@ const stepTone: Record<string, string> = {
             <Tooltip label="Copy the path">
               <button
                 type="button"
-                class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-2 py-1.5 text-left font-mono text-[11px] text-[var(--color-ink-muted)] transition-colors hover:text-[var(--color-ink)]"
+                class="mt-2 flex w-full items-center gap-1.5 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-2 py-1.5 text-left font-mono text-meta text-[var(--color-ink-muted)] transition-colors hover:text-[var(--color-ink)]"
                 :title="detail.workspace.path"
                 data-testid="workspace-path"
                 @click="copy(detail.workspace.path)"
@@ -942,7 +942,7 @@ const stepTone: Record<string, string> = {
             </Tooltip>
             <span
               v-if="copied === detail.workspace.path"
-              class="mt-1 block font-mono text-[10px] text-[var(--color-ink-faint)]"
+              class="mt-1 block font-mono text-meta text-[var(--color-ink-faint)]"
               data-testid="workspace-copied"
             >
               copied
@@ -975,7 +975,7 @@ const stepTone: Record<string, string> = {
             </button>
             <span
               v-if="justCopied"
-              class="font-mono text-[10px] text-[var(--color-ink-faint)]"
+              class="font-mono text-meta text-[var(--color-ink-faint)]"
               data-testid="workspace-command-copied"
             >
               copied
@@ -1088,22 +1088,22 @@ const stepTone: Record<string, string> = {
               :data-testid="`artifact-${item.name}`"
             >
               <span class="value flex-1 text-[var(--color-accent-text)]">{{ item.name }}</span>
-              <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">{{ item.phase }}</span>
+              <span class="font-mono text-meta text-[var(--color-ink-faint)]">{{ item.phase }}</span>
               <span
                 v-if="item.missing"
-                class="rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-[10px] text-[var(--color-warn)]"
+                class="rounded-md bg-[var(--color-warn)]/10 px-2 py-0.5 font-mono text-meta text-[var(--color-warn)]"
               >
                 never produced
               </span>
               <template v-else>
                 <span
                   v-if="item.runs > 1"
-                  class="font-mono text-[10px] text-[var(--color-ink-faint)]"
+                  class="font-mono text-meta text-[var(--color-ink-faint)]"
                   :data-testid="`artifact-${item.name}-runs`"
                 >
                   {{ item.runs }} versions
                 </span>
-                <span class="font-mono text-[10px] text-[var(--color-ink-muted)]">
+                <span class="font-mono text-meta text-[var(--color-ink-muted)]">
                   {{ Math.round(item.bytes / 1024) }} KB
                 </span>
               </template>
@@ -1169,12 +1169,12 @@ const stepTone: Record<string, string> = {
                 class="border-b border-[var(--color-line)] pb-1.5 text-xs text-[var(--color-ink-muted)] last:border-0"
               >
                 <span class="flex items-center gap-1.5">
-                  <span class="font-mono text-[11px]">{{ entry.action }}</span>
-                  <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">
+                  <span class="font-mono text-meta">{{ entry.action }}</span>
+                  <span class="font-mono text-meta text-[var(--color-ink-faint)]">
                     {{ entry.from }} → {{ entry.to }}
                   </span>
                 </span>
-                <span class="mt-0.5 block font-mono text-[10px] text-[var(--color-ink-faint)]">
+                <span class="mt-0.5 block font-mono text-meta text-[var(--color-ink-faint)]">
                   {{ entry.at }}
                 </span>
                 <span v-if="entry.detail" class="mt-0.5 block leading-relaxed">

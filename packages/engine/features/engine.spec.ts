@@ -14,6 +14,7 @@ import type {
   ResolvedPlan,
   StopReport,
   Run,
+  Scheduling,
   Task,
 } from '@factory/core'
 import {
@@ -162,8 +163,12 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     clears: [],
     phases,
   })
-  const givePlan = (workflow: string, phases: ResolvedPhase[]): void => {
-    plans.set(workflow, { plan: planOf(workflow, phases), problems: [] })
+  const givePlan = (
+    workflow: string,
+    phases: ResolvedPhase[],
+    scheduling: Scheduling = 'sequential',
+  ): void => {
+    plans.set(workflow, { plan: { ...planOf(workflow, phases), scheduling }, problems: [] })
   }
 
   const assign = (...workflows: string[]): void => {
@@ -1449,6 +1454,100 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the task is queued', queue)
       When('the engine works on it', runEngine)
       Then('the task is blocked', () => expect(task.state).toBe('blocked'))
+    })
+  })
+  Rule('a sequential workflow runs alone, wherever it is in the task\'s list', ({
+    RuleScenario,
+  }) => {
+    let ledger = ''
+    let second: Task
+
+    /**
+     * A step that writes when it started and when it stopped.
+     *
+     * Two of these overlap if and only if a `start` follows a `start`, which is
+     * a question the file answers without anybody measuring a clock. The sleep
+     * is what gives them time to overlap; without it, "did not overlap" would
+     * pass for a scheduler that does nothing at all — which is why the parallel
+     * scenario below reads the same file and expects the opposite.
+     */
+    const recording = (who: string): ResolvedPhase =>
+      shellPhase('work', `echo "${who} start" >> ${ledger}; sleep 0.2; echo "${who} end" >> ${ledger}`)
+
+    const lines = (): string[] =>
+      readFileSync(ledger, 'utf8').trim().split('\n').filter((line) => line !== '')
+    const who = (index: number): string => lines()[index]?.split(' ')[0] ?? ''
+
+    /** A second task, in the same project as the first. */
+    const another = (name: string): Task =>
+      tasks.create({ name, projectId: tasks.get(task.id)?.projectId as string })
+
+    const givenTwo = (lane: Scheduling, workflows: (name: string) => string[]) => (): void => {
+      ledger = join(work, 'ledger.txt')
+      second = another('Ship it')
+      givePlan('first', [shellPhase('quick', 'true')], 'parallel')
+      plans.set('one-work', { plan: { ...planOf('one-work', [recording('one')]), scheduling: lane }, problems: [] })
+      plans.set('two-work', { plan: { ...planOf('two-work', [recording('two')]), scheduling: lane }, problems: [] })
+      task = tasks.assign(task.id, workflows('one'))
+      second = tasks.assign(second.id, workflows('two'))
+      task = tasks.act(task.id, 'queue')
+      second = tasks.act(second.id, 'queue')
+    }
+
+    const bothAtOnce = async (): Promise<void> => {
+      const [one, two] = await Promise.all([engine.run(task.id), engine.run(second.id)])
+      task = one.task
+      second = two.task
+    }
+
+    RuleScenario('Two tasks reaching a sequential workflow do not overlap', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'two tasks whose second workflow is sequential and records when it ran',
+        givenTwo('sequential', (name) => ['first', `${name}-work`]),
+      )
+      When('the engine works on both at once', bothAtOnce)
+      Then("the second workflow's two runs did not overlap", () => {
+        expect(lines()).toHaveLength(4)
+        expect(who(0)).toBe(who(1))
+        expect(who(2)).toBe(who(3))
+      })
+      And('both tasks are "done"', () => {
+        expect(task.state).toBe('done')
+        expect(second.state).toBe('done')
+      })
+    })
+
+    RuleScenario('The one that waited says so', ({ Given, When, Then }) => {
+      Given(
+        'two tasks whose second workflow is sequential and records when it ran',
+        givenTwo('sequential', (name) => ['first', `${name}-work`]),
+      )
+      When('the engine works on both at once', bothAtOnce)
+      Then('one of the runs says it waited for the sequential lane', () => {
+        const said = [task.id, second.id].flatMap((id) =>
+          runs.forTask(id).flatMap((run) => runs.logs(run.id).lines.map((line) => line.text)),
+        )
+        expect(said.some((text) => text.includes('waiting: another sequential workflow'))).toBe(
+          true,
+        )
+      })
+    })
+
+    RuleScenario('Parallel workflows are still parallel', ({ Given, When, Then }) => {
+      Given(
+        'two tasks whose only workflow is parallel and records when it ran',
+        givenTwo('parallel', (name) => [`${name}-work`]),
+      )
+      When('the engine works on both at once', bothAtOnce)
+      Then('the two runs overlapped', () => {
+        expect(lines()).toHaveLength(4)
+        expect(who(0)).not.toBe(who(1))
+      })
     })
   })
 })

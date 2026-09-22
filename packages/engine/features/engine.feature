@@ -573,3 +573,37 @@ Feature: Turning a task into runs
       When the engine works on it
       # Unchanged: parking is for the case a person can actually resolve.
       Then the task is blocked
+
+  Rule: a sequential workflow runs alone, wherever it is in the task's list
+
+    `scheduling: sequential` was enforced only where a task was admitted. After
+    that the task stays `running` from its first workflow to its last, and
+    nothing looked at the field again — so a sequential workflow anywhere but
+    first was never serialised against anything. Measured on a real pipeline:
+    two tasks whose fourth workflow was `merge` ran their merges 20ms apart,
+    twice, and left the repository with a staged deletion of a file that had
+    just merged cleanly. The sample repository's answer was to take a `mkdir`
+    lock inside the workflow, which is the workaround this makes unnecessary.
+
+    Held around one workflow's execution, which is the unit the field is about,
+    and released the moment that execution ends — including when it parks at an
+    approval gate. Holding a lane across a wait for a person is how one
+    forgotten approval freezes every sequential workflow in an installation.
+
+    Scenario: Two tasks reaching a sequential workflow do not overlap
+      Given two tasks whose second workflow is sequential and records when it ran
+      When the engine works on both at once
+      Then the second workflow's two runs did not overlap
+      And both tasks are "done"
+
+    Scenario: The one that waited says so
+      Given two tasks whose second workflow is sequential and records when it ran
+      When the engine works on both at once
+      Then one of the runs says it waited for the sequential lane
+
+    Scenario: Parallel workflows are still parallel
+      Given two tasks whose only workflow is parallel and records when it ran
+      When the engine works on both at once
+      # The other half of the guarantee: serialising everything would be a
+      # correct-looking scheduler that runs one thing at a time.
+      Then the two runs overlapped

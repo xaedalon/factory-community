@@ -11,6 +11,17 @@ import type { ExecutionProfile } from '../security/profile.js'
  * spell it the same way. Nothing here touches the filesystem — that belongs to
  * whoever writes the row.
  */
+/**
+ * How many hues a project's square can be.
+ *
+ * The real source of truth is `--color-project-1` to `-6` in the board's
+ * `tokens.css`, which neither this package nor the daemon can import — so the
+ * number is written here for the sides that validate it, and the board keeps
+ * its own copy for the sides that draw it. If a seventh hue is ever added it
+ * has to be added in both, and the store will refuse it until it is.
+ */
+export const PROJECT_TONES = 6
+
 export interface Project {
   readonly id: string
   /** Unique, and what a person types. */
@@ -61,6 +72,17 @@ export interface Project {
    * one place the order is written.
    */
   readonly profile?: ExecutionProfile
+  /**
+   * The hue this project's square uses, 1 to 6, when it has chosen one.
+   *
+   * Absent means derived from the name, which is what every project did before
+   * this existed and what a new one still does. An index into the closed set of
+   * `--color-project-N` hues rather than a colour, so a project cannot sit
+   * outside the palette.
+   */
+  readonly tone?: number
+  /** The letters on the square, when chosen. Absent means derived from the name. */
+  readonly initials?: string
   /**
    * Directories this project has allowed beyond its workspace, for good.
    *

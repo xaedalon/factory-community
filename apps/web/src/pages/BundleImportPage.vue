@@ -12,6 +12,8 @@ import {
 } from '../api/client.js'
 import { useProjects } from '../stores/projects.js'
 import PageHeader from '../components/PageHeader.vue'
+import AppButton from '../components/AppButton.vue'
+import AppIcon from '../components/AppIcon.vue'
 import FieldRow from '../components/form/FieldRow.vue'
 import SelectInput from '../components/form/SelectInput.vue'
 import TextInput from '../components/form/TextInput.vue'
@@ -116,8 +118,12 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
     subtitle="One file carrying a workflow and everything it needs."
   />
 
-  <div class="max-w-4xl space-y-6 px-8 py-6">
-    <FieldRow label="File">
+  <div class="page-body max-w-4xl">
+    <FieldRow
+      label="File"
+      icon="import"
+      hint="A bundle is one YAML file carrying a workflow and every phase and agent it references."
+    >
       <input
         type="file"
         accept=".yaml,.yml,text/yaml"
@@ -130,7 +136,7 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
       </p>
     </FieldRow>
 
-    <FieldRow label="Or paste">
+    <FieldRow label="Or paste" icon="edit" hint="The same thing, if it came to you as text rather than a file.">
       <textarea
         v-model="text"
         rows="6"
@@ -140,7 +146,7 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
       />
     </FieldRow>
 
-    <FieldRow label="Into" hint="Where the definitions will be written.">
+    <FieldRow label="Into" icon="folder" hint="Which scope the definitions are written to. The Scopes page says which one wins when a name exists twice.">
       <SelectInput
         v-model="targetScope"
         :options="scopes.map((scope) => scope.kind)"
@@ -150,7 +156,8 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
 
     <FieldRow
       label="On conflict"
-      hint="Fail leaves everything untouched. Overwrite keeps the previous version in .trash."
+      icon="alert"
+      hint="Fail leaves everything untouched. Skip takes only what is new. Overwrite replaces, keeping the previous version in .trash."
     >
       <SelectInput
         v-model="policy"
@@ -161,7 +168,8 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
 
     <FieldRow
       label="Prefix"
-      hint="Rename everything on the way in, rewriting references between them. Use it when a name is already taken."
+      icon="edit"
+      hint="Renames everything on the way in and rewrites the references between them. Use it when a name is already taken."
     >
       <TextInput v-model="prefix" mono placeholder="acme-" id="import-prefix" />
     </FieldRow>
@@ -179,38 +187,48 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
       <p
         v-for="(problem, index) in problems"
         :key="index"
-        class="text-xs"
+        class="flex items-start gap-1.5 text-xs leading-relaxed"
         :class="
           problem.severity === 'error' ? 'text-[var(--color-danger)]' : 'text-[var(--color-warn)]'
         "
       >
+        <AppIcon name="alert" :size="12" class="mt-0.5" />
         {{ problem.message }}
       </p>
     </div>
 
     <section v-if="result && result.plan.items.length > 0">
-      <h2 class="mb-2 font-mono text-[11px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+      <h2 class="mb-2 font-mono text-labelst text-[var(--color-ink-faint)] uppercase">
         {{ imported ? 'Imported' : 'Would import' }} · {{ result.plan.entry }}
       </h2>
       <ImportPlanTable :items="result.plan.items" />
     </section>
 
-    <div v-if="imported" class="text-sm text-[var(--color-ok)]" data-testid="imported">
-      Wrote {{ result?.written.length ?? 0 }} file(s).
-      <RouterLink to="/workflows" class="ml-2 text-[var(--color-accent)] hover:underline">
+    <div
+      v-if="imported"
+      class="flex items-center gap-2 rounded-xl border border-[var(--color-ok)]/40 bg-[var(--color-ok)]/5 px-4 py-3 text-sm text-[var(--color-ok)]"
+      data-testid="imported"
+    >
+      <AppIcon name="check" />
+      <span class="flex-1">Wrote {{ result?.written.length ?? 0 }} file(s).</span>
+      <RouterLink
+        to="/workflows"
+        class="inline-flex items-center gap-1.5 text-[var(--color-accent-text)] hover:underline"
+      >
         Back to workflows
+        <AppIcon name="go" :size="12" />
       </RouterLink>
     </div>
 
-    <button
+    <AppButton
       v-else
-      type="button"
+      :label="busy ? 'Working…' : 'Import'"
+      icon="import"
+      tone="primary"
       :disabled="busy || result === undefined || blocked()"
-      class="rounded-md bg-[var(--color-accent)] px-4 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+      hint="Write these definitions into the chosen scope"
       data-testid="import-apply"
       @click="apply"
-    >
-      {{ busy ? 'Working…' : 'Import' }}
-    </button>
+    />
   </div>
 </template>

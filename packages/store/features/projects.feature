@@ -120,6 +120,132 @@ Feature: Projects — the repositories Factory works in
     When I turn worktrees off on a project that does not exist
     Then it is refused
 
+  Rule: a project can be renamed, and its branch re-pointed
+
+    A project is identified by what it is, not by what it was called when
+    somebody typed it in. Renaming and re-pointing were the two fields a person
+    could only change by removing the project and adding it again — which nulls
+    the `project_id` of every task that ever ran in it, so the record of the
+    work survives pointing at nothing.
+
+    The branch matters more than it looks. Aiming Factory's merges somewhere
+    other than `main` is the obvious way to keep a published repository's
+    default branch clean, and until now that cost you every task in the project.
+
+    The path is deliberately not in this list. Worktree roots are derived from
+    it and every run that ever happened recorded it, so a project that moves is
+    a different project, and saying so is kinder than pretending otherwise.
+
+    Scenario: A project can be renamed
+      Given the project "factory" exists
+      When I rename it to "factory-core"
+      Then the project is called "factory-core"
+      And its tasks still belong to it
+
+    Scenario: Renaming is announced
+      Given the project "factory" exists
+      When I rename it to "factory-core"
+      Then a "project.changed" event says so
+
+    Scenario: A name still has to be unique
+      Given the project "factory" exists
+      And the project "notes" exists there
+      When I rename "notes" to "factory"
+      Then it is refused
+
+    Scenario: A project keeps its name when renamed to what it already is
+      Given the project "factory" exists
+      When I rename it to "factory"
+      Then the project is called "factory"
+
+    Scenario: An empty name is refused
+      Given the project "factory" exists
+      When I rename it to ""
+      Then it is refused
+
+    Scenario: The branch work starts from can be re-pointed
+      Given the project "factory" exists
+      When I point it at the branch "develop"
+      Then the project's branch is "develop"
+
+    Scenario: Re-pointing the branch is announced
+      Given the project "factory" exists
+      When I point it at the branch "develop"
+      Then a "project.changed" event says so
+
+    Scenario: An empty branch is refused
+      Given the project "factory" exists
+      When I point it at the branch ""
+      Then it is refused
+
+    Scenario: Renaming a project that is not there is refused
+      When I rename a project that does not exist
+      Then it is refused
+
+  Rule: a project can choose its own square, or let the name decide
+
+    The rail draws a coloured square with two letters, and both were a pure
+    function of the name — consistent everywhere, storing nothing, needing no
+    decision from anybody. That is still what a new project gets.
+
+    What a derivation cannot do is survive a rename: the hash changes, so the
+    square somebody had learned changes colour under them. And six hues across
+    a handful of projects collide often enough to matter. So a project may
+    override either half, and unset means derived, exactly as before.
+
+    Scenario: A new project has chosen neither
+      When I add the project "factory" at that directory
+      Then the project has no chosen colour
+      And the project has no chosen letters
+
+    Scenario: A colour can be chosen
+      Given the project "factory" exists
+      When I choose colour 3 for it
+      Then the project's colour is 3
+
+    Scenario: Letters can be chosen
+      Given the project "factory" exists
+      When I choose the letters "fx" for it
+      Then the project's letters are "FX"
+
+    Scenario: More than two letters is cut to two
+      Given the project "factory" exists
+      When I choose the letters "abcd" for it
+      Then the project's letters are "AB"
+
+    Scenario: Empty letters hand the square back to the name
+      Given the project "factory" exists
+      And the letters "FX" are chosen for it
+      When I choose the letters "" for it
+      Then the project has no chosen letters
+
+    Scenario: A colour can be handed back to the name
+      Given the project "factory" exists
+      And colour 3 is chosen for it
+      When I clear its colour
+      Then the project has no chosen colour
+
+    Scenario: A colour outside the palette is refused
+      Given the project "factory" exists
+      When I choose colour 9 for it
+      Then it is refused
+
+    Scenario: Choosing the square is announced
+      Given the project "factory" exists
+      When I choose colour 3 for it
+      Then a "project.changed" event says so
+
+    Scenario: A chosen square survives a rename
+      Given the project "factory" exists
+      And colour 3 is chosen for it
+      When I rename it to "factory-core"
+      Then the project's colour is 3
+
+    Scenario: A colour edited into nonsense reads as unchosen
+      Given the project "factory" exists
+      And its colour column is edited by hand to 99
+      Then the project has no chosen colour
+
 
   Rule: a project says how much authority its runs get, and what else they may reach
 

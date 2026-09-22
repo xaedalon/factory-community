@@ -149,6 +149,119 @@ Feature: The task board
     When I open the tasks page
     Then the page says it cannot reach the daemon
 
+  Rule: the task page leads with the thing you came to do
+
+    Seven sections sat in a flat vertical stack at one rank, so what mattered
+    was wherever it happened to fall. A task waiting for a person put the
+    evidence to decide on sixth of seven, below the run list and the steps; a
+    task that had failed put the reason in one place and the failing step, shut,
+    in another.
+
+    The state already decides what matters. A band at the top says it in a
+    sentence and carries the buttons that act on it, the wide column is what is
+    happening now, and the facts that do not change while you read them are in
+    a rail beside it.
+
+    Scenario: A decision leads with the evidence
+      Given the project defines the workflow "review" that writes a report and asks for approval
+      And the task "Check it" exists on "review"
+      When I open the tasks page
+      And I queue "Check it"
+      And "Check it" becomes "awaiting_approval" without me reloading
+      And I open "Check it"
+      Then the band says this is waiting for you
+      And the evidence is above the steps
+
+    Scenario: A failure says what stopped it, at the top
+      Given the project defines the workflow "doomed" that fails
+      And the task "Will fail" exists on "doomed"
+      When I open the tasks page
+      And I queue "Will fail"
+      And "Will fail" becomes "blocked" without me reloading
+      And I open "Will fail"
+      Then the band says this stopped
+      And the failing step's output is already open
+
+    Scenario: The facts sit beside the work, not under it
+      Given the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I open "Add due dates"
+      Then the facts sit beside the work
+
+  Rule: a project is created and edited on a page, not in the row it lives in
+
+    The projects page carried a seven-control strip above the list and then the
+    same settings again inside every row — as buttons labelled with the state
+    they would move to, so "Use worktrees" meant worktrees were off. Nothing
+    said what a path was for, and Remove destroyed a project on one click.
+
+    Name and branch were the two fields nobody could change at all: the only
+    way was to remove the project and add it again, which leaves every task
+    that ever ran in it pointing at nothing. The path stays fixed for that same
+    reason, and the page says so rather than leaving a box that refuses.
+
+    Scenario: The list offers no way to change a project in place
+      Given the project "work" is registered
+      When I open the projects page
+      Then no project setting can be changed from the list
+
+    Scenario: Opening a project shows what it is for
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the name field explains what it is for
+      And the path is shown as fixed
+
+    Scenario: A project can be renamed
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I rename the project to "work-core"
+      Then "work-core" is listed as a project
+
+    Scenario: The branch work starts from can be re-pointed
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I point it at the branch "develop"
+      Then "work" starts work from "develop"
+
+    Scenario: A name already taken is refused against the field
+      Given the project "work" is registered
+      And the project "other" is registered
+      When I open the projects page
+      And I open the project "other"
+      And I rename the project to "work"
+      Then the name field says the name is taken
+
+    Scenario: A project can choose its own square
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I choose colour 3 and the letters "wk"
+      Then the rail square for "work" says "WK"
+
+    Scenario: The square follows the name until it is chosen
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the square is on automatic
+
+    Scenario: Authority can be handed back to the installation
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the authority field offers following the installation
+
+    Scenario: Removing a project takes two clicks
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I press remove once
+      Then the project is still there
+      When I confirm the removal
+      Then no projects are listed
+
   Rule: The rail says which project the board is about
 
     Factory runs work in several repositories at once, and a board that mixes

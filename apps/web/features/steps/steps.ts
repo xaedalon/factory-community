@@ -633,6 +633,26 @@ Given(
   },
 )
 
+/**
+ * A workflow that fails, so the blocked case has something real to draw.
+ *
+ * A step that exits non-zero rather than a step that is missing: the page has
+ * to show the reason and the output, and only a step that actually ran produces
+ * either.
+ */
+Given(
+  'the project defines the workflow {string} that fails',
+  async ({ world }, name: string) => {
+    world.workflow(world.projectScope, name, HELLO_WORKFLOW.replace('hello', name))
+    world.phase(
+      world.projectScope,
+      'greet',
+      'name: greet\nsteps: [{run: "echo trying && exit 3"}]\n',
+    )
+    world.withShell = true
+  },
+)
+
 Given('the task {string} exists on {string}', async ({ world }, name: string, workflow: string) => {
   await world.startDaemon()
   await world.createTask(name, [workflow])
@@ -725,11 +745,15 @@ Then('the card for {string} says {string}', async ({ page }, name: string, text:
  *
  * A bar rendered at 0% and a bar that was never drawn look identical on
  * screen, so asserting it exists would pass on either.
+ *
+ * Matched inside the attribute rather than against the whole of it. The bar
+ * also carries the state's colour now, and an equality check on `style` made
+ * this step fail over a second declaration it was never about.
  */
 Then('its bar is {int}% full', async ({ page }, percent: number) => {
   await expect(page.getByTestId(/^card-progress-fill-/)).toHaveAttribute(
     'style',
-    `width: ${percent}%;`,
+    new RegExp(`(^|;)\\s*width:\\s*${percent}%\\s*(;|$)`),
   )
 })
 
@@ -776,21 +800,26 @@ When('I open the projects page', async ({ world, page }) => {
   await page.goto('/projects')
 })
 
+// Adding is a page of its own now, reached from the list the same way a
+// person reaches it. The steps go through the button rather than jumping to
+// the URL, so a broken route fails here rather than silently passing.
 When(
   'I add the project {string} at the project directory',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(world.workDir)
-    await page.getByTestId('create-project').click()
+    await page.getByTestId('save-project').click()
   },
 )
 
 When(
   'I add the project {string} at a path that does not exist',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(`${world.root}/nowhere`)
-    await page.getByTestId('create-project').click()
+    await page.getByTestId('save-project').click()
   },
 )
 
@@ -809,8 +838,104 @@ Then('{string} is listed as a project', async ({ page }, name: string) => {
   await expect(page.getByTestId(`project-${name}`)).toBeVisible()
 })
 
+When('I open the project {string}', async ({ page }, name: string) => {
+  await page.getByTestId(`open-project-${name}`).click()
+  await expect(page.getByTestId('project-form')).toBeVisible()
+})
+
+When('I rename the project to {string}', async ({ page }, to: string) => {
+  await page.getByTestId('project-name').fill(to)
+  await page.getByTestId('save-project').click()
+})
+
+When('I point it at the branch {string}', async ({ page }, branch: string) => {
+  await page.getByTestId('project-branch').fill(branch)
+  await page.getByTestId('save-project').click()
+})
+
+Then('{string} starts work from {string}', async ({ page }, name: string, branch: string) => {
+  await expect(page.getByTestId(`project-${name}`)).toContainText(branch)
+})
+
+/**
+ * The list is a list.
+ *
+ * Asserting the absence of the old controls rather than the presence of the new
+ * ones: the failure this guards against is somebody adding a convenient toggle
+ * back into a row, which no positive assertion would ever notice.
+ */
+Then('no project setting can be changed from the list', async ({ page }) => {
+  await expect(page.getByTestId('add-project')).toHaveCount(0)
+  await expect(page.getByTestId(/^toggle-worktrees-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^toggle-environments-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^profile-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^remove-/)).toHaveCount(0)
+})
+
+Then('the name field explains what it is for', async ({ page }) => {
+  await expect(page.getByText('The rail derives its square')).toBeVisible()
+})
+
+Then('the path is shown as fixed', async ({ page }) => {
+  await expect(page.getByTestId('project-path-fixed')).toBeVisible()
+  await expect(page.getByTestId('project-path')).toHaveCount(0)
+})
+
+Then('the name field says the name is taken', async ({ page }) => {
+  await expect(page.getByTestId('field-error-name')).toContainText('already exists')
+})
+
+When('I choose colour 3 and the letters {string}', async ({ page }, letters: string) => {
+  await page.getByTestId('tone-3').click()
+  await page.getByTestId('project-initials').fill(letters)
+  await page.getByTestId('save-project').click()
+})
+
+// Through the rail rather than the page's own preview: the rail is the surface
+// the choice exists for, and it reads the project from a different store.
+Then('the rail square for {string} says {string}', async ({ page }, name: string, letters: string) => {
+  await expect(page.getByTestId(`project-button-${name}`)).toHaveText(letters)
+})
+
+Then('the square is on automatic', async ({ page }) => {
+  await expect(page.getByTestId('tone-auto')).toHaveAttribute('aria-pressed', 'true')
+})
+
+/**
+ * The third position has to be reachable.
+ *
+ * `default` and unset are different things — a project that states nothing
+ * follows the installation, so changing the installation changes it, while
+ * `default` pins it. A select with only the two named profiles showed
+ * "default" for a project that had chosen nothing.
+ */
+Then('the authority field offers following the installation', async ({ page }) => {
+  const select = page.getByTestId('project-profile')
+  await expect(select).toHaveValue('')
+  await expect(select.locator('option[value=""]')).toHaveText('Follows the installation')
+})
+
+When('I press remove once', async ({ page }) => {
+  await page.getByTestId('remove-project').click()
+})
+
+Then('the project is still there', async ({ page }) => {
+  await expect(page.getByTestId('remove-project-confirm')).toBeVisible()
+  await expect(page.getByTestId('project-form')).toBeVisible()
+})
+
+When('I confirm the removal', async ({ page }) => {
+  await page.getByTestId('remove-project-confirm').click()
+})
+
+Then('no projects are listed', async ({ page }) => {
+  await expect(page.getByTestId('projects-empty')).toBeVisible()
+})
+
+// Against the path box, not in a banner at the top of the form. A refusal that
+// does not say which field it means makes you check all of them.
 Then('the page explains that there is nothing at that path', async ({ page }) => {
-  await expect(page.getByTestId('error')).toContainText('there is nothing at')
+  await expect(page.getByTestId('field-error-path')).toContainText('there is nothing at')
 })
 
 Then('{string} shows the project {string}', async ({ page }, task: string, project: string) => {
@@ -951,15 +1076,20 @@ Then('a setup step offers a command to copy', async ({ page }) => {
 When(
   'I add the project {string} at the project directory, without worktrees',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(world.workDir)
-    await page.getByTestId('project-worktrees').uncheck()
-    await page.getByTestId('create-project').click()
+    // The switch is a real checkbox behind a drawn one, so `uncheck` still
+    // works and the keyboard still does.
+    await page.getByTestId('project-worktrees-field').getByRole('checkbox').uncheck()
+    await page.getByTestId('save-project').click()
   },
 )
 
 When('I switch {string} to working in the repository', async ({ page }, name: string) => {
-  await page.getByTestId(`toggle-worktrees-${name}`).click()
+  await page.getByTestId(`open-project-${name}`).click()
+  await page.getByTestId('project-worktrees-field').getByRole('checkbox').uncheck()
+  await page.getByTestId('save-project').click()
 })
 
 Then(
@@ -1144,6 +1274,59 @@ When('I rename it to {string}', async ({ page }, name: string) => {
   await page.getByTestId('task-name-input').press('Enter')
 })
 
+Then('the band says this is waiting for you', async ({ page }) => {
+  await expect(page.getByTestId('task-band')).toContainText('waiting for you')
+})
+
+Then('the band says this stopped', async ({ page }) => {
+  await expect(page.getByTestId('task-band')).toContainText('This stopped')
+})
+
+/**
+ * Reading order, not presence.
+ *
+ * The evidence and the steps were both on the page before; the evidence was
+ * simply below the steps and the run list, on the one page where a person is
+ * being asked to decide something from it. Compared by position so that
+ * reordering them back would fail here.
+ */
+Then('the evidence is above the steps', async ({ page }) => {
+  const evidence = await page.getByTestId('evidence').boundingBox()
+  const steps = await page.getByText('Steps', { exact: true }).boundingBox()
+  expect(evidence).not.toBeNull()
+  expect(steps).not.toBeNull()
+  expect((evidence as { y: number }).y).toBeLessThan((steps as { y: number }).y)
+})
+
+Then("the failing step's output is already open", async ({ page }) => {
+  // No click first. A step nobody expanded is a step nobody read, and the
+  // failing one is the reason the page was opened.
+  await expect(page.getByTestId(/^log-/).first()).toBeVisible()
+})
+
+/**
+ * Beside, not under.
+ *
+ * Asserts the geometry rather than the membership, because "in the rail" is
+ * satisfied by a rail stacked below the work — which is the arrangement this
+ * replaced. `waits for` is the probe: unlike the workspace it is rendered for
+ * every task, including a draft that has never run and so has no workspace at
+ * all.
+ */
+Then('the facts sit beside the work', async ({ page }) => {
+  const rail = page.getByTestId('task-rail')
+  await expect(rail.getByTestId('task-dependencies')).toBeVisible()
+  const railBox = await rail.boundingBox()
+  const work = await page.getByTestId('task-plan').boundingBox()
+  expect(railBox).not.toBeNull()
+  expect(work).not.toBeNull()
+  const r = railBox as { x: number; y: number }
+  const w = work as { x: number; y: number }
+  expect(r.x).toBeGreaterThan(w.x)
+  // Same band of the page, not below it.
+  expect(Math.abs(r.y - w.y)).toBeLessThan(80)
+})
+
 Then('the task is called {string}', async ({ page }, name: string) => {
   await expect(page.getByRole('heading', { name })).toBeVisible()
 })
@@ -1320,7 +1503,9 @@ When('I open the environments page', async ({ world, page }) => {
 })
 
 When('I turn environments on for {string}', async ({ page }, name: string) => {
-  await page.getByTestId(`toggle-environments-${name}`).click()
+  await page.getByTestId(`open-project-${name}`).click()
+  await page.getByTestId('project-environments-field').getByRole('checkbox').check()
+  await page.getByTestId('save-project').click()
 })
 
 Then('the environments page is empty', async ({ page }) => {

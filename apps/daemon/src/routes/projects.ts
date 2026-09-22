@@ -4,6 +4,7 @@ import {
   DISCLAIMER,
   EXECUTION_PROFILES,
   NOT_ACCEPTED,
+  PROJECT_TONES,
   hasAccepted,
   isExecutionProfile,
   queueOrder,
@@ -138,26 +139,80 @@ export function registerProjectRoutes(
    *
    * A separate route rather than "remove and add again", which would null the
    * `project_id` of every task that ever ran in it — the record of the work
-   * would survive, pointing at nothing.
+   * would survive, pointing at nothing. That is also why `name` and
+   * `defaultBranch` belong here: they were the two fields a person could only
+   * change by destroying the project's history to do it.
+   *
+   * `path` is deliberately not accepted. Worktree roots are derived from it and
+   * every run that ever happened recorded it, so a project that moves is a
+   * different project, and saying so is kinder than pretending otherwise.
    *
    * Allowed while the project has work in flight: tasks already running finish
    * where they are, and the new rule applies to whatever starts next.
    */
   app.patch<{
     Params: { id: string }
-    Body: { usesWorktrees?: boolean; usesEnvironments?: boolean; profile?: unknown }
+    Body: {
+      name?: unknown
+      defaultBranch?: unknown
+      tone?: unknown
+      initials?: unknown
+      usesWorktrees?: boolean
+      usesEnvironments?: boolean
+      profile?: unknown
+    }
   }>('/api/projects/:id', async (request, reply) => {
     if (projects.get(request.params.id) === undefined) {
       return reply.code(404).send({ error: `No project ${request.params.id}.` })
     }
-    const { usesWorktrees, usesEnvironments, profile } = request.body ?? {}
+    const { name, defaultBranch, usesWorktrees, usesEnvironments, profile } = request.body ?? {}
     const settingProfile = 'profile' in (request.body ?? {})
-    if (usesWorktrees === undefined && usesEnvironments === undefined && !settingProfile) {
+    // Present-and-null is how either half of the square is handed back to the
+    // name, so "in the body" is the question, not "has a value".
+    const settingTone = 'tone' in (request.body ?? {})
+    const settingInitials = 'initials' in (request.body ?? {})
+    if (
+      name === undefined &&
+      defaultBranch === undefined &&
+      usesWorktrees === undefined &&
+      usesEnvironments === undefined &&
+      !settingProfile &&
+      !settingTone &&
+      !settingInitials
+    ) {
       return reply.code(400).send({
         error:
-          'Send { usesWorktrees } or { usesEnvironments }, true or false, ' +
+          'Send { name } or { defaultBranch } to change what the project is called or where ' +
+          'work starts, { usesWorktrees } or { usesEnvironments }, true or false, ' +
           'or { profile } to say how much authority its runs get.',
       })
+    }
+    // Refused here rather than at the store, so the message names the field a
+    // form can put the error against.
+    if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
+      return reply.code(400).send({ error: 'A project needs a name.' })
+    }
+    if (
+      defaultBranch !== undefined &&
+      (typeof defaultBranch !== 'string' || defaultBranch.trim() === '')
+    ) {
+      return reply.code(400).send({ error: 'A project needs a branch to start work from.' })
+    }
+    if (
+      settingTone &&
+      request.body.tone !== null &&
+      (!Number.isInteger(request.body.tone) ||
+        (request.body.tone as number) < 1 ||
+        (request.body.tone as number) > PROJECT_TONES)
+    ) {
+      return reply.code(400).send({
+        error: `colour is 1 to ${PROJECT_TONES}, or null to derive it from the name.`,
+      })
+    }
+    if (settingInitials && request.body.initials !== null) {
+      if (typeof request.body.initials !== 'string') {
+        return reply.code(400).send({ error: 'letters are text, or null to derive them.' })
+      }
     }
     // `null` clears it, which is not the same as `default`: a project that
     // states nothing follows the installation's choice, and returning to that
@@ -178,6 +233,20 @@ export function registerProjectRoutes(
       let project = projects.get(request.params.id) as Project
       const scaffolded: (ScaffoldReport | undefined)[] = []
 
+      // Identity before settings: if the rename is going to be refused for
+      // colliding with another project, nothing else should have happened yet.
+      if (name !== undefined) project = projects.rename(request.params.id, name as string)
+      if (defaultBranch !== undefined) {
+        project = projects.setDefaultBranch(request.params.id, defaultBranch as string)
+      }
+      if (settingTone || settingInitials) {
+        project = projects.setAppearance(request.params.id, {
+          ...(settingTone ? { tone: (request.body.tone as number | null) ?? undefined } : {}),
+          ...(settingInitials
+            ? { initials: (request.body.initials as string | null) ?? undefined }
+            : {}),
+        })
+      }
       if (usesWorktrees !== undefined) {
         project = projects.setWorktrees(request.params.id, usesWorktrees)
         // Only on the way on. Turning a setting off leaves the files where they

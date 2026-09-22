@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import AppIcon from '../AppIcon.vue'
+import Tooltip from '../Tooltip.vue'
 import { computed, ref } from 'vue'
 import type { DefinitionListing } from '../../api/client.js'
 import ScopeBadge from '../ScopeBadge.vue'
@@ -47,17 +49,20 @@ function move(index: number, delta: number): void {
       class="flex items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-1.5"
       :data-testid="`phase-${name}`"
     >
-      <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">{{ index + 1 }}</span>
+      <span class="font-mono text-meta text-[var(--color-ink-faint)]">{{ index + 1 }}</span>
       <span class="value flex-1">{{ name }}</span>
 
       <ScopeBadge v-if="known.get(name)" :scope="known.get(name)!.winner.scope" />
       <template v-else>
-        <span
-          class="font-mono text-[10px] text-[var(--color-danger)]"
-          :data-testid="`phase-${name}-missing`"
-        >
-          no such phase
-        </span>
+        <Tooltip label="Nothing in this project's scope chain defines it, so the workflow cannot run">
+          <span
+            class="inline-flex items-center gap-1 font-mono text-meta text-[var(--color-danger)]"
+            :data-testid="`phase-${name}-missing`"
+          >
+            <AppIcon name="alert" :size="10" />
+            no such phase
+          </span>
+        </Tooltip>
         <!-- A new tab, deliberately. Following this link mid-edit would
              otherwise mean abandoning unsaved changes to the workflow that sent
              you here — and being warned about it is not much better than losing
@@ -66,37 +71,56 @@ function move(index: number, delta: number): void {
           :href="`/phases/new?name=${encodeURIComponent(name)}`"
           target="_blank"
           rel="noopener"
-          class="font-mono text-[10px] text-[var(--color-accent)] hover:underline"
+          class="inline-flex items-center gap-1 font-mono text-meta text-[var(--color-accent-text)] hover:underline"
           :data-testid="`phase-${name}-create`"
         >
           create
+          <AppIcon name="link" :size="10" />
         </a>
       </template>
 
-      <button
-        type="button"
-        class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
-        :data-testid="`phase-${name}-up`"
-        @click="move(index, -1)"
+      <!-- Three arrows and a times sign, typed as text, was the whole control
+           set for reordering a workflow: no names for a screen reader, and a
+           target the width of one character each. Order matters here — this is
+           the sequence the phases run in — so the two that change it say which
+           way they go. -->
+      <Tooltip :label="index === 0 ? `${name} already runs first` : `Run ${name} earlier`">
+        <button
+          type="button"
+          class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:opacity-30"
+          :aria-label="`Move ${name} earlier`"
+          :disabled="index === 0"
+          :data-testid="`phase-${name}-up`"
+          @click="move(index, -1)"
+        >
+          <AppIcon name="up" :size="13" />
+        </button>
+      </Tooltip>
+      <Tooltip
+        :label="index === modelValue.length - 1 ? `${name} already runs last` : `Run ${name} later`"
       >
-        ↑
-      </button>
-      <button
-        type="button"
-        class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]"
-        :data-testid="`phase-${name}-down`"
-        @click="move(index, 1)"
-      >
-        ↓
-      </button>
-      <button
-        type="button"
-        class="px-1 text-[var(--color-ink-faint)] hover:text-[var(--color-danger)]"
-        :data-testid="`phase-${name}-remove`"
-        @click="remove(index)"
-      >
-        ×
-      </button>
+        <button
+          type="button"
+          class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:opacity-30"
+          :aria-label="`Move ${name} later`"
+          :disabled="index === modelValue.length - 1"
+          :data-testid="`phase-${name}-down`"
+          @click="move(index, 1)"
+        >
+          <AppIcon name="down" :size="13" />
+        </button>
+      </Tooltip>
+      <Tooltip :label="`Take ${name} out of this workflow`">
+        <button
+          type="button"
+          class="rounded p-1 text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-danger)]"
+          :aria-label="`Remove ${name}`"
+          :data-testid="`phase-${name}-remove`"
+          @click="remove(index)"
+        >
+          <AppIcon name="close" :size="13" />
+        </button>
+      </Tooltip>
     </div>
 
     <!-- A ComboInput, not a bare `<input list>`. Chromium hides a datalist's
@@ -119,10 +143,11 @@ function move(index: number, delta: number): void {
       </div>
       <button
         type="button"
-        class="rounded-md border border-[var(--color-line)] px-3 text-sm text-[var(--color-ink-muted)] hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
+        class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line)] px-3 text-sm text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-accent)] hover:text-[var(--color-ink)]"
         data-testid="phases-add"
         @click="add(draft)"
       >
+        <AppIcon name="add" :size="12" />
         Add
       </button>
     </div>

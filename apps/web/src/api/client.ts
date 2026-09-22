@@ -527,6 +527,16 @@ export interface Project {
   /** Whether each task gets an environment of its own. Off unless asked for. */
   usesEnvironments: boolean
   /**
+   * The hue this project's square uses, 1 to 6, when it has chosen one.
+   *
+   * Absent means derived from the name — see `identity.ts`, which is still the
+   * default and still the argument. Read through `markTone`, never directly,
+   * so a chosen square and a derived one look the same at the call site.
+   */
+  tone?: number
+  /** The letters on the square, when chosen. Absent means derived. */
+  initials?: string
+  /**
    * How much authority its runs get. Absent means it follows the installation.
    *
    * Absent is not the same as `default`: a project that has never chosen
@@ -757,15 +767,27 @@ export const api = {
 
   projects: () => request<{ items: Project[] }>('/api/projects'),
 
-  /** Turn either project setting on or off. Both go through the same route. */
+  /**
+   * Change a project. Everything editable goes through the one route.
+   *
+   * `name` and `defaultBranch` are here because the alternative was removing
+   * the project and adding it again, which orphans every task that ever ran in
+   * it. `path` is not editable by design — see the route.
+   */
   setProjectSetting: (
     id: string,
     // `profile: null` clears it, which is how a project returns to following
     // the installation. Distinct from choosing `default`.
     setting: {
+      name?: string
+      defaultBranch?: string
       usesWorktrees?: boolean
       usesEnvironments?: boolean
       profile?: ExecutionProfile | null
+      // `null` for either means derive it from the name, which is where a
+      // project starts and what it returns to.
+      tone?: number | null
+      initials?: string | null
     },
   ) =>
     request<{ project: Project; scaffolded: ScaffoldReport }>(

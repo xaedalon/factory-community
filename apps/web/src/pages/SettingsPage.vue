@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { onMounted } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
+import AppButton from '../components/AppButton.vue'
+import AppIcon, { type IconName } from '../components/AppIcon.vue'
+import Tooltip from '../components/Tooltip.vue'
+import { useClipboard } from '../composables/useClipboard.js'
 import { SCALES, useSettings } from '../stores/settings.js'
 import type { ExecutionProfile, UiTheme } from '../api/client.js'
 
@@ -19,10 +23,10 @@ const settings = useSettings()
  * Spelled here for the same reason `PROFILES` is below: the board offers a
  * choice the daemon has not been told about yet.
  */
-const THEMES: readonly { value: UiTheme; label: string }[] = [
-  { value: 'light', label: 'Light' },
-  { value: 'dark', label: 'Dark' },
-  { value: 'system', label: 'System' },
+const THEMES: readonly { value: UiTheme; label: string; icon: IconName }[] = [
+  { value: 'light', label: 'Light', icon: 'light' },
+  { value: 'dark', label: 'Dark', icon: 'night' },
+  { value: 'system', label: 'System', icon: 'system' },
 ]
 
 /**
@@ -32,10 +36,23 @@ const THEMES: readonly { value: UiTheme; label: string }[] = [
  * has to offer a choice the daemon has not been told about yet — and a third
  * profile would be a deliberate change to this list, not a silent one.
  */
-const PROFILES: readonly { value: ExecutionProfile; label: string }[] = [
-  { value: 'default', label: 'Default' },
-  { value: 'full-access', label: 'Full Access' },
-]
+const PROFILES: readonly { value: ExecutionProfile; label: string; icon: IconName; hint: string }[] =
+  [
+    {
+      value: 'default',
+      label: 'Default',
+      icon: 'profile',
+      hint: 'An agent is confined to the workspace and handed an environment with the credentials taken out',
+    },
+    {
+      value: 'full-access',
+      label: 'Full Access',
+      icon: 'alert',
+      hint: 'No workspace boundary, and every credential passed through',
+    },
+  ]
+
+const { copied, copy } = useClipboard()
 
 onMounted(() => {
   if (settings.settings === undefined) void settings.load()
@@ -45,17 +62,32 @@ onMounted(() => {
 <template>
   <PageHeader title="Settings" subtitle="Preferences, kept beside your definitions." />
 
-  <div class="space-y-8 px-8 py-6">
+  <div class="page-body">
     <p
       v-if="settings.error"
       class="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
       data-testid="error"
     >
+      <AppIcon name="alert" class="mr-1 inline-block align-[-2px]" />
       {{ settings.error }}
     </p>
 
-    <section data-testid="appearance">
-      <h2 class="mb-3 font-mono text-[11px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+    <!-- One group, not four page-level blocks. A column of bordered cards sits
+         8px apart everywhere else in the app — the plugin list, the setup
+         steps, the scope chain — and these were inheriting the 24px that
+         separates unlike sections because they were direct children of
+         `.page-body`. -->
+    <div class="space-y-2">
+
+    <!-- A card per setting. These were four unbounded stacks separated by
+         whitespace, so a heading, its buttons and the paragraph explaining them
+         had nothing saying they belonged together. -->
+    <section
+      class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
+      data-testid="appearance"
+    >
+      <h2 class="mb-3 flex items-center gap-2 text-title">
+        <AppIcon name="light" :size="15" class="text-[var(--color-ink-muted)]" />
         Appearance
       </h2>
       <div class="flex flex-wrap items-center gap-2">
@@ -63,15 +95,17 @@ onMounted(() => {
           v-for="option in THEMES"
           :key="option.value"
           type="button"
-          class="rounded-md border px-3 py-1.5 text-sm"
+          class="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors"
           :class="
             settings.theme === option.value
               ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
-              : 'border-[var(--color-line-strong)] text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
+              : 'border-[var(--color-line-strong)] text-[var(--color-ink-muted)] hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]'
           "
+          :aria-pressed="settings.theme === option.value"
           :data-testid="`theme-${option.value}`"
           @click="settings.setTheme(option.value)"
         >
+          <AppIcon :name="option.icon" :size="13" />
           {{ option.label }}
         </button>
       </div>
@@ -80,23 +114,26 @@ onMounted(() => {
         that changes.
       </p>
 
-      <p class="mt-6 mb-2 text-xs text-[var(--color-ink-faint)]">Interface size</p>
+      <p class="mt-6 mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
+        Interface size
+      </p>
       <div class="flex flex-wrap items-center gap-2">
-        <button
-          v-for="value in SCALES"
-          :key="value"
-          type="button"
-          class="rounded-md border px-3 py-1.5 text-sm"
-          :class="
-            settings.scale === value
-              ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
-              : 'border-[var(--color-line-strong)] text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
-          "
-          :data-testid="`scale-${value}`"
-          @click="settings.setScale(value)"
-        >
-          {{ value }}×
-        </button>
+        <Tooltip v-for="value in SCALES" :key="value" :label="`Scale the whole interface to ${value}×`">
+          <button
+            type="button"
+            class="rounded-md border px-3 py-1.5 text-sm transition-colors"
+            :class="
+              settings.scale === value
+                ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
+                : 'border-[var(--color-line-strong)] text-[var(--color-ink-muted)] hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]'
+            "
+            :aria-pressed="settings.scale === value"
+            :data-testid="`scale-${value}`"
+            @click="settings.setScale(value)"
+          >
+            {{ value }}×
+          </button>
+        </Tooltip>
       </div>
       <!-- The same thing Cmd+ does, which is what was asked for — and why it
            is page zoom rather than a font size: the board has a hundred
@@ -110,26 +147,36 @@ onMounted(() => {
 
     <!-- Above the file path and below appearance: it is the setting with
          consequences, and the reading order should say so. -->
-    <section data-testid="execution-profile">
-      <h2 class="mb-3 font-mono text-[11px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+    <section
+      class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
+      data-testid="execution-profile"
+    >
+      <h2 class="mb-3 flex items-center gap-2 text-title">
+        <AppIcon name="profile" :size="15" class="text-[var(--color-ink-muted)]" />
         What agents may reach
       </h2>
       <div class="flex flex-wrap items-center gap-2">
-        <button
-          v-for="option in PROFILES"
-          :key="option.value"
-          type="button"
-          class="rounded-md border px-3 py-1.5 text-sm"
-          :class="
-            settings.profile === option.value
-              ? 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
-              : 'border-[var(--color-line-strong)] text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]'
-          "
-          :data-testid="`profile-${option.value}`"
-          @click="settings.setProfile(option.value)"
-        >
-          {{ option.label }}
-        </button>
+        <!-- The hint is the consequence, not the name. This is the setting a
+             person is most likely to change without knowing what it costs. -->
+        <Tooltip v-for="option in PROFILES" :key="option.value" :label="option.hint">
+          <button
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors"
+            :class="
+              settings.profile === option.value
+                ? option.value === 'full-access'
+                  ? 'border-[var(--color-warn)] bg-[var(--color-warn)]/10 text-[var(--color-warn)]'
+                  : 'border-[var(--color-accent)] bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
+                : 'border-[var(--color-line-strong)] text-[var(--color-ink-muted)] hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]'
+            "
+            :aria-pressed="settings.profile === option.value"
+            :data-testid="`profile-${option.value}`"
+            @click="settings.setProfile(option.value)"
+          >
+            <AppIcon :name="option.icon" :size="13" />
+            {{ option.label }}
+          </button>
+        </Tooltip>
       </div>
       <p class="mt-2 text-xs text-[var(--color-ink-faint)]">
         What a project gets when it has not chosen for itself. A project can
@@ -142,13 +189,19 @@ onMounted(() => {
         class="mt-3 rounded-lg border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/5 px-4 py-3 text-xs leading-relaxed text-[var(--color-ink)]"
         data-testid="full-access-warning"
       >
+        <AppIcon name="alert" :size="13" class="mr-1 inline-block align-[-2px]" />
         Full Access removes the workspace boundary and passes every credential
         through to the agent. Use it where you can restore the machine.
       </p>
     </section>
 
-    <section data-testid="disclaimer-state">
-      <h2 class="mb-2 font-mono text-[11px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+    <section
+      class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
+      data-testid="disclaimer-state"
+    >
+      <h2 class="mb-2 flex items-center gap-2 text-title">
+        <AppIcon :name="settings.accepted === true ? 'check' : 'alert'" :size="15"
+          :class="settings.accepted === true ? 'text-[var(--color-ok)]' : 'text-[var(--color-warn)]'" />
         What you agreed to
       </h2>
       <p v-if="settings.accepted === true" class="text-xs text-[var(--color-ink-muted)]">
@@ -165,20 +218,23 @@ onMounted(() => {
              panel's own "Review permissions" link sends people to, and sending
              somebody somewhere to read and then giving them no way to agree is
              a dead end. Accepting here starts nothing: it is not "continue". -->
-        <button
-          type="button"
-          class="mt-3 rounded-md border border-[var(--color-accent)] bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-white"
-          data-testid="accept-here"
-          @click="settings.accept()"
-        >
-          I understand — accept
-        </button>
+        <div class="mt-3">
+          <AppButton
+            label="I understand — accept"
+            icon="check"
+            tone="primary"
+            hint="Records that you have read this. It starts nothing."
+            data-testid="accept-here"
+            @click="settings.accept()"
+          />
+        </div>
       </div>
       <details v-if="settings.disclaimer" class="mt-3">
         <summary
-          class="cursor-pointer text-xs text-[var(--color-ink-faint)] underline"
+          class="inline-flex cursor-pointer items-center gap-1.5 text-xs text-[var(--color-ink-faint)] hover:text-[var(--color-ink-muted)]"
           data-testid="read-disclaimer"
         >
+          <AppIcon name="go" :size="11" />
           Read it
         </summary>
         <p class="mt-3 text-xs leading-relaxed text-[var(--color-ink)]">
@@ -199,11 +255,29 @@ onMounted(() => {
       </details>
     </section>
 
-    <section v-if="settings.file" data-testid="settings-file">
-      <h2 class="mb-2 font-mono text-[11px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+    <section
+      v-if="settings.file"
+      class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
+      data-testid="settings-file"
+    >
+      <h2 class="mb-2 flex items-center gap-2 text-title">
+        <AppIcon name="folder" :size="15" class="text-[var(--color-ink-muted)]" />
         Where this is kept
       </h2>
-      <p class="font-mono text-[11px] text-[var(--color-ink-muted)]">{{ settings.file }}</p>
+      <!-- A path on screen with no way to take it is a path you retype. -->
+      <Tooltip label="Copy the path">
+        <button
+          type="button"
+          class="flex w-full items-center gap-2 rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-2 text-left font-mono text-meta text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-line-strong)] hover:text-[var(--color-ink)]"
+          data-testid="copy-settings-file"
+          @click="copy(settings.file)"
+        >
+          <AppIcon name="copy" :size="11" class="shrink-0" />
+          <span class="min-w-0 flex-1 break-all">{{ settings.file }}</span>
+          <span v-if="copied === settings.file" class="shrink-0 text-[var(--color-ok)]">copied</span>
+        </button>
+      </Tooltip>
     </section>
+    </div>
   </div>
 </template>

@@ -14,7 +14,7 @@ defineProps<{ shadowed: DefinitionRef[] }>()
 <template>
   <span
     v-if="shadowed.length > 0"
-    class="inline-flex items-center gap-1 font-mono text-[10px] tracking-wide text-[var(--color-warn)]"
+    class="inline-flex items-center gap-1 font-mono text-label text-[var(--color-warn)]"
     :title="shadowed.map((ref) => ref.file).join('\n')"
     data-testid="shadow-notice"
   >

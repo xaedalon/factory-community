@@ -19,6 +19,23 @@ export interface Migration {
   readonly version: number
   /** What it does, shown by `factory doctor` and in the migration log. */
   readonly describe: string
+  /**
+   * Set when `up` rebuilds a table that other tables reference.
+   *
+   * SQLite cannot add `NOT NULL` to an existing column, so tightening one means
+   * the twelve-step rebuild: create, copy, drop, rename. `DROP TABLE` with
+   * foreign keys on deletes the old table's rows first, and that fires every
+   * `ON DELETE CASCADE` pointing at it — so rebuilding `tasks` to tighten one
+   * column would take every run, step, log and history row with it. Measured,
+   * not feared: the scenario that leaves this flag off watches the children
+   * disappear.
+   *
+   * It cannot be done inside `up`. `PRAGMA foreign_keys` is a no-op once a
+   * transaction is open, and every migration runs in one, so a migration can
+   * only *declare* that it needs enforcement off and let the harness bracket the
+   * transaction with it.
+   */
+  readonly rebuildsForeignKeys?: boolean
   up(db: Database): void
 }
 
@@ -56,14 +73,23 @@ export function migrate(db: Database, migrations: readonly Migration[]): Migrati
   const applied: { version: number; describe: string }[] = []
   for (const migration of migrations) {
     if (migration.version <= from) continue
-    // Each migration is its own transaction: a failure leaves the database at
-    // the last version that fully applied, which is a state someone can act on.
-    db.transaction(() => {
-      migration.up(db)
-      // PRAGMA will not take a bound parameter, and the value is a validated
-      // integer from our own list rather than anything a caller supplied.
-      db.exec(`PRAGMA user_version = ${migration.version}`)
-    })
+    // Outside the transaction, because that is the only place it does anything —
+    // see `rebuildsForeignKeys`. Restored in a `finally` so a migration that
+    // throws does not leave the connection with its foreign keys switched off,
+    // which would turn every later write into one nothing checks.
+    if (migration.rebuildsForeignKeys === true) db.exec('PRAGMA foreign_keys = OFF')
+    try {
+      // Each migration is its own transaction: a failure leaves the database at
+      // the last version that fully applied, which is a state someone can act on.
+      db.transaction(() => {
+        migration.up(db)
+        // PRAGMA will not take a bound parameter, and the value is a validated
+        // integer from our own list rather than anything a caller supplied.
+        db.exec(`PRAGMA user_version = ${migration.version}`)
+      })
+    } finally {
+      if (migration.rebuildsForeignKeys === true) db.exec('PRAGMA foreign_keys = ON')
+    }
     applied.push({ version: migration.version, describe: migration.describe })
   }
 

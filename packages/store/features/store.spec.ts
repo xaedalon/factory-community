@@ -32,7 +32,7 @@ const throws: Migration = {
   },
 }
 
-describeFeature(feature, ({ Scenario, BeforeEachScenario, AfterEachScenario }) => {
+describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenario }) => {
   let root = ''
   let file = ''
   let migrations: Migration[] = []
@@ -202,6 +202,87 @@ describeFeature(feature, ({ Scenario, BeforeEachScenario, AfterEachScenario }) =
     And('the error explains that SQLite has no nested transactions', () =>
       expect(String((thrownInTransaction as Error).message)).toContain('no nested transactions'),
     )
+  })
+
+  Rule('a migration that rebuilds a table keeps what referenced it', ({ RuleScenario }) => {
+    /**
+     * A parent with a cascading child, and one row in each.
+     *
+     * The child is what the rebuild is allowed to lose or keep, so it is the
+     * only thing these scenarios read back.
+     */
+    const seeded: Migration = {
+      version: 1,
+      describe: 'a parent and a cascading child',
+      up: (db) => {
+        db.exec('CREATE TABLE parents (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')
+        db.exec(
+          'CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL ' +
+            'REFERENCES parents(id) ON DELETE CASCADE)',
+        )
+        db.run('INSERT INTO parents (id, name) VALUES (1, ?)', 'kept')
+        db.run('INSERT INTO children (id, parent_id) VALUES (1, 1)')
+      },
+    }
+
+    /** The rebuild every table-tightening migration has to perform. */
+    const rebuild = (declared: boolean): Migration => ({
+      version: 2,
+      describe: 'rebuild parents with a tighter column',
+      ...(declared ? { rebuildsForeignKeys: true } : {}),
+      up: (db) => {
+        db.exec('CREATE TABLE parents_new (id INTEGER PRIMARY KEY, name TEXT NOT NULL)')
+        db.exec('INSERT INTO parents_new SELECT id, name FROM parents')
+        db.exec('DROP TABLE parents')
+        db.exec('ALTER TABLE parents_new RENAME TO parents')
+      },
+    })
+
+    const children = () =>
+      store?.db.get<{ n: number }>('SELECT count(*) AS n FROM children')?.n ?? -1
+
+    RuleScenario('A rebuild keeps the rows that pointed at what it kept', ({ Given, And, When, Then }) => {
+      Given('a store with a parent table and children that cascade', () => {
+        migrations = [seeded]
+      })
+      And('a migration that rebuilds the parent, declaring that it does', () => {
+        migrations = [seeded, rebuild(true)]
+      })
+      When('the store is opened', () => open())
+      Then('the children are still there', () => expect(children()).toBe(1))
+    })
+
+    RuleScenario('A rebuild that does not declare itself loses them', ({ Given, And, When, Then }) => {
+      Given('a store with a parent table and children that cascade', () => {
+        migrations = [seeded]
+      })
+      // The mutation this rule exists for, run as a scenario: the same rebuild
+      // without the declaration, so the loss is specified rather than feared.
+      And('a migration that rebuilds the parent without declaring it', () => {
+        migrations = [seeded, rebuild(false)]
+      })
+      When('the store is opened', () => open())
+      Then('the children are gone', () => expect(children()).toBe(0))
+    })
+
+    RuleScenario('Enforcement is back on afterwards', ({ Given, And, When, Then }) => {
+      Given('a store with a parent table and children that cascade', () => {
+        migrations = [seeded]
+      })
+      And('a migration that rebuilds the parent, declaring that it does', () => {
+        migrations = [seeded, rebuild(true)]
+      })
+      When('the store is opened', () => open())
+      And('a row references a parent that does not exist', () => {
+        try {
+          store?.db.run('INSERT INTO children (id, parent_id) VALUES (2, 404)')
+          thrownInTransaction = undefined
+        } catch (error) {
+          thrownInTransaction = error
+        }
+      })
+      Then('the write is refused', () => expect(thrownInTransaction).toBeInstanceOf(Error))
+    })
   })
 
   Scenario('Foreign keys are enforced', ({ Given, When, Then }) => {

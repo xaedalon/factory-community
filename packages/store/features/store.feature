@@ -80,3 +80,34 @@ Feature: Keeping what happened
     Given a store path inside a directory that does not exist
     When the store is opened
     Then the database file exists
+
+  Rule: a migration that rebuilds a table keeps what referenced it
+
+    SQLite cannot add NOT NULL to a column, so tightening one means rebuilding
+    the table: copy, drop, rename. Dropping a table other tables point at, with
+    foreign keys on, deletes its rows first — which fires every ON DELETE
+    CASCADE hanging off it. A migration meant to tighten one column would take
+    every child row with it.
+
+    `PRAGMA foreign_keys` is a no-op inside a transaction, and migrations run in
+    one, so a migration cannot turn enforcement off for itself. It says so
+    instead, and the harness does it either side of the transaction.
+
+    Scenario: A rebuild keeps the rows that pointed at what it kept
+      Given a store with a parent table and children that cascade
+      And a migration that rebuilds the parent, declaring that it does
+      When the store is opened
+      Then the children are still there
+
+    Scenario: A rebuild that does not declare itself loses them
+      Given a store with a parent table and children that cascade
+      And a migration that rebuilds the parent without declaring it
+      When the store is opened
+      Then the children are gone
+
+    Scenario: Enforcement is back on afterwards
+      Given a store with a parent table and children that cascade
+      And a migration that rebuilds the parent, declaring that it does
+      When the store is opened
+      And a row references a parent that does not exist
+      Then the write is refused

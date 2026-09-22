@@ -1,4 +1,4 @@
-import { dependencyStatus, type Scheduling, type Task } from '@factory/core'
+import { dependencyStatus, nextEntry, type Scheduling, type Task } from '@factory/core'
 import type { Blocker, RunRepository, TaskRepository } from '@factory/store'
 import type { EventBus } from '@factory/events'
 
@@ -446,18 +446,43 @@ export class Scheduler {
    * alongside anything.
    */
   #factsFor(task: Task): WorkflowFacts {
-    // `.workflow`, not the entry: this was `task.workflows[0] as string` when
-    // the list held names, and a cast is exactly the kind of thing that keeps
-    // compiling after the type under it changes shape.
-    //
-    // Still the newest run's workflow first, which is a known divergence from
-    // "the one about to run" — after an `on_fail` the newest run is the
-    // recovery workflow, so a retry is admitted on its lane and requirements.
-    // Left alone deliberately: fixing it changes which tasks the scheduler
-    // admits, and that belongs in its own change with its own scenario.
-    const current =
-      this.#runs.forTask(task.id)[0]?.workflow ?? task.workflows[0]?.workflow
+    const current = this.#workflowOf(task)
     if (current === undefined) return { scheduling: 'sequential' }
     return this.#workflow(current, task.projectId) ?? { scheduling: 'sequential' }
+  }
+
+  /**
+   * The workflow the gates are about.
+   *
+   * This read the newest run's workflow for every task, falling back to
+   * `workflows[0]`, and both are the wrong question for a task that has not
+   * started: a task whose first workflow has finished was admitted on the lane
+   * and the requirements of work that was already over. It cost real work —
+   * agents ran in a project's own checkout because the flag gate was asked
+   * about a workflow needing no worktree, and two `merge` workflows overlapped
+   * because the lane gate was asked about the parallel one before them. No
+   * scenario caught it because every one of them gave its task a single
+   * workflow, so the two answers coincided.
+   *
+   * The distinction is the task's state, and it is the engine's own:
+   *
+   * - **Running** — the workflow in flight, which is the newest run's. After an
+   *   `on_fail` that is the recovery workflow, which is not in the list at all,
+   *   and it is the one holding the lane.
+   * - **Anything else** — what `start` would pick: a paused run resumes at its
+   *   own entry whatever is ticked before it, otherwise the first ticked entry.
+   *   Mirrored from `Engine.start`, which is the only other place that decides.
+   */
+  #workflowOf(task: Task): string | undefined {
+    if (task.state === 'running') return this.#runs.forTask(task.id)[0]?.workflow
+
+    const paused = this.#runs.pausedFor(task.id)
+    if (paused !== undefined) {
+      const resuming = task.workflows.find((entry) => entry.id === paused.entryId)
+      // The run's own workflow when the entry has gone — an `on_fail` recovery
+      // that paused for approval has no entry of its own.
+      return resuming?.workflow ?? paused.workflow
+    }
+    return nextEntry(task)?.workflow
   }
 }

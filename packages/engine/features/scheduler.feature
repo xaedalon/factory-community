@@ -413,3 +413,39 @@ Feature: Deciding what runs next
       # blocker settles the question however many others are merely in flight.
       Then "The model" is "blocked"
       And the reason for "The model" says "Scaffold" was cancelled
+
+  Rule: the gates are about the workflow that is about to run
+
+    A task carries a list of workflows and runs them in order, so "what lane is
+    this task in" and "what flag does it need" have as many answers as the task
+    has workflows. The one that matters is the one the engine would start next.
+
+    This read the *newest run's* workflow instead, falling back to the first in
+    the list — so a task whose first workflow had already run was admitted on
+    the lane and requirements of work that was already over. It cost real work
+    twice: agents ran in a project's own checkout because the flag gate was
+    asked about a workflow that needed no worktree, and two `merge` workflows
+    overlapped because the lane gate was asked about the parallel one before
+    them.
+
+    A running task is the exception, and it is not one: the workflow it is on
+    is the run in flight, which after an `on_fail` is the recovery workflow and
+    not anything in the list.
+
+    Scenario: The lane comes from the workflow about to run, not the one that has run
+      Given a queued task "Ship" whose parallel workflow has run and whose next is sequential
+      And a sequential workflow is already running
+      When the scheduler ticks
+      Then "Ship" was skipped because "a sequential workflow is already running"
+
+    Scenario: The flag gate asks about the workflow about to run
+      Given a queued task "Ship" whose parallel workflow has run and whose next needs "hasWorktree"
+      When the scheduler ticks
+      Then "Ship" was skipped because "a required flag is not set"
+      And the report names "hasWorktree"
+
+    Scenario: A running task holds the lane of the workflow it is actually running
+      Given a task "Repairing" running a sequential recovery workflow that is not in its list
+      And a queued task "Next" on a sequential workflow
+      When the scheduler ticks
+      Then "Next" was skipped because "a sequential workflow is already running"

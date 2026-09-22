@@ -1024,4 +1024,103 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
       )
     })
   })
+  Rule('the gates are about the workflow that is about to run', ({ RuleScenario }) => {
+    /**
+     * A task that has finished its first workflow and is queued for its next.
+     *
+     * `finished` is what the engine calls when a workflow completes: it unticks
+     * the entry, so `nextEntry` moves on while `workflows[0]` and the newest
+     * run both still name the one that is over.
+     */
+    const partlyDone = (next: string): void => {
+      const created = tasks.create({
+        name: 'Ship',
+        workflows: ['parallel-work', next],
+        projectId: home(),
+      })
+      byName.set('Ship', created.id)
+      // Through the real transitions, so the task reaches "queued with one
+      // workflow behind it" the way a task actually does.
+      tasks.act(created.id, 'queue')
+      tasks.act(created.id, 'start')
+      runs.start({ workflow: 'parallel-work', taskId: created.id })
+      tasks.finished(created.id, created.workflows[0]?.id as string)
+      tasks.act(created.id, 'complete')
+      tasks.act(created.id, 'queue')
+    }
+
+    RuleScenario('The lane comes from the workflow about to run, not the one that has run', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'a queued task "Ship" whose parallel workflow has run and whose next is sequential',
+        () => partlyDone('sequential-work'),
+      )
+      And('a sequential workflow is already running', () => {
+        queued('Holder', 'sequential')
+        tasks.act(idOf('Holder'), 'start')
+        runs.start({ workflow: 'sequential-work', taskId: idOf('Holder') })
+      })
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Ship" was skipped because "a sequential workflow is already running"', () =>
+        expect(skippedFor('Ship')).toBe('a sequential workflow is already running'),
+      )
+    })
+
+    RuleScenario('The flag gate asks about the workflow about to run', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'a queued task "Ship" whose parallel workflow has run and whose next needs "hasWorktree"',
+        () => {
+          requirements.set('deploy', ['hasWorktree'])
+          partlyDone('deploy')
+        },
+      )
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Ship" was skipped because "a required flag is not set"', () =>
+        expect(skippedFor('Ship')).toBe('a required flag is not set'),
+      )
+      And('the report names "hasWorktree"', () =>
+        expect(report.skipped.find((entry) => entry.task.name === 'Ship')?.detail).toBe(
+          'hasWorktree',
+        ),
+      )
+    })
+
+    // The one case where the newest run is the right answer, and why the fix
+    // is not "always ask the list": an `on_fail` workflow is not in it.
+    RuleScenario('A running task holds the lane of the workflow it is actually running', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'a task "Repairing" running a sequential recovery workflow that is not in its list',
+        () => {
+          queued('Repairing', 'parallel')
+          tasks.act(idOf('Repairing'), 'start')
+          runs.start({ workflow: 'sequential-repair', taskId: idOf('Repairing') })
+        },
+      )
+      And('a queued task "Next" on a sequential workflow', () => queued('Next', 'sequential'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Next" was skipped because "a sequential workflow is already running"', () =>
+        expect(skippedFor('Next')).toBe('a sequential workflow is already running'),
+      )
+    })
+  })
 })

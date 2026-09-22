@@ -386,6 +386,104 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a project can choose its own square, or let the name decide', ({ RuleScenario }) => {
+    const exists = (): void => add('factory')
+    const chooseTone =
+      (tone: number | undefined) =>
+      (): void =>
+        attempt(() => {
+          project = projects.setAppearance((project as Project).id, { tone })
+        })
+    const chooseLetters =
+      (initials: string | undefined) =>
+      (): void =>
+        attempt(() => {
+          project = projects.setAppearance((project as Project).id, { initials })
+        })
+    const editColumn =
+      (column: string, value: unknown) =>
+      (): void => {
+        store.db.run(
+          `UPDATE projects SET ${column} = ? WHERE id = ?`,
+          value as string,
+          (project as Project).id,
+        )
+        project = projects.get((project as Project).id)
+      }
+
+    RuleScenario('A new project has chosen neither', ({ When, Then, And }) => {
+      When('I add the project "factory" at that directory', exists)
+      Then('the project has no chosen colour', () => expect(project?.tone).toBeUndefined())
+      And('the project has no chosen letters', () => expect(project?.initials).toBeUndefined())
+    })
+
+    RuleScenario('A colour can be chosen', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I choose colour 3 for it', chooseTone(3))
+      Then("the project's colour is 3", () => expect(project?.tone).toBe(3))
+    })
+
+    RuleScenario('Letters can be chosen', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I choose the letters "fx" for it', chooseLetters('fx'))
+      // Upper-cased in the store, so a square is the same whichever side wrote it.
+      Then("the project's letters are \"FX\"", () => expect(project?.initials).toBe('FX'))
+    })
+
+    RuleScenario('More than two letters is cut to two', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I choose the letters "abcd" for it', chooseLetters('abcd'))
+      Then("the project's letters are \"AB\"", () => expect(project?.initials).toBe('AB'))
+    })
+
+    RuleScenario('Empty letters hand the square back to the name', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('the letters "FX" are chosen for it', chooseLetters('FX'))
+      When('I choose the letters "" for it', chooseLetters(''))
+      Then('the project has no chosen letters', () => expect(project?.initials).toBeUndefined())
+    })
+
+    RuleScenario('A colour can be handed back to the name', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('colour 3 is chosen for it', chooseTone(3))
+      When('I clear its colour', chooseTone(undefined))
+      Then('the project has no chosen colour', () => expect(project?.tone).toBeUndefined())
+    })
+
+    RuleScenario('A colour outside the palette is refused', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I choose colour 9 for it', chooseTone(9))
+      Then('it is refused', () => expect(failure).toBeDefined())
+    })
+
+    RuleScenario('Choosing the square is announced', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I choose colour 3 for it', chooseTone(3))
+      Then('a "project.changed" event says so', () => {
+        const changed = events.find((event) => event.name === 'project.changed')
+        expect(changed?.payload).toMatchObject({ name: 'factory' })
+      })
+    })
+
+    // The whole reason the override exists: a derivation cannot survive this.
+    RuleScenario('A chosen square survives a rename', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('colour 3 is chosen for it', chooseTone(3))
+      When('I rename it to "factory-core"', () =>
+        attempt(() => {
+          project = projects.rename((project as Project).id, 'factory-core')
+        }),
+      )
+      Then("the project's colour is 3", () => expect(project?.tone).toBe(3))
+    })
+
+    RuleScenario('A colour edited into nonsense reads as unchosen', ({ Given, And, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its colour column is edited by hand to 99', editColumn('tone', 99))
+      Then('the project has no chosen colour', () => expect(project?.tone).toBeUndefined())
+    })
+  })
+
   Rule('a project says how much authority its runs get, and what else they may reach', ({
     RuleScenario,
   }) => {

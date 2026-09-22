@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, join, resolve } from 'node:path'
-import { defaultWorktreesRoot, isExecutionProfile, type ExecutionProfile, type Project } from '@factory/core'
+import {
+  PROJECT_TONES,
+  defaultWorktreesRoot,
+  isExecutionProfile,
+  type ExecutionProfile,
+  type Project,
+} from '@factory/core'
 import type { EventBus } from '@factory/events'
 import type { Database } from './sqlite.js'
 
@@ -25,6 +31,8 @@ interface ProjectRow {
   uses_environments: number
   profile: string | null
   granted_directories: string | null
+  tone: number | null
+  initials: string | null
   created_at: string
 }
 
@@ -225,6 +233,40 @@ export class ProjectRepository {
     return this.#changed(id)
   }
 
+  /**
+   * Choose the square, or hand it back to the name.
+   *
+   * `undefined` for either means derived, which is where every project starts
+   * and where it returns to — the same three-position idea `profile` needed,
+   * and for the same reason: "hasn't chosen" is a real answer and has to be
+   * expressible.
+   *
+   * Letters are capped at two and upper-cased here rather than at the edge, so
+   * a square is the same size whichever side of the app wrote it.
+   */
+  setAppearance(
+    id: string,
+    appearance: { tone?: number | undefined; initials?: string | undefined },
+  ): Project {
+    if (this.get(id) === undefined) throw new Error(`No project ${id}.`)
+    if ('tone' in appearance) {
+      const tone = appearance.tone
+      if (tone !== undefined && (!Number.isInteger(tone) || tone < 1 || tone > PROJECT_TONES)) {
+        throw new Error(`A project's colour is 1 to ${PROJECT_TONES}, or nothing to derive it.`)
+      }
+      this.#db.run('UPDATE projects SET tone = ? WHERE id = ?', tone ?? null, id)
+    }
+    if ('initials' in appearance) {
+      const letters = appearance.initials?.trim().slice(0, 2).toUpperCase()
+      this.#db.run(
+        'UPDATE projects SET initials = ? WHERE id = ?',
+        letters === undefined || letters === '' ? null : letters,
+        id,
+      )
+    }
+    return this.#changed(id)
+  }
+
   /** Re-read and announce. Every setter ends the same way. */
   #changed(id: string): Project {
     const updated = this.get(id) as Project
@@ -324,6 +366,15 @@ function hydrate(row: ProjectRow): Project {
     usesWorktrees: row.uses_worktrees === 1,
     usesEnvironments: row.uses_environments === 1,
     ...(profile === undefined ? {} : { profile }),
+    // Out of range reads as unset rather than as a hue nobody defined, for the
+    // same reason `profile` goes through its guard: a column edited by hand
+    // should degrade to the derived square, not to no square at all.
+    ...(row.tone !== null && row.tone >= 1 && row.tone <= PROJECT_TONES
+      ? { tone: row.tone }
+      : {}),
+    ...(row.initials !== null && row.initials.trim() !== ''
+      ? { initials: row.initials }
+      : {}),
     grantedDirectories: readDirectories(row.granted_directories),
     createdAt: row.created_at,
   }

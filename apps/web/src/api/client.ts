@@ -527,6 +527,16 @@ export interface Project {
   /** Whether each task gets an environment of its own. Off unless asked for. */
   usesEnvironments: boolean
   /**
+   * The hue this project's square uses, 1 to 6, when it has chosen one.
+   *
+   * Absent means derived from the name — see `identity.ts`, which is still the
+   * default and still the argument. Read through `markTone`, never directly,
+   * so a chosen square and a derived one look the same at the call site.
+   */
+  tone?: number
+  /** The letters on the square, when chosen. Absent means derived. */
+  initials?: string
+  /**
    * How much authority its runs get. Absent means it follows the installation.
    *
    * Absent is not the same as `default`: a project that has never chosen
@@ -774,6 +784,10 @@ export const api = {
       usesWorktrees?: boolean
       usesEnvironments?: boolean
       profile?: ExecutionProfile | null
+      // `null` for either means derive it from the name, which is where a
+      // project starts and what it returns to.
+      tone?: number | null
+      initials?: string | null
     },
   ) =>
     request<{ project: Project; scaffolded: ScaffoldReport }>(

@@ -182,6 +182,70 @@ Feature: Projects — the repositories Factory works in
       When I rename a project that does not exist
       Then it is refused
 
+  Rule: a project can choose its own square, or let the name decide
+
+    The rail draws a coloured square with two letters, and both were a pure
+    function of the name — consistent everywhere, storing nothing, needing no
+    decision from anybody. That is still what a new project gets.
+
+    What a derivation cannot do is survive a rename: the hash changes, so the
+    square somebody had learned changes colour under them. And six hues across
+    a handful of projects collide often enough to matter. So a project may
+    override either half, and unset means derived, exactly as before.
+
+    Scenario: A new project has chosen neither
+      When I add the project "factory" at that directory
+      Then the project has no chosen colour
+      And the project has no chosen letters
+
+    Scenario: A colour can be chosen
+      Given the project "factory" exists
+      When I choose colour 3 for it
+      Then the project's colour is 3
+
+    Scenario: Letters can be chosen
+      Given the project "factory" exists
+      When I choose the letters "fx" for it
+      Then the project's letters are "FX"
+
+    Scenario: More than two letters is cut to two
+      Given the project "factory" exists
+      When I choose the letters "abcd" for it
+      Then the project's letters are "AB"
+
+    Scenario: Empty letters hand the square back to the name
+      Given the project "factory" exists
+      And the letters "FX" are chosen for it
+      When I choose the letters "" for it
+      Then the project has no chosen letters
+
+    Scenario: A colour can be handed back to the name
+      Given the project "factory" exists
+      And colour 3 is chosen for it
+      When I clear its colour
+      Then the project has no chosen colour
+
+    Scenario: A colour outside the palette is refused
+      Given the project "factory" exists
+      When I choose colour 9 for it
+      Then it is refused
+
+    Scenario: Choosing the square is announced
+      Given the project "factory" exists
+      When I choose colour 3 for it
+      Then a "project.changed" event says so
+
+    Scenario: A chosen square survives a rename
+      Given the project "factory" exists
+      And colour 3 is chosen for it
+      When I rename it to "factory-core"
+      Then the project's colour is 3
+
+    Scenario: A colour edited into nonsense reads as unchosen
+      Given the project "factory" exists
+      And its colour column is edited by hand to 99
+      Then the project has no chosen colour
+
 
   Rule: a project says how much authority its runs get, and what else they may reach
 

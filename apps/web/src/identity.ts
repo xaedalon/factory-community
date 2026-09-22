@@ -44,3 +44,30 @@ export function tone(name: string): number {
 
 /** The CSS variable holding this project's hue. */
 export const toneVariable = (name: string): string => `var(--color-project-${tone(name)})`
+
+/**
+ * What a project's square actually shows.
+ *
+ * The derivation above is still the default and still the argument: a new
+ * project needs no decision and every surface agrees without being told. This
+ * is only the override on top of it, for the two things a hash of the name
+ * cannot do — survive a rename, and avoid a collision when six hues have to
+ * cover a dozen projects.
+ *
+ * Every place that draws a square goes through here, so a chosen colour and a
+ * derived one are indistinguishable at the call site. That is the property
+ * worth having: the rail, the list and the project page cannot disagree.
+ */
+export interface ProjectMark {
+  readonly name: string
+  readonly tone?: number | undefined
+  readonly initials?: string | undefined
+}
+
+/** The letters to draw: chosen, else worked out from the name. */
+export const markInitials = (project: ProjectMark): string =>
+  project.initials !== undefined && project.initials !== '' ? project.initials : initials(project.name)
+
+/** The hue to draw in: chosen, else worked out from the name. */
+export const markTone = (project: ProjectMark): string =>
+  project.tone !== undefined ? `var(--color-project-${project.tone})` : toneVariable(project.name)

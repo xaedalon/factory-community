@@ -3,7 +3,7 @@ import { onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { ALL, useProjects } from '../stores/projects.js'
-import { initials, toneVariable } from '../identity.js'
+import { markInitials, markTone } from '../identity.js'
 
 /**
  * Which project you are working in.
@@ -64,14 +64,14 @@ const square =
               : 'text-white/80 opacity-60 hover:opacity-100',
           ]"
           :style="{
-            backgroundColor: toneVariable(project.name),
-            ...(selected === project.id ? { '--tw-ring-color': toneVariable(project.name) } : {}),
+            backgroundColor: markTone(project),
+            ...(selected === project.id ? { '--tw-ring-color': markTone(project) } : {}),
           }"
           :aria-current="selected === project.id ? 'true' : undefined"
           :title="project.name"
           @click="store.select(project.id)"
         >
-          {{ initials(project.name) }}
+          {{ markInitials(project) }}
         </button>
       </li>
     </ul>

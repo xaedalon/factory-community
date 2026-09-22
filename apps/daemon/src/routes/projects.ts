@@ -4,6 +4,7 @@ import {
   DISCLAIMER,
   EXECUTION_PROFILES,
   NOT_ACCEPTED,
+  PROJECT_TONES,
   hasAccepted,
   isExecutionProfile,
   queueOrder,
@@ -154,6 +155,8 @@ export function registerProjectRoutes(
     Body: {
       name?: unknown
       defaultBranch?: unknown
+      tone?: unknown
+      initials?: unknown
       usesWorktrees?: boolean
       usesEnvironments?: boolean
       profile?: unknown
@@ -164,12 +167,18 @@ export function registerProjectRoutes(
     }
     const { name, defaultBranch, usesWorktrees, usesEnvironments, profile } = request.body ?? {}
     const settingProfile = 'profile' in (request.body ?? {})
+    // Present-and-null is how either half of the square is handed back to the
+    // name, so "in the body" is the question, not "has a value".
+    const settingTone = 'tone' in (request.body ?? {})
+    const settingInitials = 'initials' in (request.body ?? {})
     if (
       name === undefined &&
       defaultBranch === undefined &&
       usesWorktrees === undefined &&
       usesEnvironments === undefined &&
-      !settingProfile
+      !settingProfile &&
+      !settingTone &&
+      !settingInitials
     ) {
       return reply.code(400).send({
         error:
@@ -188,6 +197,22 @@ export function registerProjectRoutes(
       (typeof defaultBranch !== 'string' || defaultBranch.trim() === '')
     ) {
       return reply.code(400).send({ error: 'A project needs a branch to start work from.' })
+    }
+    if (
+      settingTone &&
+      request.body.tone !== null &&
+      (!Number.isInteger(request.body.tone) ||
+        (request.body.tone as number) < 1 ||
+        (request.body.tone as number) > PROJECT_TONES)
+    ) {
+      return reply.code(400).send({
+        error: `colour is 1 to ${PROJECT_TONES}, or null to derive it from the name.`,
+      })
+    }
+    if (settingInitials && request.body.initials !== null) {
+      if (typeof request.body.initials !== 'string') {
+        return reply.code(400).send({ error: 'letters are text, or null to derive them.' })
+      }
     }
     // `null` clears it, which is not the same as `default`: a project that
     // states nothing follows the installation's choice, and returning to that
@@ -213,6 +238,14 @@ export function registerProjectRoutes(
       if (name !== undefined) project = projects.rename(request.params.id, name as string)
       if (defaultBranch !== undefined) {
         project = projects.setDefaultBranch(request.params.id, defaultBranch as string)
+      }
+      if (settingTone || settingInitials) {
+        project = projects.setAppearance(request.params.id, {
+          ...(settingTone ? { tone: (request.body.tone as number | null) ?? undefined } : {}),
+          ...(settingInitials
+            ? { initials: (request.body.initials as string | null) ?? undefined }
+            : {}),
+        })
       }
       if (usesWorktrees !== undefined) {
         project = projects.setWorktrees(request.params.id, usesWorktrees)

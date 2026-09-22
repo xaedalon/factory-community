@@ -430,4 +430,29 @@ export const MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    version: 16,
+    describe: "a project's own square: a chosen hue and chosen letters",
+    up: (db) => {
+      // Both nullable, and null keeps exactly the behaviour that was here
+      // before: the square is derived from the name. `identity.ts` argues for
+      // that derivation and the argument still holds — adding a project should
+      // need no decision from anybody, and a name is enough to be consistent
+      // everywhere without storing a thing.
+      //
+      // What it cannot do is survive a rename, which changes the hash and so
+      // changes the colour of a square somebody had already learned. And with
+      // six hues, two projects collide often enough to matter. So this is an
+      // override, not a replacement: unset means derived, set means chosen.
+      //
+      // `tone` is an index into the six `--color-project-N` hues rather than a
+      // hex. The palette is deliberately closed — tokens.css says a seventh
+      // meaning for colour does not go there — and storing a free colour would
+      // let a project sit outside it.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN tone INTEGER;
+        ALTER TABLE projects ADD COLUMN initials TEXT;
+      `)
+    },
+  },
 ]

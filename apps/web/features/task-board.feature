@@ -190,6 +190,25 @@ Feature: The task board
       And I rename the project to "work"
       Then the name field says the name is taken
 
+    Scenario: A project can choose its own square
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I choose colour 3 and the letters "wk"
+      Then the rail square for "work" says "WK"
+
+    Scenario: The square follows the name until it is chosen
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the square is on automatic
+
+    Scenario: Authority can be handed back to the installation
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the authority field offers following the installation
+
     Scenario: Removing a project takes two clicks
       Given the project "work" is registered
       When I open the projects page

@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import { ApiError, api, type Project } from '../api/client.js'
-import { initials, toneVariable } from '../identity.js'
+import { markInitials, markTone } from '../identity.js'
 import PageHeader from '../components/PageHeader.vue'
 import AppButton from '../components/AppButton.vue'
 import AppIcon from '../components/AppIcon.vue'
@@ -126,11 +126,11 @@ onMounted(load)
         >
           <span
             class="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[11px] font-medium text-white"
-            :style="{ backgroundColor: toneVariable(project.name) }"
+            :style="{ backgroundColor: markTone(project) }"
             :data-testid="`project-mark-${project.name}`"
             aria-hidden="true"
           >
-            {{ initials(project.name) }}
+            {{ markInitials(project) }}
           </span>
 
           <div class="flex min-w-0 flex-1 flex-col">

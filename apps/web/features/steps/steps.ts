@@ -865,6 +865,36 @@ Then('the name field says the name is taken', async ({ page }) => {
   await expect(page.getByTestId('field-error-name')).toContainText('already exists')
 })
 
+When('I choose colour 3 and the letters {string}', async ({ page }, letters: string) => {
+  await page.getByTestId('tone-3').click()
+  await page.getByTestId('project-initials').fill(letters)
+  await page.getByTestId('save-project').click()
+})
+
+// Through the rail rather than the page's own preview: the rail is the surface
+// the choice exists for, and it reads the project from a different store.
+Then('the rail square for {string} says {string}', async ({ page }, name: string, letters: string) => {
+  await expect(page.getByTestId(`project-button-${name}`)).toHaveText(letters)
+})
+
+Then('the square is on automatic', async ({ page }) => {
+  await expect(page.getByTestId('tone-auto')).toHaveAttribute('aria-pressed', 'true')
+})
+
+/**
+ * The third position has to be reachable.
+ *
+ * `default` and unset are different things — a project that states nothing
+ * follows the installation, so changing the installation changes it, while
+ * `default` pins it. A select with only the two named profiles showed
+ * "default" for a project that had chosen nothing.
+ */
+Then('the authority field offers following the installation', async ({ page }) => {
+  const select = page.getByTestId('project-profile')
+  await expect(select).toHaveValue('')
+  await expect(select.locator('option[value=""]')).toHaveText('Follows the installation')
+})
+
 When('I press remove once', async ({ page }) => {
   await page.getByTestId('remove-project').click()
 })

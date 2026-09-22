@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ApiError, api, type ExecutionProfile, type Project } from '../api/client.js'
-import { initials, toneVariable } from '../identity.js'
+import { markInitials, markTone } from '../identity.js'
 import PageHeader from '../components/PageHeader.vue'
 import AppButton from '../components/AppButton.vue'
 import AppIcon from '../components/AppIcon.vue'
@@ -11,6 +11,7 @@ import FieldRow from '../components/form/FieldRow.vue'
 import TextInput from '../components/form/TextInput.vue'
 import SelectInput from '../components/form/SelectInput.vue'
 import ToggleField from '../components/form/ToggleField.vue'
+import MarkPicker from '../components/form/MarkPicker.vue'
 
 /**
  * A project, on a page of its own.
@@ -39,6 +40,8 @@ const branch = ref('main')
 const usesWorktrees = ref(true)
 const usesEnvironments = ref(false)
 const profile = ref('')
+const tone = ref<number | undefined>(undefined)
+const letters = ref<string | undefined>(undefined)
 
 const loaded = ref<Project | undefined>(undefined)
 const loading = ref(false)
@@ -90,6 +93,8 @@ async function load(): Promise<void> {
     usesWorktrees.value = found.usesWorktrees
     usesEnvironments.value = found.usesEnvironments
     profile.value = found.profile ?? ''
+    tone.value = found.tone
+    letters.value = found.initials
   } catch (caught) {
     error.value = caught instanceof ApiError ? caught.message : String(caught)
   } finally {
@@ -135,6 +140,8 @@ async function save(): Promise<void> {
       usesWorktrees: usesWorktrees.value,
       usesEnvironments: usesEnvironments.value,
       profile: profile.value === '' ? null : (profile.value as ExecutionProfile),
+      tone: tone.value ?? null,
+      initials: letters.value ?? null,
     })
     // A scaffold *error* is a reason to stay: it is about this form, and the
     // person is mid-edit. A scaffold *report* is a result, and travels.
@@ -209,10 +216,10 @@ onMounted(load)
       <div v-if="!isNew && loaded" class="mb-5 flex items-center gap-3">
         <span
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-medium text-white"
-          :style="{ backgroundColor: toneVariable(loaded.name) }"
+          :style="{ backgroundColor: markTone(loaded) }"
           aria-hidden="true"
         >
-          {{ initials(loaded.name) }}
+          {{ markInitials(loaded) }}
         </span>
         <div class="min-w-0">
           <p class="truncate text-sm">{{ loaded.name }}</p>
@@ -273,6 +280,18 @@ onMounted(load)
         <TextInput id="project-branch" v-model="branch" mono data-testid="project-branch" placeholder="main" />
       </FieldRow>
 
+      <FieldRow
+        label="Square"
+        icon="project"
+        hint="What the rail shows for this project. Left automatic it follows the name — which means a rename changes it, and two projects can land on the same hue."
+      >
+        <MarkPicker
+          v-model:tone="tone"
+          v-model:initials="letters"
+          :name="name"
+        />
+      </FieldRow>
+
       <div class="mt-5 space-y-2">
         <p class="font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase">
           How work runs here
@@ -306,10 +325,18 @@ onMounted(load)
           for="project-profile"
           hint="How much an agent in this project may reach. Following the installation means this project changes when the installation does — choosing one pins it."
         >
+          <!-- Three positions, and the third is the one that matters: a project
+               that states nothing follows the installation, so changing the
+               installation changes it. Without an empty option the control
+               showed "default" for a project that had chosen nothing — which
+               is not a display detail, because `default` pins the project
+               against an installation that later switches to Full Access. -->
           <SelectInput
             id="project-profile"
             v-model="profile"
             data-testid="project-profile"
+            allow-empty
+            empty-label="Follows the installation"
             :options="['default', 'full-access']"
           />
           <p
@@ -322,9 +349,6 @@ onMounted(load)
             environment.
           </p>
         </FieldRow>
-        <p class="pl-[10rem] text-xs text-[var(--color-ink-faint)]">
-          Leave it empty to follow the installation.
-        </p>
       </div>
 
       <p

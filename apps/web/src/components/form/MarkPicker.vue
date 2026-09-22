@@ -60,7 +60,7 @@ const shownLetters = computed(() =>
       >
         {{ shownLetters }}
       </span>
-      <span class="font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+      <span class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
         Rail
       </span>
     </div>
@@ -102,7 +102,7 @@ const shownLetters = computed(() =>
       <div class="mt-3 flex items-center gap-2">
         <label
           for="project-initials"
-          class="font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase"
+          class="font-mono text-label text-[var(--color-ink-faint)] uppercase"
         >
           Letters
         </label>

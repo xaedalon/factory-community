@@ -82,6 +82,39 @@
   --color-warn: #f0a020;
   --color-danger: #e5484d;
 
+  /*
+   * The ranks, so a heading can outrank the labels inside it.
+   *
+   * 292 text-size utilities and 287 of them were 14px or smaller, which is a
+   * page where nothing outranks anything. Two ranks were missing and two were
+   * redundant: `text-[10px]` and `text-[11px]` were one rank spelled twice,
+   * 118 times between them, and there was no section heading at all.
+   *
+   * Written here because the alternative is what happened while these pages
+   * were being converted: `text-lg leading-snug font-medium` typed out eleven
+   * times across four files, which is the drift the top of this file exists to
+   * complain about. Tailwind 4 reads the modifiers too, so one utility carries
+   * size, leading and weight together.
+   *
+   * `label` keeps `font-mono` and `uppercase` at the call site: neither is in
+   * this namespace, and a label is not always uppercase.
+   */
+  --text-display: 28px;
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.01em;
+  --text-display--font-weight: 500;
+
+  --text-title: 18px;
+  --text-title--line-height: 1.3;
+  --text-title--font-weight: 500;
+
+  --text-metric: 30px;
+  --text-metric--line-height: 1;
+
+  --text-label: 11px;
+  --text-label--line-height: 1;
+  --text-label--letter-spacing: 0.08em;
+
   --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 

@@ -84,7 +84,7 @@ const when = (iso: string): string => new Date(iso).toLocaleString()
         class="mb-4 flex flex-wrap items-center gap-2"
         data-testid="artifact-versions"
       >
-        <span class="font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
+        <span class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
           Versions
         </span>
         <button

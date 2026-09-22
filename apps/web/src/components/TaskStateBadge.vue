@@ -27,7 +27,7 @@ const look = computed(() =>
 <template>
   <span
     v-if="look"
-    class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-[10px] tracking-wide uppercase"
+    class="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 font-mono text-label uppercase"
     :style="{ color: look.tone, backgroundColor: fillFor(look) }"
     :data-testid="`state-${state}`"
   >

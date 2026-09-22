@@ -169,7 +169,7 @@ onMounted(async () => {
       </FieldRow>
 
       <div class="pt-4">
-        <p class="mb-2 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+        <p class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
           Steps
         </p>
         <StepsEditor

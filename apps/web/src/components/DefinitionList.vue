@@ -170,7 +170,7 @@ watch(() => chosen.projectId, reload)
       class="mb-8 last:mb-0"
       :data-testid="`${kind}-group-${group.key}`"
     >
-      <h2 class="mb-2 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+      <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
         {{ group.title }}
         <span v-if="group.key === 'builtin'" class="normal-case tracking-normal">
           — ships with Factory; saving one writes your own copy
@@ -182,7 +182,7 @@ watch(() => chosen.projectId, reload)
           <th
             v-for="heading in ['Name', 'Scope', '', 'Location', '']"
             :key="heading"
-            class="pb-2 font-mono text-[10px] font-normal tracking-widest text-[var(--color-ink-faint)] uppercase"
+            class="pb-2 font-mono text-label font-normal text-[var(--color-ink-faint)] uppercase"
           >
             {{ heading }}
           </th>

@@ -131,7 +131,7 @@ const router = useRouter()
         >
           {{ markInitials(group.project) }}
         </span>
-        <h2 class="text-lg leading-snug font-medium">{{ group.project.name }}</h2>
+        <h2 class="text-title">{{ group.project.name }}</h2>
       </header>
 
       <p
@@ -190,7 +190,7 @@ const router = useRouter()
     </section>
 
     <section v-if="stray.length > 0" data-testid="stray-environments">
-      <h2 class="mb-2 flex items-center gap-2 text-lg leading-snug font-medium text-[var(--color-warn)]">
+      <h2 class="mb-2 flex items-center gap-2 text-title text-[var(--color-warn)]">
         <AppIcon name="alert" :size="15" />
         Holding an environment, in a project that says it has none
       </h2>

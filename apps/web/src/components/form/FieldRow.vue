@@ -21,7 +21,7 @@ defineProps<{
   <div class="grid grid-cols-[9rem_1fr] items-start gap-4 py-2">
     <label
       :for="$props.for"
-      class="flex items-center gap-1.5 pt-1.5 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase"
+      class="flex items-center gap-1.5 pt-1.5 font-mono text-label text-[var(--color-ink-faint)] uppercase"
     >
       <AppIcon v-if="icon" :name="icon" :size="12" />
       {{ label }}

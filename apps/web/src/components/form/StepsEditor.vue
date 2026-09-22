@@ -100,7 +100,7 @@ const fieldsOf = (step: Step): Record<string, unknown> => {
         >
           {{ open === index ? '▾' : '▸' }}
         </button>
-        <span class="font-mono text-[10px] tracking-widest text-[var(--color-accent-text)] uppercase">
+        <span class="font-mono text-label text-[var(--color-accent-text)] uppercase">
           {{ step.uses }}
         </span>
         <span class="value min-w-0 flex-1 truncate text-[var(--color-ink-muted)]">
@@ -144,7 +144,7 @@ const fieldsOf = (step: Step): Record<string, unknown> => {
       <div v-if="open === index" class="border-t border-[var(--color-line)] px-3 pb-3">
         <div class="grid grid-cols-[9rem_1fr] items-start gap-4 py-2">
           <label
-            class="pt-1.5 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase"
+            class="pt-1.5 font-mono text-label text-[var(--color-ink-faint)] uppercase"
           >
             uses
           </label>

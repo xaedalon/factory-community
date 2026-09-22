@@ -293,7 +293,7 @@ onMounted(load)
       </FieldRow>
 
       <div class="mt-5 space-y-2">
-        <p class="font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+        <p class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
           How work runs here
         </p>
 

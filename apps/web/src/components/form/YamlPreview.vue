@@ -5,7 +5,7 @@ defineProps<{ text: string; stale?: boolean | undefined }>()
 <template>
   <div class="flex h-full flex-col border-l border-[var(--color-line)] bg-[var(--color-surface)]">
     <div
-      class="flex items-center gap-2 border-b border-[var(--color-line)] px-4 py-2 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase"
+      class="flex items-center gap-2 border-b border-[var(--color-line)] px-4 py-2 font-mono text-label text-[var(--color-ink-faint)] uppercase"
     >
       <span>Preview</span>
       <span v-if="stale" class="text-[var(--color-ink-faint)]" data-testid="preview-stale">…</span>

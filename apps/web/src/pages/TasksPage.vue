@@ -171,7 +171,7 @@ onUnmounted(() => store.disconnect())
         :data-testid="`summary-${card.key}`"
         class="rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-4 py-3"
       >
-        <p class="font-mono text-2xl" :class="card.tone">{{ card.value }}</p>
+        <p class="font-mono text-metric" :class="card.tone">{{ card.value }}</p>
         <p class="mt-0.5 text-xs text-[var(--color-ink-muted)]">{{ card.label }}</p>
       </div>
     </div>
@@ -307,7 +307,7 @@ onUnmounted(() => store.disconnect())
     <div v-else-if="view === 'list'" class="overflow-x-auto">
       <table class="w-full min-w-[56rem] text-sm" data-testid="task-table">
         <thead>
-          <tr class="border-b border-[var(--color-line)] text-left font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
+          <tr class="border-b border-[var(--color-line)] text-left font-mono text-label text-[var(--color-ink-faint)] uppercase">
             <th class="py-2 pr-4">Ticket</th>
             <th class="py-2 pr-4">Task</th>
             <th class="py-2 pr-4">Project</th>
@@ -424,7 +424,7 @@ onUnmounted(() => store.disconnect())
         :data-testid="`column-${column}`"
       >
         <header class="flex items-center justify-between px-1 pb-2">
-          <span class="font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
+          <span class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
             {{ HEADINGS[column] }}
           </span>
           <span class="font-mono text-[10px] text-[var(--color-ink-faint)]">

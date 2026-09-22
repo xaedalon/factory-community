@@ -555,7 +555,7 @@ const stepTone: Record<string, string> = {
         v-if="renaming"
         v-model="nameDraft"
         data-testid="task-name-input"
-        class="w-full max-w-xl rounded-md border border-[var(--color-accent)] bg-[var(--color-base)] px-2 py-1 text-xl font-medium focus:outline-none"
+        class="w-full max-w-xl rounded-md border border-[var(--color-accent)] bg-[var(--color-base)] px-2 py-1 text-display focus:outline-none"
         :disabled="renamingBusy"
         autofocus
         @keydown.enter.prevent="saveName"
@@ -673,7 +673,7 @@ const stepTone: Record<string, string> = {
           <AppIcon :name="band.icon" :size="17" />
         </span>
         <div class="min-w-0 flex-1">
-          <p class="text-lg leading-snug font-medium">{{ band.title }}</p>
+          <p class="text-title">{{ band.title }}</p>
           <!-- Keeps its own testid: this is still where the reason for a
                blocked task is read, it has simply stopped being a lone red
                paragraph halfway down the page. -->
@@ -729,7 +729,7 @@ const stepTone: Record<string, string> = {
             data-testid="evidence"
             :style="{ order: decisionPending ? 0 : 2 }"
           >
-            <h2 class="mb-2 text-lg leading-snug font-medium">
+            <h2 class="mb-2 text-title">
               Evidence
             </h2>
             <div
@@ -770,7 +770,7 @@ const stepTone: Record<string, string> = {
           </section>
           <section data-testid="task-plan" :style="{ order: 1 }">
             <div class="mb-2 flex items-baseline gap-3">
-              <h2 class="text-lg leading-snug font-medium">Workflows</h2>
+              <h2 class="text-title">Workflows</h2>
               <!-- On the page someone actually watches a task from, which is the one
                    place progress was never served. -->
               <span
@@ -841,7 +841,7 @@ const stepTone: Record<string, string> = {
             </div>
           </section>
           <section v-if="openRun" :style="{ order: 3 }">
-            <h2 class="mb-2 text-lg leading-snug font-medium">
+            <h2 class="mb-2 text-title">
               Steps
             </h2>
             <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]">
@@ -896,7 +896,7 @@ const stepTone: Record<string, string> = {
             class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-3.5"
             data-testid="task-workspace"
           >
-            <h2 class="mb-2 font-mono text-[11px] leading-none tracking-widest text-[var(--color-ink-faint)] uppercase">
+            <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
               Where it runs
             </h2>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -990,7 +990,7 @@ const stepTone: Record<string, string> = {
                control the daemon would accept has to be here, or the rule has two
                different answers depending on where you ask. -->
           <section data-testid="task-dependencies">
-            <h2 class="mb-2 font-mono text-[11px] leading-none tracking-widest text-[var(--color-ink-faint)] uppercase">
+            <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
               Waits for
             </h2>
 
@@ -1008,7 +1008,7 @@ const stepTone: Record<string, string> = {
                      whether this task can ever start, and "done" and "archived
                      after finishing" are the same answer. -->
                 <span
-                  class="font-mono text-[10px] tracking-wide"
+                  class="font-mono text-label"
                   :class="{
                     'text-[var(--color-ink-faint)]': blocker.status === 'met',
                     'text-[var(--color-warn)]': blocker.status === 'waiting',
@@ -1077,7 +1077,7 @@ const stepTone: Record<string, string> = {
                and somebody looking for "what did the analysis say" should not have
                to scroll past a run list and guess which one to open. -->
           <section v-if="detail.artifacts.length > 0" data-testid="artifacts">
-            <h2 class="mb-2 font-mono text-[11px] leading-none tracking-widest text-[var(--color-ink-faint)] uppercase">
+            <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
               Artifacts
             </h2>
             <RouterLink
@@ -1110,7 +1110,7 @@ const stepTone: Record<string, string> = {
             </RouterLink>
           </section>
           <section>
-            <h2 class="mb-2 font-mono text-[11px] leading-none tracking-widest text-[var(--color-ink-faint)] uppercase">
+            <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
               Runs
             </h2>
             <p v-if="detail.runs.length === 0" class="text-sm text-[var(--color-ink-muted)]" data-testid="no-runs">
@@ -1137,7 +1137,7 @@ const stepTone: Record<string, string> = {
                      under Full Access still says so after the project moved on. -->
                 <span
                   v-if="run.profile === 'full-access'"
-                  class="ml-1.5 font-mono text-[10px] tracking-wider text-[var(--color-warn)] uppercase"
+                  class="ml-1.5 font-mono text-label text-[var(--color-warn)] uppercase"
                   :data-testid="`run-profile-${run.workflow}-${run.attempt}`"
                 >
                   full access
@@ -1157,7 +1157,7 @@ const stepTone: Record<string, string> = {
             </p>
           </section>
           <section>
-            <h2 class="mb-2 font-mono text-[11px] leading-none tracking-widest text-[var(--color-ink-faint)] uppercase">
+            <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
               History
             </h2>
             <ol class="space-y-1.5" data-testid="history">

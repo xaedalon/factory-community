@@ -151,7 +151,7 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
                 @update:model-value="toggle(entry)"
               />
               <span
-                class="font-mono text-[10px] tracking-wide"
+                class="font-mono text-label"
                 :class="entry.enabled ? 'text-[var(--color-ok)]' : 'text-[var(--color-ink-faint)]'"
                 :data-testid="`plugin-state-${entry.id}`"
               >
@@ -201,7 +201,7 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
     <!-- Availability is about the CLI, not about the plugin, so it keeps its
          own section rather than being folded into a row above. -->
     <section v-if="providers.length > 0" data-testid="providers">
-      <h2 class="mb-3 flex items-center gap-2 text-lg leading-snug font-medium">
+      <h2 class="mb-3 flex items-center gap-2 text-title">
         <AppIcon name="profile" :size="15" class="text-[var(--color-ink-muted)]" />
         Agents
       </h2>
@@ -214,7 +214,7 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
         >
           <span class="value w-24">{{ provider.id }}</span>
           <span
-            class="inline-flex items-center gap-1 font-mono text-[10px] tracking-wide"
+            class="inline-flex items-center gap-1 font-mono text-label"
             :class="provider.available ? 'text-[var(--color-ok)]' : 'text-[var(--color-warn)]'"
           >
             <AppIcon :name="provider.available ? 'check' : 'alert'" :size="10" />

@@ -30,7 +30,7 @@ const tone = (action: ImportItem['action']) =>
         <th
           v-for="heading in ['Action', 'Kind', 'Name', 'Notes']"
           :key="heading"
-          class="pb-2 font-mono text-[10px] font-normal tracking-widest text-[var(--color-ink-faint)] uppercase"
+          class="pb-2 font-mono text-label font-normal text-[var(--color-ink-faint)] uppercase"
         >
           {{ heading }}
         </th>

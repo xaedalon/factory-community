@@ -8,7 +8,7 @@ defineProps<{ title: string; subtitle?: string | undefined }>()
       <!-- The slot defaults to the prop, so every page that just wants a heading
            passes a string and reads no differently than before. A page whose
            title is editable puts its own control here. -->
-      <h1 class="text-xl font-medium">
+      <h1 class="text-display">
         <slot name="title">{{ title }}</slot>
       </h1>
       <!-- Same idiom as the title: the slot defaults to the prop, so a page that

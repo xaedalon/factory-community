@@ -23,7 +23,7 @@ const tone = computed(
 
 <template>
   <span
-    class="inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10px] tracking-widest uppercase"
+    class="inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-label uppercase"
     :class="tone"
     :data-testid="`scope-${scope}`"
   >

@@ -37,7 +37,7 @@ const path = computed(() => target.value?.root ?? '')
         type="button"
         :disabled="!scope.writable"
         :data-testid="`scope-option-${scope.kind}`"
-        class="px-3 py-1.5 font-mono text-[11px] tracking-wide transition-colors"
+        class="px-3 py-1.5 font-mono text-label transition-colors"
         :class="[
           scope.kind === modelValue
             ? 'bg-[var(--color-accent-soft)] text-[var(--color-ink)]'

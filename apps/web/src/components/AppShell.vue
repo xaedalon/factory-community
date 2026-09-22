@@ -83,7 +83,7 @@ const current = computed(() => route.path)
         class="mx-3 mb-1 rounded-md border border-[var(--color-warn)]/50 bg-[var(--color-warn)]/10 px-3 py-2"
         data-testid="full-access-badge"
       >
-        <p class="font-mono text-[10px] leading-tight tracking-widest text-[var(--color-warn)] uppercase">
+        <p class="font-mono text-label text-[var(--color-warn)] uppercase">
           Full Access
         </p>
         <p class="mt-0.5 text-[10px] leading-tight text-[var(--color-ink-muted)]">
@@ -94,7 +94,7 @@ const current = computed(() => route.path)
       <div v-for="(section, index) in nav" :key="section.heading ?? index" class="px-2">
         <p
           v-if="section.heading"
-          class="mt-5 mb-1 px-3 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase"
+          class="mt-5 mb-1 px-3 font-mono text-label text-[var(--color-ink-faint)] uppercase"
           :data-testid="`nav-section-${section.heading.toLowerCase()}`"
         >
           {{ section.heading }}

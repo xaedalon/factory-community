@@ -35,7 +35,7 @@ const confirmingDelete = ref(false)
       <h1 class="text-base font-medium">{{ title }}</h1>
       <span
         v-if="dirty"
-        class="flex items-center gap-1 font-mono text-[10px] tracking-wide text-[var(--color-warn)]"
+        class="flex items-center gap-1 font-mono text-label text-[var(--color-warn)]"
         data-testid="dirty"
       >
         <AppIcon name="alert" :size="11" />

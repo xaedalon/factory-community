@@ -79,7 +79,7 @@ onMounted(() => {
       class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
       data-testid="appearance"
     >
-      <h2 class="mb-3 flex items-center gap-2 text-lg leading-snug font-medium">
+      <h2 class="mb-3 flex items-center gap-2 text-title">
         <AppIcon name="light" :size="15" class="text-[var(--color-ink-muted)]" />
         Appearance
       </h2>
@@ -107,7 +107,7 @@ onMounted(() => {
         that changes.
       </p>
 
-      <p class="mt-6 mb-2 font-mono text-[11px] leading-none tracking-widest text-[var(--color-ink-faint)] uppercase">
+      <p class="mt-6 mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
         Interface size
       </p>
       <div class="flex flex-wrap items-center gap-2">
@@ -144,7 +144,7 @@ onMounted(() => {
       class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
       data-testid="execution-profile"
     >
-      <h2 class="mb-3 flex items-center gap-2 text-lg leading-snug font-medium">
+      <h2 class="mb-3 flex items-center gap-2 text-title">
         <AppIcon name="profile" :size="15" class="text-[var(--color-ink-muted)]" />
         What agents may reach
       </h2>
@@ -192,7 +192,7 @@ onMounted(() => {
       class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
       data-testid="disclaimer-state"
     >
-      <h2 class="mb-2 flex items-center gap-2 text-lg leading-snug font-medium">
+      <h2 class="mb-2 flex items-center gap-2 text-title">
         <AppIcon :name="settings.accepted === true ? 'check' : 'alert'" :size="15"
           :class="settings.accepted === true ? 'text-[var(--color-ok)]' : 'text-[var(--color-warn)]'" />
         What you agreed to
@@ -253,7 +253,7 @@ onMounted(() => {
       class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
       data-testid="settings-file"
     >
-      <h2 class="mb-2 flex items-center gap-2 text-lg leading-snug font-medium">
+      <h2 class="mb-2 flex items-center gap-2 text-title">
         <AppIcon name="folder" :size="15" class="text-[var(--color-ink-muted)]" />
         Where this is kept
       </h2>

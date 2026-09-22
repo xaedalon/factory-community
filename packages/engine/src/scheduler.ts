@@ -228,7 +228,9 @@ export class Scheduler {
   #tick(): TickReport {
     const running = this.#tasks.list({ state: 'running' })
     let capacity = this.#maxParallel - running.length
-    let sequentialBusy = running.some((task) => this.#factsFor(task).scheduling === 'sequential')
+    let sequentialBusy = running.some(
+      (task) => this.#executing(task) && this.#factsFor(task).scheduling === 'sequential',
+    )
 
     // Who is holding a shared working copy: everything running, plus everything
     // parked at a gate with uncommitted changes still in the tree. Keyed by
@@ -263,6 +265,21 @@ export class Scheduler {
     for (const task of running) {
       if (this.#active.has(task.id)) continue
       if (this.#runs.pausedFor(task.id) === undefined) continue
+      // The lane, which this loop used to skip entirely. The queued path below
+      // checks it, and a workflow that is unsafe to run twice at once does not
+      // become safe because a person approved it: two `merge` workflows
+      // approved in the same second overlapped and left a staged deletion of a
+      // file that had just merged cleanly.
+      //
+      // Capacity is deliberately not checked, as before: the task is already
+      // running and occupies its slot either way.
+      if (this.#factsFor(task).scheduling === 'sequential') {
+        if (sequentialBusy) {
+          skipped.push({ task, reason: 'a sequential workflow is already running' })
+          continue
+        }
+        sequentialBusy = true
+      }
       this.#hand(task)
       started.push(task)
     }
@@ -421,6 +438,25 @@ export class Scheduler {
     while (this.#inFlight.size > 0) {
       await Promise.all([...this.#inFlight])
     }
+  }
+
+  /**
+   * Whether this task is actually running something right now.
+   *
+   * Not the same as `state === 'running'`. A task whose run paused at an
+   * approval gate and was then approved is `running` and executing nothing,
+   * and counting it as the sequential lane's occupant made each of two
+   * simultaneous approvals see the other as busy while neither was doing any
+   * work — so both resumed together.
+   *
+   * Two sources because neither is enough on its own. `#active` covers the
+   * moment between handing a task over and the engine writing its run row.
+   * The run's own state survives a restart, where nothing was handed over in
+   * this process, and it is what tells a paused run from a going one.
+   */
+  #executing(task: Task): boolean {
+    if (this.#active.has(task.id)) return true
+    return this.#runs.forTask(task.id)[0]?.state === 'running'
   }
 
   /**

@@ -449,3 +449,45 @@ Feature: Deciding what runs next
       And a queued task "Next" on a sequential workflow
       When the scheduler ticks
       Then "Next" was skipped because "a sequential workflow is already running"
+
+  Rule: the lane holds across an approval gate too
+
+    A task parked at an approval gate is `running` and holding a paused run.
+    Nothing but the resume loop above will ever pick it up, so that loop was
+    written to hand one over unconditionally — and it did, whatever lane the
+    workflow was in. Approve two tasks in the same second and both resumed
+    their sequential workflows together: measured at 15:03:19.832 and
+    15:03:19.853, two `merge` workflows overlapping, leaving the repository
+    with a staged deletion of a file that had just merged cleanly.
+
+    The other half is that a paused run holds nothing. It is not executing —
+    that is what "paused" means — so counting it as the lane's occupant made
+    each of two approvals see the other as busy while neither was running
+    anything.
+
+    Scenario: Two approved tasks do not resume their sequential workflows together
+      Given a task "First" approved and holding a paused sequential run
+      And a task "Second" approved and holding a paused sequential run
+      When the scheduler ticks
+      Then 1 task was handed over
+      And "Second" was skipped because "a sequential workflow is already running"
+
+    Scenario: The one left behind resumes on the next tick
+      Given a task "First" approved and holding a paused sequential run
+      And a task "Second" approved and holding a paused sequential run
+      And the scheduler ticks
+      When "First" finishes
+      And the scheduler ticks again
+      Then "Second" was handed over
+
+    Scenario: An approved parallel workflow resumes beside a sequential one
+      Given a task "First" approved and holding a paused sequential run
+      And a task "Second" approved and holding a paused parallel run
+      When the scheduler ticks
+      Then 2 tasks were handed over
+
+    Scenario: A task waiting to be approved does not hold the lane
+      Given a task "Waiting" at an approval gate nobody has answered
+      And a queued task "Next" on a sequential workflow
+      When the scheduler ticks
+      Then "Next" is started

@@ -1123,4 +1123,88 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
       )
     })
   })
+  Rule('the lane holds across an approval gate too', ({ RuleScenario }) => {
+    /** Approved, holding a paused run, waiting for the resume loop to pick it up. */
+    const approvedOn = (name: string, lane: Scheduling) => (): void => {
+      queued(name, lane)
+      const id = idOf(name)
+      tasks.act(id, 'start')
+      const run = runs.start({ workflow: `${lane}-work`, taskId: id })
+      runs.pause(run.id, 1)
+      tasks.act(id, 'await_approval')
+      tasks.act(id, 'approve')
+    }
+    const handedOver = (name: string) => handovers.includes(idOf(name))
+
+    RuleScenario('Two approved tasks do not resume their sequential workflows together', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "First" approved and holding a paused sequential run', approvedOn('First', 'sequential'))
+      And('a task "Second" approved and holding a paused sequential run', approvedOn('Second', 'sequential'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('1 task was handed over', () => expect(handovers).toHaveLength(1))
+      And('"Second" was skipped because "a sequential workflow is already running"', () =>
+        expect(skippedFor('Second')).toBe('a sequential workflow is already running'),
+      )
+    })
+
+    RuleScenario('The one left behind resumes on the next tick', ({ Given, And, When, Then }) => {
+      Given('a task "First" approved and holding a paused sequential run', approvedOn('First', 'sequential'))
+      And('a task "Second" approved and holding a paused sequential run', approvedOn('Second', 'sequential'))
+      And('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      When('"First" finishes', () => {
+        const paused = runs.pausedFor(idOf('First'))
+        if (paused !== undefined) runs.resume(paused.id)
+        tasks.act(idOf('First'), 'complete')
+      })
+      And('the scheduler ticks again', () => {
+        report = scheduler.tick()
+      })
+      Then('"Second" was handed over', () => expect(handedOver('Second')).toBe(true))
+    })
+
+    RuleScenario('An approved parallel workflow resumes beside a sequential one', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "First" approved and holding a paused sequential run', approvedOn('First', 'sequential'))
+      And('a task "Second" approved and holding a paused parallel run', approvedOn('Second', 'parallel'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('2 tasks were handed over', () => expect(handovers).toHaveLength(2))
+    })
+
+    // The other half: a run stopped at a gate is not executing anything, so it
+    // cannot be what makes the lane busy.
+    RuleScenario('A task waiting to be approved does not hold the lane', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Waiting" at an approval gate nobody has answered', () => {
+        queued('Waiting', 'sequential')
+        const id = idOf('Waiting')
+        tasks.act(id, 'start')
+        const run = runs.start({ workflow: 'sequential-work', taskId: id })
+        runs.pause(run.id, 1)
+        tasks.act(id, 'await_approval')
+      })
+      And('a queued task "Next" on a sequential workflow', () => queued('Next', 'sequential'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Next" is started', () => expect(startedNames()).toEqual(['Next']))
+    })
+  })
 })

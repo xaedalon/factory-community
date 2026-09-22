@@ -510,6 +510,21 @@ const band = computed((): { tone: string; icon: IconName; title: string; detail:
  */
 const decisionPending = computed(() => detail.value?.task.state === 'awaiting_approval')
 
+/**
+ * An icon per tool, by the id the plugin registered.
+ *
+ * Keyed on the id and not the label, because the label is the plugin's to
+ * change and several of these are somebody else's plugin. A tool this map has
+ * never heard of still gets a mark: they all open something, which is what the
+ * fallback says, and the label carries the rest.
+ */
+const TOOL_ICON: Record<string, IconName> = {
+  'open-terminal': 'terminal',
+  'open-session': 'link',
+  diffity: 'diff',
+}
+const toolIcon = (id: string): IconName => TOOL_ICON[id] ?? 'link'
+
 /** A mark per step state, so a list of twelve can be read down rather than across. */
 const STEP_ICON: Record<string, IconName> = {
   completed: 'check',
@@ -606,6 +621,23 @@ const stepTone: Record<string, string> = {
       >
         {{ detail?.task.description }}
       </p>
+    </template>
+
+    <!-- The way back belongs where a person looks for it, which is the top.
+         At the foot of the page it was below the history of everything that had
+         ever happened to the task — reachable only by scrolling past the thing
+         you had finished reading. -->
+    <template #actions>
+      <Tooltip label="Back to the board">
+        <RouterLink
+          to="/tasks"
+          class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line-strong)] px-2.5 py-1.5 text-sm text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]"
+          data-testid="back-to-tasks"
+        >
+          <AppIcon name="back" :size="13" />
+          All tasks
+        </RouterLink>
+      </Tooltip>
     </template>
   </PageHeader>
 
@@ -924,7 +956,7 @@ const stepTone: Record<string, string> = {
               v-for="tool in detail.tools"
               :key="tool.id"
               type="button"
-              class="rounded-md border border-[var(--color-line-strong)] px-2 py-1 text-xs text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:cursor-not-allowed disabled:text-[var(--color-ink-faint)] disabled:hover:text-[var(--color-ink-faint)]"
+              class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line-strong)] px-2 py-1 text-xs text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)] disabled:cursor-not-allowed disabled:text-[var(--color-ink-faint)] disabled:hover:text-[var(--color-ink-faint)]"
               :disabled="opening !== undefined || tool.unavailable !== undefined"
               :title="
                 tool.unavailable ??
@@ -933,6 +965,7 @@ const stepTone: Record<string, string> = {
               :data-testid="`tool-${tool.id}`"
               @click="runTool(tool)"
             >
+              <AppIcon :name="toolIcon(tool.id)" :size="11" />
               {{ tool.label }}
               <!-- The label stays the tool's own either way. Nothing installed here
                    can perform it, so pressing it copies the line instead — said
@@ -1009,7 +1042,7 @@ const stepTone: Record<string, string> = {
             <div v-if="candidates.length > 0" class="flex flex-col gap-2">
               <select
                 v-model="addBlocker"
-                class="w-full rounded-md border border-[var(--color-line)] bg-[var(--color-raised)] px-2 py-1.5 text-sm"
+                class="field-control text-sm"
                 data-testid="blocker-choice"
               >
                 <option value="">Choose a task…</option>
@@ -1156,9 +1189,6 @@ const stepTone: Record<string, string> = {
         </aside>
       </div>
 
-      <RouterLink to="/tasks" class="inline-block text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]">
-        ← All tasks
-      </RouterLink>
     </div>
   </div>
 </template>

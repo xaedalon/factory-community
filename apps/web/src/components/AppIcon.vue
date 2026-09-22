@@ -22,6 +22,7 @@ export type IconName =
   | 'branch'
   | 'check'
   | 'copy'
+  | 'diff'
   | 'edit'
   | 'environment'
   | 'export'
@@ -38,6 +39,7 @@ export type IconName =
   | 'settings'
   | 'stop'
   | 'tasks'
+  | 'terminal'
   | 'worktree'
 
 const PATHS: Record<IconName, string> = {
@@ -47,6 +49,7 @@ const PATHS: Record<IconName, string> = {
   branch: 'M6 3v12M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 9a9 9 0 0 1-9 9',
   check: 'M20 6 9 17l-5-5',
   copy: 'M8 8h11a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H8a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1ZM16 5V4a1 1 0 0 0-1-1H4a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h1',
+  diff: 'M6 3v8M3 6h6M6 17a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM15 21h6M18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6ZM18 9v12',
   edit: 'M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z',
   environment: 'M12 2 2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5',
   export: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
@@ -63,6 +66,7 @@ const PATHS: Record<IconName, string> = {
   settings: 'M4 6h16M4 12h16M4 18h16M9 6v0M15 12v0M7 18v0',
   stop: 'M6 6h12v12H6z',
   tasks: 'M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01',
+  terminal: 'M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1ZM7 10l2.5 2.5L7 15M12.5 15h4',
   worktree: 'M6 3v6a3 3 0 0 0 3 3h6M6 3a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',
 }
 

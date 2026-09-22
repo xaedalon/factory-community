@@ -1550,4 +1550,55 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
     })
   })
+  Rule('rejecting an approval ends the run it was asked about', ({ RuleScenario }) => {
+    const parked = async (): Promise<void> => {
+      assign('development')
+      givePlan('development', [
+        shellPhase('build', 'echo building'),
+        shellPhase('ship', 'echo shipping', 'before'),
+      ])
+      queue()
+      await runEngine()
+    }
+    /**
+     * Through the watcher, which is what the route does: `reject` is a state
+     * change, and noticing it is the engine's job — subscribed once so the
+     * API, the CLI and a desktop menu cannot differ about what it means.
+     */
+    const reject = async (): Promise<void> => {
+      const unwatch = engine.watch()
+      task = tasks.act(task.id, 'reject', { reason: 'Not like that.' })
+      // The watcher defers to a microtask, because the transition is emitted
+      // from inside the store's transaction.
+      await new Promise((done) => setTimeout(done, 0))
+      unwatch()
+    }
+
+    RuleScenario('The run is finished as declined', ({ Given, When, Then, And }) => {
+      Given('a task parked at an approval gate', parked)
+      When('somebody rejects it', reject)
+      Then('the run is "declined"', () => expect(newest().state).toBe('declined'))
+      And("the run's output is still there", () =>
+        expect(stepsOf(newest()).length).toBeGreaterThan(0),
+      )
+    })
+
+    RuleScenario('A retry after a rejection starts the workflow again', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task parked at an approval gate', parked)
+      And('somebody rejects it', reject)
+      When('the task is retried', async () => {
+        task = tasks.act(task.id, 'retry')
+        await runEngine()
+      })
+      Then('the gate was reached a second time', () =>
+        expect(task.state).toBe('awaiting_approval'),
+      )
+      And('there are 2 runs', () => expect(allRuns()).toHaveLength(2))
+    })
+  })
 })

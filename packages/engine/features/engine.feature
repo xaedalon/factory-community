@@ -607,3 +607,34 @@ Feature: Turning a task into runs
       # The other half of the guarantee: serialising everything would be a
       # correct-looking scheduler that runs one thing at a time.
       Then the two runs overlapped
+
+  Rule: rejecting an approval ends the run it was asked about
+
+    `reject` moves the task to `blocked` and used to leave its paused run
+    paused for ever. Two consequences, and the second is the serious one. The
+    board showed a run nobody would ever pick up, and doctor said somebody
+    should approve or reject a task that had already been rejected. Worse, a
+    retry afterwards *resumed* that run — `Engine.start` picks a paused run up
+    at the phase after the gate, so the phases the person had declined to
+    authorise ran anyway, with nobody asked a second time.
+
+    `declined` is the state for this — "someone said no at an approval gate" —
+    and until now nothing in the product ever wrote it.
+
+    Everything the run produced is kept. Rejecting is a verdict on what
+    happened, not a reason to throw away the evidence it was reached from.
+
+    Scenario: The run is finished as declined
+      Given a task parked at an approval gate
+      When somebody rejects it
+      Then the run is "declined"
+      And the run's output is still there
+
+    Scenario: A retry after a rejection starts the workflow again
+      Given a task parked at an approval gate
+      And somebody rejects it
+      When the task is retried
+      # Not resumed past the gate: the phases before it run again, and the gate
+      # is asked again.
+      Then the gate was reached a second time
+      And there are 2 runs

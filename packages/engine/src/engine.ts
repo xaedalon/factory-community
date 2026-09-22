@@ -355,11 +355,12 @@ export class Engine {
   }
 
   /**
-   * Stop a task's processes whenever anything cancels it.
+   * React to the two transitions that mean something to a run in flight.
    *
-   * Subscribed rather than called by the cancel route, so that every way of
-   * cancelling — the API, the CLI, a future desktop menu — goes through one
-   * implementation. The route only has to change the state; this notices.
+   * Subscribed rather than called by each route, so that every way of
+   * cancelling or rejecting — the API, the CLI, a future desktop menu — goes
+   * through one implementation. A route only has to change the state; this
+   * notices.
    *
    * Deferred to a microtask for the reason the scheduler gives: the transition
    * is emitted from inside the store's transaction, and doing work there would
@@ -368,10 +369,30 @@ export class Engine {
   watch(): () => void {
     if (this.#events === undefined) return () => {}
     return this.#events.on('task.transitioned', (event) => {
-      if (event.payload.to !== 'cancelled') return
-      queueMicrotask(() => {
-        void this.cancel(event.payload.taskId)
-      })
+      const { taskId, action, to } = event.payload
+      if (to === 'cancelled') {
+        queueMicrotask(() => {
+          void this.cancel(taskId)
+        })
+        return
+      }
+      // A rejected approval ends the run it was asked about. It used to leave
+      // it paused for ever: the board drew a run nobody would pick up, doctor
+      // asked somebody to approve or reject a task that had been rejected —
+      // and a retry *resumed* it, continuing at the phase after the gate, so
+      // the work the person declined to authorise ran anyway with nobody asked
+      // a second time.
+      //
+      // `declined` is the state for exactly this, and nothing in the product
+      // wrote it until now. What the run produced is kept: rejecting is a
+      // verdict on what happened, not a reason to discard the evidence.
+      if (action === 'reject') {
+        queueMicrotask(() => {
+          const paused = this.#runs.pausedFor(taskId)
+          if (paused === undefined) return
+          this.#runs.finish(paused.id, 'declined', { detail: 'Approval was refused.' })
+        })
+      }
     })
   }
 

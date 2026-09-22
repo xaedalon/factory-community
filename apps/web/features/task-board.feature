@@ -144,6 +144,50 @@ Feature: The task board
     And I switch "work" to working in the repository
     Then "work" says it works in the repository, one task at a time
 
+  Scenario: The daemon not running is explained
+    Given the daemon is not running
+    When I open the tasks page
+    Then the page says it cannot reach the daemon
+
+  Rule: the task page leads with the thing you came to do
+
+    Seven sections sat in a flat vertical stack at one rank, so what mattered
+    was wherever it happened to fall. A task waiting for a person put the
+    evidence to decide on sixth of seven, below the run list and the steps; a
+    task that had failed put the reason in one place and the failing step, shut,
+    in another.
+
+    The state already decides what matters. A band at the top says it in a
+    sentence and carries the buttons that act on it, the wide column is what is
+    happening now, and the facts that do not change while you read them are in
+    a rail beside it.
+
+    Scenario: A decision leads with the evidence
+      Given the project defines the workflow "review" that writes a report and asks for approval
+      And the task "Check it" exists on "review"
+      When I open the tasks page
+      And I queue "Check it"
+      And "Check it" becomes "awaiting_approval" without me reloading
+      And I open "Check it"
+      Then the band says this is waiting for you
+      And the evidence is above the steps
+
+    Scenario: A failure says what stopped it, at the top
+      Given the project defines the workflow "doomed" that fails
+      And the task "Will fail" exists on "doomed"
+      When I open the tasks page
+      And I queue "Will fail"
+      And "Will fail" becomes "blocked" without me reloading
+      And I open "Will fail"
+      Then the band says this stopped
+      And the failing step's output is already open
+
+    Scenario: The facts sit beside the work, not under it
+      Given the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I open "Add due dates"
+      Then the facts sit beside the work
+
   Rule: a project is created and edited on a page, not in the row it lives in
 
     The projects page carried a seven-control strip above the list and then the
@@ -217,11 +261,6 @@ Feature: The task board
       Then the project is still there
       When I confirm the removal
       Then no projects are listed
-
-  Scenario: The daemon not running is explained
-    Given the daemon is not running
-    When I open the tasks page
-    Then the page says it cannot reach the daemon
 
   Rule: The rail says which project the board is about
 

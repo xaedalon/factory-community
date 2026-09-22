@@ -633,6 +633,26 @@ Given(
   },
 )
 
+/**
+ * A workflow that fails, so the blocked case has something real to draw.
+ *
+ * A step that exits non-zero rather than a step that is missing: the page has
+ * to show the reason and the output, and only a step that actually ran produces
+ * either.
+ */
+Given(
+  'the project defines the workflow {string} that fails',
+  async ({ world }, name: string) => {
+    world.workflow(world.projectScope, name, HELLO_WORKFLOW.replace('hello', name))
+    world.phase(
+      world.projectScope,
+      'greet',
+      'name: greet\nsteps: [{run: "echo trying && exit 3"}]\n',
+    )
+    world.withShell = true
+  },
+)
+
 Given('the task {string} exists on {string}', async ({ world }, name: string, workflow: string) => {
   await world.startDaemon()
   await world.createTask(name, [workflow])
@@ -1252,6 +1272,59 @@ When('I rename it to {string}', async ({ page }, name: string) => {
   await page.getByTestId('rename-task').click()
   await page.getByTestId('task-name-input').fill(name)
   await page.getByTestId('task-name-input').press('Enter')
+})
+
+Then('the band says this is waiting for you', async ({ page }) => {
+  await expect(page.getByTestId('task-band')).toContainText('waiting for you')
+})
+
+Then('the band says this stopped', async ({ page }) => {
+  await expect(page.getByTestId('task-band')).toContainText('This stopped')
+})
+
+/**
+ * Reading order, not presence.
+ *
+ * The evidence and the steps were both on the page before; the evidence was
+ * simply below the steps and the run list, on the one page where a person is
+ * being asked to decide something from it. Compared by position so that
+ * reordering them back would fail here.
+ */
+Then('the evidence is above the steps', async ({ page }) => {
+  const evidence = await page.getByTestId('evidence').boundingBox()
+  const steps = await page.getByText('Steps', { exact: true }).boundingBox()
+  expect(evidence).not.toBeNull()
+  expect(steps).not.toBeNull()
+  expect((evidence as { y: number }).y).toBeLessThan((steps as { y: number }).y)
+})
+
+Then("the failing step's output is already open", async ({ page }) => {
+  // No click first. A step nobody expanded is a step nobody read, and the
+  // failing one is the reason the page was opened.
+  await expect(page.getByTestId(/^log-/).first()).toBeVisible()
+})
+
+/**
+ * Beside, not under.
+ *
+ * Asserts the geometry rather than the membership, because "in the rail" is
+ * satisfied by a rail stacked below the work — which is the arrangement this
+ * replaced. `waits for` is the probe: unlike the workspace it is rendered for
+ * every task, including a draft that has never run and so has no workspace at
+ * all.
+ */
+Then('the facts sit beside the work', async ({ page }) => {
+  const rail = page.getByTestId('task-rail')
+  await expect(rail.getByTestId('task-dependencies')).toBeVisible()
+  const railBox = await rail.boundingBox()
+  const work = await page.getByTestId('task-plan').boundingBox()
+  expect(railBox).not.toBeNull()
+  expect(work).not.toBeNull()
+  const r = railBox as { x: number; y: number }
+  const w = work as { x: number; y: number }
+  expect(r.x).toBeGreaterThan(w.x)
+  // Same band of the page, not below it.
+  expect(Math.abs(r.y - w.y)).toBeLessThan(80)
 })
 
 Then('the task is called {string}', async ({ page }, name: string) => {

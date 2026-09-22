@@ -187,24 +187,31 @@ export function writeSettings(
   }
 
   const current = readSettings(chain).settings
-  // Merged one level down, per named group. The cost of that is this function:
-  // a new top-level group not added here is written nowhere and *silently* —
-  // the call succeeds, the file is rewritten, and the new value is gone. Worth
-  // replacing with something that cannot be forgotten; until then it is held by
-  // scenarios that write one group and check the others survived.
-  const merged = {
-    ...current,
-    kind: SETTINGS_KIND,
-    ui: { ...current.ui, ...(patch.ui ?? {}) },
-    security: { ...current.security, ...(patch.security ?? {}) },
-    plugins: {
-      ...current.plugins,
-      ...(patch.plugins === undefined
-        ? {}
-        : patch.plugins.disabled === undefined
-          ? {}
-          : { disabled: [...patch.plugins.disabled] }),
-    },
+
+  /**
+   * Merged one level down, so saving the interface scale does not discard the
+   * execution profile.
+   *
+   * Over the patch's own keys rather than a list of groups kept here. The list
+   * was the cost: a new top-level group added to `SettingsPatch` and not added
+   * to it was written nowhere, and *silently* — the call succeeded, the file
+   * was rewritten, and the value was gone. There is nothing left to forget.
+   *
+   * `undefined` inside a group means "not mentioned", never "clear it": a
+   * caller that spreads an optional field in under `exactOptionalPropertyTypes`
+   * would otherwise erase what is already there.
+   *
+   * The result is parsed against the schema below before anything is written,
+   * which is what makes the indexing here safe to do dynamically.
+   */
+  const groups = current as unknown as Record<string, Record<string, unknown>>
+  const merged: Record<string, unknown> = { ...current, kind: SETTINGS_KIND }
+  for (const [name, values] of Object.entries(patch)) {
+    if (values === undefined) continue
+    const stated = Object.fromEntries(
+      Object.entries(values as Record<string, unknown>).filter(([, value]) => value !== undefined),
+    )
+    merged[name] = { ...groups[name], ...stated }
   }
 
   const text = `${JSON.stringify(merged, undefined, 2)}\n`

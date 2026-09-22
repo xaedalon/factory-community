@@ -223,4 +223,41 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
       )
     })
   })
+  Rule('a group the writer was never told about is still written', ({ RuleScenario }) => {
+    RuleScenario('A group the merge does not name lands anyway', ({ Given, When, Then, And }) => {
+      Given('an installation with the default settings', givenUserScope())
+      // An `x-` group, which the schema allows and the old merge dropped: a
+      // plugin keeping its settings beside Factory's lost them to the next
+      // save of anything else. Cast in because `SettingsPatch` names the
+      // groups Factory itself writes, which is also the shape the next
+      // top-level group would arrive in.
+      When('a patch carries an extension group beside a known one', () => {
+        problems = writeSettings(chain, {
+          ui: { scale: 2 },
+          'x-telemetry': { enabled: false },
+        } as unknown as Parameters<typeof writeSettings>[1]).problems
+      })
+      Then('the file holds that group', () => {
+        expect(problems).toEqual([])
+        expect(JSON.parse(readFileSync(file(), 'utf8'))['x-telemetry']).toEqual({ enabled: false })
+      })
+      And('the known setting was saved too', () => {
+        read()
+        expect(settings.ui.scale).toBe(2)
+      })
+    })
+
+    RuleScenario('A group says only what it means to change', ({ Given, When, Then, And }) => {
+      Given('the execution profile is "full-access"', () => {
+        givenUserScope()()
+        writeSettings(chain, { security: { profile: 'full-access' } })
+      })
+      When('the interface scale is set to 2', save({ ui: { scale: 2 } }))
+      Then('the profile is still "full-access"', () => {
+        read()
+        expect(settings.security.profile).toBe('full-access')
+      })
+      And('the scale is 2', () => expect(settings.ui.scale).toBe(2))
+    })
+  })
 })

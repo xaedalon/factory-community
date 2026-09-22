@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
-import { scaffoldProjectDefinitions } from '@factory/config'
+import { SCOPE_DIR, createScope, scaffoldProjectDefinitions } from '@factory/config'
+import { join } from 'node:path'
 import {
   DISCLAIMER,
   EXECUTION_PROFILES,
@@ -128,12 +129,27 @@ export function registerProjectRoutes(
             ? {}
             : { usesEnvironments: body.usesEnvironments }),
         })
+        // A scope of its own, before anything tries to write into it.
+        //
+        // A repository with no `.xaedalon/.factory` resolves to a chain with no
+        // project scope, and then every write that asks for one fails — which
+        // is the first thing a new project does, because the worktree workflows
+        // are copied in as it is registered. It answered 500 with "No project
+        // scope in this chain", and the reply that had already tried said only
+        // `written: []`. Creating it is the one `mkdir` the person would have
+        // had to do, and it is the same directory the copies are about to go
+        // into.
+        //
+        // Never over an existing one: the moment `config.yaml` is there the
+        // directory is theirs.
+        const scope = createScope({ root: join(project.path, SCOPE_DIR), kind: 'project' })
+
         // Whatever it was registered with, it gets the files for.
         const scaffolded = [
           ...(project.usesWorktrees ? [await scaffold(project, 'worktrees')] : []),
           ...(project.usesEnvironments ? [await scaffold(project, 'environments')] : []),
         ]
-        return reply.code(201).send({ project, scaffolded: merge(scaffolded) })
+        return reply.code(201).send({ project, scope, scaffolded: merge(scaffolded) })
       } catch (error) {
         // A path that does not exist or a name already taken is a mistake in
         // the request, not a failure of the server.

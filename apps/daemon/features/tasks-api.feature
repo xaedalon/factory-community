@@ -91,6 +91,23 @@ Feature: Tasks, runs and live updates over HTTP
     Then the response is 201
     And the project is listed
 
+  Scenario: A repository with no Factory scope is given one
+    When I add the project "fresh" at a repository with no scope
+    Then the response is 201
+    # Without it, every write that asks for the project scope fails — and the
+    # first thing a new project does is copy its worktree workflows in, which
+    # asks for exactly that. It answered 500 with "No project scope in this
+    # chain", and the reply that had already tried said only `written: []`.
+    Then the project has a scope of its own
+    And the response says the scope was created
+
+  Scenario: A repository that already has a scope keeps it
+    Given a repository whose scope says something of its own
+    When I add the project "fresh" at that repository
+    Then the response is 201
+    And the scope still says what it said
+    And the response does not claim to have created one
+
   Scenario: A project at a path that does not exist is refused
     When I add the project "ghost" at a path that does not exist
     Then the response is 400

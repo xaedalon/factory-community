@@ -95,6 +95,16 @@ Feature: The definitions API
     When I DELETE "/api/phases/analysis"
     Then the response is 200
 
+  Scenario: Saving into a scope that is not in the chain says so
+    Given the project scope has been taken away
+    When I POST a workflow named "release"
+    # It answered 500 with "No project scope in this chain", which is a fault
+    # the caller cannot act on. The condition is ordinary — a repository
+    # registered before Factory started creating a scope for one — and the
+    # message already knows enough to say it.
+    Then the response is 400
+    And the response names the scope that is missing
+
   Scenario: A definition that does not validate is refused
     When I POST a workflow with an invalid mode
     Then the response is 400

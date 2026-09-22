@@ -1,7 +1,15 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -411,6 +419,41 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       const items = response.body.items as { id: string }[]
       expect(items.some((item) => item.id === added)).toBe(true)
     })
+  })
+
+  Scenario('A repository with no Factory scope is given one', ({ When, Then, And }) => {
+    let fresh = ''
+    When('I add the project "fresh" at a repository with no scope', async () => {
+      fresh = join(root, 'fresh')
+      mkdirSync(join(fresh, '.git'), { recursive: true })
+      await addProject('fresh', fresh)
+    })
+    Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    Then('the project has a scope of its own', () =>
+      expect(existsSync(join(fresh, '.xaedalon', '.factory', 'config.yaml'))).toBe(true),
+    )
+    And('the response says the scope was created', () =>
+      expect((response.body.scope as { created: boolean }).created).toBe(true),
+    )
+  })
+
+  Scenario('A repository that already has a scope keeps it', ({ Given, When, Then, And }) => {
+    let fresh = ''
+    Given('a repository whose scope says something of its own', () => {
+      fresh = join(root, 'fresh')
+      file(join(fresh, '.xaedalon', '.factory', 'config.yaml'), '# mine\nkind: factory.scope/v1\nscope: project\n')
+      mkdirSync(join(fresh, '.git'), { recursive: true })
+    })
+    When('I add the project "fresh" at that repository', () => addProject('fresh', fresh))
+    Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    And('the scope still says what it said', () =>
+      expect(
+        readFileSync(join(fresh, '.xaedalon', '.factory', 'config.yaml'), 'utf8'),
+      ).toContain('# mine'),
+    )
+    And('the response does not claim to have created one', () =>
+      expect((response.body.scope as { created: boolean }).created).toBe(false),
+    )
   })
 
   Scenario('A project at a path that does not exist is refused', ({ When, Then, And }) => {

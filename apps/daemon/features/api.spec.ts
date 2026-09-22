@@ -281,6 +281,29 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
   })
 
+  Scenario('Saving into a scope that is not in the chain says so', ({ Given, When, Then, And }) => {
+    Given('the project scope has been taken away', async () => {
+      // Rebuilt against a directory with no project scope at all, which is
+      // what a repository registered before Factory created one looks like.
+      rmSync(join(root, 'work', '.xaedalon'), { recursive: true, force: true })
+      const env = { FACTORY_HOME: userScope, PATH: '' }
+      const chain = resolveScopes({ cwd: join(root, 'work', 'src'), env })
+      const runtime = await createRuntime({ cwd: join(root, 'work'), env, chain })
+      app = buildServer(runtime)
+      await app.ready()
+    })
+    When('I POST a workflow named "release"', () =>
+      call('POST', '/api/workflows', {
+        definition: { name: 'release', mode: 'once', scheduling: 'parallel', description: '', variables: {}, phases: [], extensions: {} },
+        scope: 'project',
+      }),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    And('the response names the scope that is missing', () =>
+      expect(JSON.stringify(response.body)).toContain('project'),
+    )
+  })
+
   Scenario('A definition that does not validate is refused', ({ When, Then, And }) => {
     // The write path re-validates. A client that skipped validation, or a
     // different client entirely, must not be able to put a broken file on disk.

@@ -60,6 +60,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       runs = new RunRepository({ db: store.db, now, newId: () => `run-${++ids}` })
       projects = new ProjectRepository({ db: store.db, now, newId: () => `project-${++ids}` })
       root = mkdtempSync(join(tmpdir(), 'factory-doctor-'))
+      homeId = ''
     })
     And('the workflow "hello" exists', () => {
       facts.set('hello', { scheduling: 'parallel', requires: [] })
@@ -105,8 +106,21 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
   const says = (text: string) => problems.some((problem) => problem.message.includes(text))
 
+  /**
+   * The project the scenarios that are not about projects put their tasks in.
+   *
+   * Made on first use rather than in the Background: the setup-step scenarios
+   * are about an installation that has none at all, and one conjured for every
+   * scenario would quietly finish that step for them.
+   */
+  let homeId = ''
+  const home = (): string => {
+    if (homeId === '') homeId = projects.add({ name: 'sample', path: root }).id
+    return homeId
+  }
+
   const task = (name: string, workflow: string) => {
-    const created = tasks.create({ name, workflows: [workflow] })
+    const created = tasks.create({ name, workflows: [workflow], projectId: home() })
     return created.id
   }
   const workflowRequiring = (name: string, flag: string, lane: Scheduling = 'parallel') => {
@@ -440,7 +454,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     // after it can never set the flag in time. Naming the misordering is the
     // whole value of the message.
     And('a queued task "Ship it" on "deploy" and then "prepare"', () => {
-      const created = tasks.create({ name: 'Ship it', workflows: ['deploy', 'prepare'] })
+      const created = tasks.create({
+        name: 'Ship it',
+        workflows: ['deploy', 'prepare'],
+        projectId: home(),
+      })
       tasks.act(created.id, 'queue')
     })
     When('doctor runs', () => doctor(true))
@@ -540,7 +558,8 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       facts.set('validate', { scheduling: 'parallel', requires: [], needs: [] })
       facts.set('verify', { scheduling: 'parallel', requires: [], needs: ['validate'] })
     }
-    const assigned = (...workflows: string[]) => tasks.create({ name: 'Ship it', workflows }).id
+    const assigned = (...workflows: string[]) =>
+      tasks.create({ name: 'Ship it', workflows, projectId: home() }).id
     const outOfOrder = () => problems.filter((p) => p.rule === 'doctor.needsOutOfOrder')
 
     RuleScenario('A predecessor that comes later in the list is an error', ({

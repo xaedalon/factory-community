@@ -251,12 +251,10 @@ export function unavailableFor(
  */
 export function workspaceFor(
   task: { readonly directory?: string | undefined },
-  project: (ProjectFacilities & Pick<Project, 'path' | 'worktreesRoot'>) | undefined,
+  project: ProjectFacilities & Pick<Project, 'path' | 'worktreesRoot'>,
   exists: (path: string) => boolean,
   join: Join,
-): Workspace | undefined {
-  if (project === undefined) return undefined
-
+): Workspace {
   // A project that works in place skips the first step entirely. That is not
   // only the setting doing its job: a directory left over under
   // `worktreesRoot` from before the setting changed cannot silently win.

@@ -350,13 +350,21 @@ export function registerTaskRoutes(
     if (typeof body.name !== 'string' || body.name.trim() === '') {
       return reply.code(400).send({ error: 'A task needs a name.' })
     }
-    if (body.projectId !== undefined && service.projects.get(body.projectId) === undefined) {
+    // A task decides nothing about where it runs; its project does. Refused
+    // here rather than defaulted, because the default this used to have was
+    // the directory the daemon happened to be started in.
+    if (typeof body.projectId !== 'string' || body.projectId.trim() === '') {
+      return reply
+        .code(400)
+        .send({ error: 'A task needs a project: it decides where the work happens.' })
+    }
+    if (service.projects.get(body.projectId) === undefined) {
       return reply.code(400).send({ error: `No project ${body.projectId}.` })
     }
     const task = tasks.create({
       name: body.name.trim(),
+      projectId: body.projectId,
       ...(body.description === undefined ? {} : { description: body.description }),
-      ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
       ...(body.ticketId === undefined ? {} : { ticketId: body.ticketId }),
       ...(body.branch === undefined ? {} : { branch: body.branch }),
       ...(body.directory === undefined ? {} : { directory: body.directory }),

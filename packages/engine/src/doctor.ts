@@ -50,9 +50,8 @@ export function runningDoctorRules(
 ): readonly DoctorRuleCapability[] {
   const { tasks, runs, projects, reconciliation } = options
 
-  /** The project this task shares a working copy with, when it has one. */
+  /** The project this task shares a working copy with, when it is shared. */
   const sharedCheckout = (task: Task): Project | undefined => {
-    if (task.projectId === undefined) return undefined
     const project = projects.get(task.projectId)
     return project === undefined || project.usesWorktrees ? undefined : project
   }
@@ -160,16 +159,11 @@ export function runningDoctorRules(
         if (isSettled(task.state)) continue
         for (const { workflow } of task.workflows) {
           if (known.has(workflow)) continue
-          // `workflows` is what the installation can see. A task in a project
-          // resolves through that project's own scope as well, so ask there
-          // before calling a name missing — otherwise every workflow committed
-          // to a repository is reported as broken.
-          if (
-            task.projectId !== undefined &&
-            options.workflow(workflow, task.projectId) !== undefined
-          ) {
-            continue
-          }
+          // `workflows` is what the installation can see. A task resolves
+          // through its project's own scope as well, so ask there before
+          // calling a name missing — otherwise every workflow committed to a
+          // repository is reported as broken.
+          if (options.workflow(workflow, task.projectId) !== undefined) continue
           problems.push({
             severity: 'error',
             message:
@@ -275,17 +269,16 @@ export function runningDoctorRules(
         // is resolved rather than rebuilt, so the sentence below cannot name a
         // directory other than the one the engine would really use.
         if (!task.flags.includes('hasWorktree')) continue
-        if (task.projectId === undefined) continue
-        const workspace = workspaceFor(
-          task,
-          projects.get(task.projectId),
-          existsSync,
-          join,
-        )
+        // A row that is not there is a database edited by hand, not a
+        // diagnosis this rule can make: the run itself refuses and says which
+        // project is missing, which is the honest place for it.
+        const project = projects.get(task.projectId)
+        if (project === undefined) continue
+        const workspace = workspaceFor(task, project, existsSync, join)
         // No worktree was even considered — the project works in place, or the
         // task has no directory of its own. Both are the configured behaviour
         // rather than a fault.
-        if (workspace?.worktree === undefined || workspace.inWorktree) continue
+        if (workspace.worktree === undefined || workspace.inWorktree) continue
         // The flag says a workflow created one; the disk says otherwise. Steps
         // gated on it will run in the repository instead, which is exactly the
         // shared-checkout problem worktrees exist to avoid.
@@ -323,7 +316,6 @@ export function runningDoctorRules(
 
       for (const task of tasks.list()) {
         if (isSettled(task.state)) continue
-        if (task.projectId === undefined) continue
 
         for (const { workflow: name } of task.workflows) {
           const facts = options.workflow(name, task.projectId)
@@ -379,8 +371,8 @@ const current = (task: Task): string | undefined => nextEntry(task)?.workflow
  *
  * The one setup step that needs the database: a project is a row, not a file,
  * so no amount of reading the scope chain can answer it. Essential, because a
- * task with no project runs wherever the daemon happens to have been started —
- * which is fine for a demonstration and wrong for work.
+ * task cannot be created without one — a project is what says where the work
+ * happens, and until there is one there is nothing for Factory to do.
  */
 function projectStep(options: RunningDoctorOptions): SetupStepCapability {
   return {
@@ -402,7 +394,7 @@ function projectStep(options: RunningDoctorOptions): SetupStepCapability {
       return {
         done: false,
         essential: true,
-        detail: 'No repositories have been added, so work would run wherever Factory was started.',
+        detail: 'No repositories have been added, so there is nowhere for a task to happen.',
         actions: [
           { label: 'Add one on the Projects page', url: '/projects' },
           {

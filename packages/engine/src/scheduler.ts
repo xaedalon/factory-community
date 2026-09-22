@@ -426,13 +426,12 @@ export class Scheduler {
   /**
    * The project whose single working copy this task would occupy, if any.
    *
-   * Undefined for a task with no project, a project nobody can look up — one
-   * removed while the task was queued — and any project that gives each task a
-   * worktree. In all three cases there is nothing to serialise against, and
-   * defaulting to "exclusive" would stall work for no reason.
+   * Undefined for a project that gives each task a worktree — nothing to
+   * serialise against, and defaulting to "exclusive" would stall work for no
+   * reason — and for one nobody can look up, which now means either a
+   * scheduler built without a project store or a row edited away by hand.
    */
   #sharedCheckoutOf(task: Task): string | undefined {
-    if (task.projectId === undefined) return undefined
     const project = this.#project(task.projectId)
     if (project === undefined || project.usesWorktrees) return undefined
     return task.projectId

@@ -16,7 +16,14 @@ import type {
   Run,
   Task,
 } from '@factory/core'
-import { MIGRATIONS, RunRepository, TaskRepository, openStore, type Store } from '@factory/store'
+import {
+  MIGRATIONS,
+  ProjectRepository,
+  RunRepository,
+  TaskRepository,
+  openStore,
+  type Store,
+} from '@factory/store'
 import { Engine, reconcile, type ReconcileReport } from '@factory/engine'
 
 const feature = await loadFeature(fileURLToPath(new URL('./engine.feature', import.meta.url)))
@@ -77,7 +84,14 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       engine = buildEngine()
     })
     And('a task "Add due dates"', () => {
-      task = tasks.create({ name: 'Add due dates' })
+      // `work` is already a directory on disk; a project needs one, and a task
+      // needs a project.
+      const project = new ProjectRepository({
+        db: store.db,
+        now,
+        newId: () => `project-${++ids}`,
+      }).add({ name: 'sample', path: work })
+      task = tasks.create({ name: 'Add due dates', projectId: project.id })
     })
   })
 

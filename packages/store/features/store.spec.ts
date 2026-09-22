@@ -4,7 +4,14 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { currentVersion, openDatabase, openStore, type Migration, type Store } from '../src/index.js'
+import {
+  MIGRATIONS,
+  currentVersion,
+  openDatabase,
+  openStore,
+  type Migration,
+  type Store,
+} from '../src/index.js'
 
 const feature = await loadFeature(fileURLToPath(new URL('./store.feature', import.meta.url)))
 
@@ -53,7 +60,7 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
     rmSync(root, { recursive: true, force: true })
   })
 
-  const open = (list = migrations) => {
+  const open = (list: readonly Migration[] = migrations) => {
     try {
       store = openStore({ file, migrations: list })
     } catch (error) {
@@ -325,5 +332,156 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
     })
     When('the store is opened', () => open())
     Then('the database file exists', () => expect(existsSync(file)).toBe(true))
+  })
+
+  Rule('a migration can say what it did', ({ RuleScenario }) => {
+    RuleScenario('A migration that reports something carries it out to the caller', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a migration that deletes rows and says how many', () => {
+        migrations = [
+          first,
+          {
+            version: 2,
+            describe: 'tidy up',
+            up: (db) => {
+              db.run('INSERT INTO widgets (id, name) VALUES (1, ?)', 'doomed')
+              const gone = db.run('DELETE FROM widgets').changes
+              return `deleted ${gone} widget(s)`
+            },
+          },
+        ]
+      })
+      When('the store is opened', () => open())
+      Then('the outcome carries that note', () =>
+        expect(store?.migration.applied.at(-1)?.note).toBe('deleted 1 widget(s)'),
+      )
+    })
+
+    RuleScenario('A migration with nothing to say carries no note', ({ Given, When, Then }) => {
+      Given('two migrations', () => {
+        migrations = [first, second]
+      })
+      When('the store is opened', () => open())
+      Then('no note is carried', () =>
+        expect(store?.migration.applied.every((entry) => entry.note === undefined)).toBe(true),
+      )
+    })
+  })
+  /**
+   * The real migrations, unlike everything above.
+   *
+   * This Rule is about migration 17 itself rather than about the harness, so it
+   * has to be the shipped list: a synthetic pair would prove the mechanism
+   * works and nothing about whether that migration does.
+   */
+  Rule('upgrading an installation that has tasks in no project', ({ RuleScenario }) => {
+    const upTo = (version: number) => MIGRATIONS.filter((entry) => entry.version <= version)
+    /** Seeded before a task needed a project, so the columns are that era's. */
+    const seedAtSixteen = (): void => {
+      const before = openStore({ file, migrations: upTo(16) })
+      const db = before.db
+      db.run(
+        `INSERT INTO projects (id, name, path, default_branch, worktrees_root, created_at)
+         VALUES ('pr-1', 'work', '/repos/work', 'main', '/worktrees/work', '2026-01-01T00:00:00Z')`,
+      )
+      // One in a project, one in none, each with a row in every table that
+      // points at `tasks` — which is what the rebuild has to leave alone.
+      for (const [id, project] of [
+        ['owned', "'pr-1'"],
+        ['orphan', 'NULL'],
+      ] as const) {
+        db.run(
+          `INSERT INTO tasks (id, name, state, created_at, updated_at, project_id)
+           VALUES ('${id}', '${id}', 'draft', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', ${project})`,
+        )
+        db.run(
+          `INSERT INTO runs (id, task_id, workflow, state, started_at)
+           VALUES ('run-${id}', '${id}', 'hello', 'done', '2026-01-01T00:00:00Z')`,
+        )
+        db.run(
+          `INSERT INTO run_steps (id, run_id, phase, step_index, describe, uses, state, started_at)
+           VALUES (${id === 'owned' ? 1 : 2}, 'run-${id}', 'greet', 0, 'echo', 'run', 'done', '2026-01-01T00:00:00Z')`,
+        )
+        db.run(
+          `INSERT INTO run_logs (run_id, step_id, at, stream, text, bytes)
+           VALUES ('run-${id}', ${id === 'owned' ? 1 : 2}, '2026-01-01T00:00:00Z', 'stdout', 'hi', 2)`,
+        )
+        db.run(
+          `INSERT INTO run_evidence (run_id, phase, name, path, bytes, collected_at)
+           VALUES ('run-${id}', 'greet', 'notes', '/tmp/notes.md', 0, '2026-01-01T00:00:00Z')`,
+        )
+        db.run(`INSERT INTO task_workflows (task_id, position, workflow) VALUES ('${id}', 0, 'hello')`)
+        // The one that was missed when this migration was first written: its
+        // absence from the cleanup only shows up on a task that has a flag.
+        db.run(
+          `INSERT INTO task_flags (task_id, flag, set_at) VALUES ('${id}', 'hasWorktree', '2026-01-01T00:00:00Z')`,
+        )
+        db.run(
+          `INSERT INTO task_history (task_id, at, action, from_state, to_state)
+           VALUES ('${id}', '2026-01-01T00:00:00Z', 'queue', 'draft', 'queued')`,
+        )
+      }
+      // An edge each way, so both columns of the dependency table are exercised.
+      db.run(`INSERT INTO task_dependencies (task_id, depends_on_id) VALUES ('orphan', 'owned')`)
+      before.close()
+    }
+    const count = (sql: string, ...params: string[]): number =>
+      store?.db.get<{ n: number }>(`SELECT count(*) AS n FROM ${sql}`, ...params)?.n ?? -1
+
+    RuleScenario('A task that belonged to no project is deleted, and said so', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('an installation from before a task needed a project', seedAtSixteen)
+      When('it is upgraded', () => open(MIGRATIONS))
+      Then('the task that had no project is gone', () =>
+        expect(count('tasks WHERE id = ?', 'orphan')).toBe(0),
+      )
+      And('nothing recorded about it is left behind', () => {
+        expect(count('runs WHERE task_id = ?', 'orphan')).toBe(0)
+        expect(count('run_steps WHERE run_id = ?', 'run-orphan')).toBe(0)
+        expect(count('run_logs WHERE run_id = ?', 'run-orphan')).toBe(0)
+        expect(count('run_evidence WHERE run_id = ?', 'run-orphan')).toBe(0)
+        expect(count('task_workflows WHERE task_id = ?', 'orphan')).toBe(0)
+        expect(count('task_flags WHERE task_id = ?', 'orphan')).toBe(0)
+        expect(count('task_history WHERE task_id = ?', 'orphan')).toBe(0)
+        expect(count('task_dependencies WHERE task_id = ?', 'orphan')).toBe(0)
+      })
+      And('the upgrade says it deleted 1 task', () =>
+        expect(store?.migration.applied.at(-1)?.note).toContain('deleted 1 task'),
+      )
+    })
+
+    RuleScenario('A task that had a project keeps everything it recorded', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('an installation from before a task needed a project', seedAtSixteen)
+      When('it is upgraded', () => open(MIGRATIONS))
+      Then('the task in a project is still there', () =>
+        expect(count('tasks WHERE id = ?', 'owned')).toBe(1),
+      )
+      // The whole reason the migration switches foreign keys off: dropping
+      // `tasks` with them on deletes every one of these first.
+      And('its run, step, log, artifact, flag, history and dependency are still there', () => {
+        expect(count('runs WHERE task_id = ?', 'owned')).toBe(1)
+        expect(count('run_steps WHERE run_id = ?', 'run-owned')).toBe(1)
+        expect(count('run_logs WHERE run_id = ?', 'run-owned')).toBe(1)
+        expect(count('run_evidence WHERE run_id = ?', 'run-owned')).toBe(1)
+        expect(count('task_workflows WHERE task_id = ?', 'owned')).toBe(1)
+        expect(count('task_flags WHERE task_id = ?', 'owned')).toBe(1)
+        expect(count('task_history WHERE task_id = ?', 'owned')).toBe(1)
+      })
+      And('no foreign key is violated', () =>
+        expect(store?.db.all('PRAGMA foreign_key_check')).toHaveLength(0),
+      )
+    })
   })
 })

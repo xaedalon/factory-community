@@ -52,9 +52,14 @@ export interface Service {
   /**
    * Where this task's steps run — its worktree, or its project's checkout.
    *
-   * Undefined for a task with no project. The rule is core's; what the Service
-   * adds is the repository, the filesystem and the path join, so a route can
-   * ask the question without assembling it again.
+   * Undefined only when the project the task names is not in the database —
+   * which the foreign key makes impossible through Factory, so it means a
+   * database edited by hand. Read paths tolerate it so the board can still
+   * draw the task and say what is wrong; anything that would *run* refuses.
+   *
+   * The rule is core's; what the Service adds is the repository, the
+   * filesystem and the path join, so a route can ask the question without
+   * assembling it again.
    */
   readonly workspace: (task: Task) => TaskWorkspace | undefined
   readonly engine: Engine
@@ -115,23 +120,35 @@ export async function createService(
    * lines is exactly what moving the rule into core was for.
    */
   const workspace = (task: Task): TaskWorkspace | undefined => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
-    const resolved = workspaceFor(task, project, existsSync, join)
-    // Both or neither: core returns nothing precisely when there is no
-    // project, so the type can promise the project rather than leave a caller
-    // that needs the name to look it up a second time.
-    return resolved === undefined || project === undefined
-      ? undefined
-      : { ...resolved, project }
+    const project = projects.get(task.projectId)
+    return project === undefined ? undefined : { ...workspaceFor(task, project, existsSync, join), project }
   }
 
   /**
-   * The same answer as a path the engine can be handed.
+   * The project a task happens in, or an error naming what is missing.
    *
-   * A task with no project runs where the daemon was started — which is what
-   * `factory run` would have used, and the one part of this core cannot know.
+   * Every path that starts work goes through here. It used to fall back to the
+   * directory the daemon was started in, which meant a task whose project
+   * could not be resolved ran an agent against whatever repository that
+   * happened to be — the doctor's own setup rule calls that "fine for a
+   * demonstration and wrong for work". There is nothing left to fall back for:
+   * a task names a project, and the database will not let go of one that still
+   * has tasks. A row that is not there is corruption, and saying so is better
+   * than running somewhere nobody chose.
    */
-  const workspacePathFor = (task: Task): string => workspace(task)?.path ?? runtime.cwd
+  const projectOf = (task: Task): Project => {
+    const project = projects.get(task.projectId)
+    if (project === undefined) {
+      throw new Error(
+        `Task "${task.name}" belongs to project ${task.projectId}, which is not in the database.`,
+      )
+    }
+    return project
+  }
+
+  /** The same answer as a path the engine can be handed. */
+  const workspacePathFor = (task: Task): string =>
+    workspaceFor(task, projectOf(task), existsSync, join).path
 
   /**
    * Where this task's artifacts go.
@@ -139,14 +156,10 @@ export async function createService(
    * Under the project, deliberately — not under the workspace, which is
    * the worktree when the project uses them. A worktree is deleted when the work
    * in it ends, and an artifact that goes with it is one nobody can read
-   * afterwards. A task with no project has nowhere of its own, so it falls back
-   * to the directory the daemon was started in, the way everything else does.
+   * afterwards.
    */
-  const artifactsFor = (task: Task): string => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
-    const base = project?.path ?? runtime.cwd
-    return artifactsRoot(base, task.directory ?? 'local', join)
-  }
+  const artifactsFor = (task: Task): string =>
+    artifactsRoot(projectOf(task).path, task.directory ?? 'local', join)
 
   /**
    * How much authority this task's run gets.
@@ -155,18 +168,15 @@ export async function createService(
    * between runs, and the next run should use what the board currently says.
    */
   const profileFor = (task: Task): ExecutionProfile => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
+    const project = projectOf(task)
     return resolveProfile({
-      project: project?.profile,
+      project: project.profile,
       installation: runtime.settings.current().security.profile,
     })
   }
 
   /** Directories this task's project has granted beyond its workspace. */
-  const grantsFor = (task: Task): readonly string[] => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
-    return project?.grantedDirectories ?? []
-  }
+  const grantsFor = (task: Task): readonly string[] => projectOf(task).grantedDirectories ?? []
 
   const engine = new Engine({
     tasks,
@@ -205,9 +215,7 @@ export async function createService(
         // repository is, what branch work starts from, where worktrees go — and,
         // for a recovery workflow, what went wrong.
         project: {
-          ...projectVariables(
-            task.projectId === undefined ? undefined : projects.get(task.projectId),
-          ),
+          ...projectVariables(projectOf(task)),
           ...(failure === undefined ? {} : failureVariables(failure)),
         },
       }),
@@ -338,16 +346,13 @@ export async function createService(
  * list. Adding a variable here without documenting it does not compile.
  */
 const projectVariables = (
-  project: Project | undefined,
-): Partial<Record<keyof typeof PROJECT_TOKENS, string>> =>
-  project === undefined
-    ? {}
-    : {
-        name: project.name,
-        path: project.path,
-        branch: project.defaultBranch,
-        worktrees: project.worktreesRoot,
-      }
+  project: Project,
+): Partial<Record<keyof typeof PROJECT_TOKENS, string>> => ({
+  name: project.name,
+  path: project.path,
+  branch: project.defaultBranch,
+  worktrees: project.worktreesRoot,
+})
 
 const failureVariables = (
   failure: FailureContext,

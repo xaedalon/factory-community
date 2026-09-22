@@ -22,9 +22,15 @@ export const openTerminalTool: TaskToolCapability = {
   // First, because "where is this happening" is the question you ask of a task
   // that has never run and of one that finished an hour ago.
   order: 10,
+  // A task always belongs to a project, so an unresolved workspace means the
+  // project row is not there — a database edited by hand. Said plainly rather
+  // than hidden, because the button would otherwise open the wrong directory.
   offer: (context) =>
     context.workspace === undefined
-      ? { unavailable: 'This task belongs to no project, so there is nowhere to open.' }
+      ? {
+          unavailable:
+            'Factory cannot find the project this task belongs to, so there is nowhere to open.',
+        }
       : {},
 }
 

@@ -182,6 +182,27 @@ Feature: The factory command
     Then the daemon was asked to create a task with workflows "worktree-create, development"
     And the output says how to start it
 
+  Scenario: a task lands in the only project there is
+    Given a daemon with one project "work"
+    When I run "task new Add due dates"
+    # Not typed, because there is nothing to choose between. A task needs a
+    # project, and asking which of one is busywork.
+    Then the daemon was asked to create it in "work"
+
+  Scenario: with no project there is nowhere to put a task
+    Given a daemon with no projects
+    When I run "task new Add due dates"
+    Then it fails
+    And the output contains "needs a project"
+    And the output says how to add one
+
+  Scenario: with more than one project the task says which
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task new Add due dates"
+    Then it fails
+    And the output contains "--project"
+    And the output names both projects
+
   Scenario: showing a task lists what it can do next
     Given a daemon with a task "Add due dates" that is queued
     When I run "task show task-1"

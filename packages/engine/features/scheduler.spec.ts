@@ -64,6 +64,7 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
       requirements = new Map()
       lanes = new Map()
       projectIds = new Map()
+      homeId = ''
       hidden = new Set()
       root = mkdtempSync(join(tmpdir(), 'factory-scheduler-'))
       byName = new Map()
@@ -124,8 +125,25 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
     })
   }
 
+  /**
+   * The project the scenarios that are not about projects put their tasks in.
+   *
+   * It gives each task a worktree, so it serialises nothing — these scenarios
+   * are about lanes and capacity, and a shared checkout would hold tasks back
+   * for a reason they are not testing.
+   */
+  let homeId = ''
+  const home = (): string => {
+    if (homeId === '') {
+      const path = join(root, 'home')
+      mkdirSync(join(path, '.git'), { recursive: true })
+      homeId = projects.add({ name: 'home', path, usesWorktrees: true }).id
+    }
+    return homeId
+  }
+
   const queued = (name: string, lane: Scheduling): void => {
-    const task = tasks.create({ name, workflows: [`${lane}-work`] })
+    const task = tasks.create({ name, workflows: [`${lane}-work`], projectId: home() })
     byName.set(name, task.id)
     tasks.act(task.id, 'queue')
   }
@@ -329,7 +347,7 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
   })
 
   const waiting = (): void => {
-    const created = tasks.create({ name: 'Watch', workflows: ['parallel-work'] })
+    const created = tasks.create({ name: 'Watch', workflows: ['parallel-work'], projectId: home() })
     byName.set('Watch', created.id)
     tasks.act(created.id, 'queue', { until: new Date(clock.getTime() + 60_000).toISOString() })
   }
@@ -439,12 +457,11 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
     mkdirSync(usesWorktrees ? join(path, '.git') : path, { recursive: true })
     projectIds.set(name, projects.add({ name, path, usesWorktrees }).id)
   }
-  const queuedIn = (name: string, project: string | undefined): void => {
-    const projectId = project === undefined ? undefined : projectIds.get(project)
+  const queuedIn = (name: string, project: string): void => {
     const created = tasks.create({
       name,
       workflows: ['parallel-work'],
-      ...(projectId === undefined ? {} : { projectId }),
+      projectId: projectIds.get(project) as string,
     })
     byName.set(name, created.id)
     tasks.act(created.id, 'queue')
@@ -531,32 +548,16 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
       )
     })
 
-      RuleScenario('A task belonging to no project is never held back by one', ({
-      Given,
-      And,
-      When,
-      Then,
-    }) => {
-      Given('a project "api" that works in its own checkout', () => givenProject('api', false))
-      And('a queued task "First" in "api"', () => queuedIn('First', 'api'))
-      And('a queued task "Loose" with no project', () => queuedIn('Loose', undefined))
-      When('the scheduler ticks', () => {
-        report = scheduler.tick()
-      })
-      Then('2 tasks are started', () => expect(report.started).toHaveLength(2))
-    })
-
-      RuleScenario('A project the scheduler cannot look up holds nothing', ({ Given, And, When, Then }) => {
-      // Removed between listing the tasks and asking about the project.
-      // Defaulting to "exclusive" would stall them for no reason.
-      Given('a queued task "First" in a project that has since been removed', () => {
+      RuleScenario('A project no lookup can answer for holds nothing', ({ Given, And, When, Then }) => {
+      // `hidden` is the lookup refusing to answer, which is what a scheduler
+      // built without a project store does for every project — and what a
+      // hand-edited database does for one.
+      Given('a queued task "First" in a project the lookup cannot see', () => {
         givenProject('gone', false)
         queuedIn('First', 'gone')
         hidden.add(projectIds.get('gone') as string)
       })
-      And('a queued task "Second" in a project that has since been removed', () =>
-        queuedIn('Second', 'gone'),
-      )
+      And('a queued task "Second" in the same project', () => queuedIn('Second', 'gone'))
       When('the scheduler ticks', () => {
         report = scheduler.tick()
       })
@@ -617,9 +618,10 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
 
       RuleScenario('A busy project does not hold up the queue behind it', ({ Given, And, When, Then }) => {
       Given('a project "api" that works in its own checkout', () => givenProject('api', false))
+      And('a project "web" that gives each task a worktree', () => givenProject('web', true))
       And('a queued task "First" in "api"', () => queuedIn('First', 'api'))
       And('a queued task "Second" in "api"', () => queuedIn('Second', 'api'))
-      And('a queued task "Loose" with no project', () => queuedIn('Loose', undefined))
+      And('a queued task "Loose" in "web"', () => queuedIn('Loose', 'web'))
       When('the scheduler ticks', () => {
         report = scheduler.tick()
       })

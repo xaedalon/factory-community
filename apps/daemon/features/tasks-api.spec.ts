@@ -65,6 +65,23 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     roots = []
   })
 
+  /**
+   * The project tasks are created in.
+   *
+   * Set by the Background and replaced by any scenario that adds one of its
+   * own, so a task lands in whichever project the scenario is about.
+   */
+  let projectId = ''
+
+  const addProject = async (name: string, path: string, usesWorktrees?: boolean) => {
+    await call('POST', '/api/projects', {
+      name,
+      path,
+      ...(usesWorktrees === undefined ? {} : { usesWorktrees }),
+    })
+    projectId = (response.body.project as { id: string } | undefined)?.id ?? ''
+  }
+
   const file = (path: string, contents: string) => {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, contents)
@@ -144,11 +161,18 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       file(join(scope, 'workflows', 'hello.workflow.yaml'), 'name: hello\nphases: [greet]\n')
       file(join(scope, 'phases', 'greet.phase.yaml'), 'name: greet\nsteps: [{run: echo hello}]\n')
     })
+    // A task cannot be created without one. Named so the many scenarios that
+    // add their own project called "work" still can — two projects may share a
+    // path, only the name has to be unique.
+    And('a project to create tasks in', async () => {
+      await addProject('sample', join(root, 'work'))
+    })
   })
 
   const create = async (name: string, workflows?: string[]) => {
     await call('POST', '/api/tasks', {
       name,
+      projectId,
       ...(workflows === undefined ? {} : { workflows }),
     })
     taskId = (response.body.task as { id: string }).id
@@ -358,17 +382,6 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('nothing was dropped from the output', () => expect(response.body.dropped).toBe(0))
   })
 
-  let projectId = ''
-
-  const addProject = async (name: string, path: string, usesWorktrees?: boolean) => {
-    await call('POST', '/api/projects', {
-      name,
-      path,
-      ...(usesWorktrees === undefined ? {} : { usesWorktrees }),
-    })
-    projectId = (response.body.project as { id: string } | undefined)?.id ?? ''
-  }
-
   /** A real repository with a commit: `git worktree add` needs a HEAD. */
   const makeRepository = (at: string): string => {
     mkdirSync(at, { recursive: true })
@@ -393,8 +406,10 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
     Then('the response is 201', () => expect(response.statusCode).toBe(201))
     And('the project is listed', async () => {
+      const added = projectId
       await call('GET', '/api/projects')
-      expect(response.body.items).toHaveLength(1)
+      const items = response.body.items as { id: string }[]
+      expect(items.some((item) => item.id === added)).toBe(true)
     })
   })
 
@@ -418,6 +433,42 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the task belongs to the project', () =>
       expect((response.body.task as { projectId?: string }).projectId).toBe(projectId),
     )
+  })
+
+  Scenario('A task without a project is refused', ({ When, Then, And }) => {
+    When('I create the task "Add due dates" naming no project', () =>
+      call('POST', '/api/tasks', { name: 'Add due dates' }),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    And('the response says a task needs a project', () =>
+      expect(String(response.body.error)).toContain('needs a project'),
+    )
+  })
+
+  Scenario('A project with nothing in it can be removed', ({ Given, When, Then }) => {
+    Given('the project "work" exists', () => addProject('work', join(root, 'work')))
+    When('I remove that project', () => call('DELETE', `/api/projects/${projectId}`))
+    Then('the response is 204', () => expect(response.statusCode).toBe(204))
+  })
+
+  Scenario('A project that still has tasks cannot be removed', ({ Given, And, When, Then }) => {
+    let removed = ''
+    Given('the project "work" exists', () => addProject('work', join(root, 'work')))
+    And('the task "Add due dates" exists in that project', async () => {
+      removed = projectId
+      await create('Add due dates')
+    })
+    When('I remove that project', () => call('DELETE', `/api/projects/${removed}`))
+    Then('the response is 409', () => expect(response.statusCode).toBe(409))
+    And('the response says 1 task is still in it', () =>
+      expect(String(response.body.error)).toContain('1 task still in it'),
+    )
+    And('the response carries the count', () => expect(response.body.tasks).toBe(1))
+    And('the project is still listed', async () => {
+      await call('GET', '/api/projects')
+      const items = response.body.items as { id: string }[]
+      expect(items.some((item) => item.id === removed)).toBe(true)
+    })
   })
 
   Scenario("A task in a project runs in that project's directory", ({
@@ -542,7 +593,16 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       (item) => item.id === id,
     )
 
-  Scenario('Setup says what is still missing', ({ When, Then, And }) => {
+  Scenario('Setup says what is still missing', ({ Given, When, Then, And }) => {
+    // The Background adds one, because a task cannot be created without it.
+    // Removing it is how this scenario gets back to a fresh installation —
+    // and it is only removable because nothing has been put in it yet.
+    Given('no repositories have been added', async () => {
+      await call('GET', '/api/projects')
+      for (const item of response.body.items as { id: string }[]) {
+        await call('DELETE', `/api/projects/${item.id}`)
+      }
+    })
     When('I ask what setup is left', () => call('GET', '/api/setup'))
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
     // Contributed by the engine, because it is the only part that can see the
@@ -1063,6 +1123,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Given('the task "Add due dates" is created with a description', async () => {
         await call('POST', '/api/tasks', {
           name: 'Add due dates',
+          projectId,
           description: 'Every todo gets an optional due date.',
         })
         taskId = (response.body.task as { id: string }).id
@@ -1553,8 +1614,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       // test is that resolution *looks*, and a directory somebody created or
       // deleted outside Factory is exactly the case the rule exists for.
       And('a worktree for it exists on the disk', async () => {
+        const mine = projectId
         await call('GET', '/api/projects')
-        const project = (response.body.items as { worktreesRoot: string }[])[0]
+        const project = (response.body.items as { id: string; worktreesRoot: string }[]).find(
+          (item) => item.id === mine,
+        )
         await reload()
         const directory = (response.body.task as { directory: string }).directory
         worktree = join(project?.worktreesRoot as string, directory)
@@ -1563,18 +1627,6 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       When('I ask for the task', reload)
       Then('its workspace is that worktree', () => expect(workspace()?.path).toBe(worktree))
       And('the workspace is a worktree', () => expect(workspace()?.inWorktree).toBe(true))
-    })
-
-    RuleScenario('A task belonging to no project has no workspace', ({
-      Given,
-      When,
-      Then,
-    }) => {
-      Given('the task "Add due dates" exists with the workflow "hello"', () =>
-        create('Add due dates', ['hello']),
-      )
-      When('I ask for the task', reload)
-      Then('it has no workspace', () => expect(workspace()).toBeUndefined())
     })
 
     RuleScenario('The task list does not carry it', ({ Given, And, When, Then }) => {
@@ -1626,18 +1678,17 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
     RuleScenario('The tools are beside the actions, not inside the workspace', ({
       Given,
+      And,
       When,
       Then,
-      And,
     }) => {
-      Given('the task "Add due dates" exists with the workflow "hello"', () =>
-        create('Add due dates', ['hello']),
-      )
+      Given("the project \"work\" exists at the scope's directory", givenProject)
+      And('the task "Add due dates" exists in it with the workflow "hello"', givenTask)
       When('I ask for the task', reload)
-      Then('it has no workspace', () =>
-        expect((response.body as { workspace?: unknown }).workspace).toBeUndefined(),
-      )
-      And('it still has tools', () => expect(tools().length).toBeGreaterThan(0))
+      Then('its tools are beside its workspace, not inside it', () => {
+        expect(tools().length).toBeGreaterThan(0)
+        expect((response.body.workspace as { tools?: unknown }).tools).toBeUndefined()
+      })
     })
 
     RuleScenario('A terminal tool only changes directory', ({ Given, And, When, Then }) => {
@@ -1926,7 +1977,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
   Rule('a client chooses a task\'s name, never a path', ({ RuleScenario }) => {
     const createWithDirectory = (name: string, directory: string) => async (): Promise<void> => {
-      await call('POST', '/api/tasks', { name, directory })
+      await call('POST', '/api/tasks', { name, projectId, directory })
       taskId = (response.body.task as { id: string }).id
     }
     const directoryIs = (expected: string) => (): void => {
@@ -1997,6 +2048,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       app = buildServer(freshRuntime, freshService, {})
       service = freshService
       roots.push(fresh)
+      // A fresh database, so the Background's project is not in it — and a
+      // task cannot be created without one.
+      await addProject('sample', join(fresh, 'work'))
     }
     const accept = async (): Promise<void> => {
       await call('POST', '/api/settings/accept')
@@ -2344,8 +2398,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
       ids.set(name, (response.body.task as { id: string }).id)
     }
-    const taskNowhere = (name: string) => async (): Promise<void> => {
-      await call('POST', '/api/tasks', { name, workflows: ['hello'] })
+    // In a *different* project, which is what the batch routes have to ignore.
+    // It used to be a task in no project, which no longer exists.
+    const taskElsewhere = (name: string) => async (): Promise<void> => {
+      await addProject('elsewhere', join(root, 'work'))
+      await call('POST', '/api/tasks', { name, projectId, workflows: ['hello'] })
       ids.set(name, (response.body.task as { id: string }).id)
     }
     const idOf = (name: string) => ids.get(name) as string
@@ -2447,7 +2504,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     RuleScenario("Queue all ignores another project's tasks", ({ Given, And, When, Then }) => {
       Given('the project "work" exists here', quietDaemon(true))
       And('the task "One" exists in the project with a workflow', taskIn('One', ['hello']))
-      And('a task "Elsewhere" with a workflow in no project', taskNowhere('Elsewhere'))
+      And('a task "Elsewhere" with a workflow in another project', taskElsewhere('Elsewhere'))
       When('I queue the whole project', queueAll)
       Then('1 task was queued', () => expect(queued()).toHaveLength(1))
     })
@@ -2557,7 +2614,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     RuleScenario("Stop all ignores another project's tasks", ({ Given, And, When, Then }) => {
       Given('the project "work" exists here', quietDaemon(true))
       And('the task "One" exists in the project with a workflow', taskIn('One', ['hello']))
-      And('a task "Elsewhere" with a workflow in no project', taskNowhere('Elsewhere'))
+      And('a task "Elsewhere" with a workflow in another project', taskElsewhere('Elsewhere'))
       And('the whole project is queued', queueAll)
       And('"Elsewhere" is queued', act('Elsewhere', 'queue'))
       When('I stop the whole project', stopAll)

@@ -37,11 +37,16 @@ const description = ref('')
 const ticketId = ref('')
 const branch = ref('')
 // Defaults to whatever the rail is showing: creating a task while looking at a
-// project almost always means creating it there.
+// project almost always means creating it there. When the rail shows
+// everything, the first project is chosen rather than none — a task cannot be
+// created without one, and an empty select that refuses on submit is a worse
+// way to learn that than a filled one you can change.
 const projectId = ref(chosen.projectId ?? '')
 const workflows = ref<WorkflowChoice[]>([])
 const available = ref<DefinitionListing[]>([])
 const busy = ref(false)
+// So the empty state is not flashed before the first list arrives.
+const loaded = ref(false)
 
 /** What this project can run — its own scope, layered over the shared ones. */
 async function loadWorkflows(): Promise<void> {
@@ -55,8 +60,10 @@ async function loadWorkflows(): Promise<void> {
   }
 }
 
-onMounted(() => {
-  void chosen.load()
+onMounted(async () => {
+  await chosen.load()
+  if (projectId.value === '') projectId.value = projects.value[0]?.id ?? ''
+  loaded.value = true
   void loadWorkflows()
 })
 // Changing the project changes which workflows exist, so the list is fetched
@@ -65,14 +72,14 @@ onMounted(() => {
 watch(projectId, loadWorkflows)
 
 async function submit(): Promise<void> {
-  if (name.value.trim() === '' || busy.value) return
+  if (name.value.trim() === '' || projectId.value === '' || busy.value) return
   busy.value = true
   const id = await tasks.create({
     name: name.value.trim(),
     ...(description.value.trim() === '' ? {} : { description: description.value.trim() }),
     ...(ticketId.value.trim() === '' ? {} : { ticketId: ticketId.value.trim() }),
     ...(branch.value.trim() === '' ? {} : { branch: branch.value.trim() }),
-    ...(projectId.value === '' ? {} : { projectId: projectId.value }),
+    projectId: projectId.value,
     workflows: workflows.value.map((entry) => entry.workflow),
   })
   busy.value = false
@@ -85,7 +92,33 @@ async function submit(): Promise<void> {
   <PageHeader title="New task" subtitle="A name, what it is for, where it happens, and what it runs — in order." />
 
   <div class="px-8 py-6">
-    <form class="max-w-2xl" data-testid="new-task-form" @submit.prevent="submit">
+    <!--
+      A task happens in a project, so with none registered there is nothing to
+      fill in. The form is not shown disabled: the thing to do is add a
+      repository, and that is the only control offered.
+    -->
+    <div
+      v-if="loaded && projects.length === 0"
+      class="max-w-2xl rounded-lg border border-dashed border-[var(--color-line)] px-6 py-12 text-center"
+      data-testid="new-task-needs-project"
+    >
+      <AppIcon name="project" :size="22" class="mx-auto text-[var(--color-ink-faint)]" />
+      <p class="mt-3 text-sm text-[var(--color-ink-muted)]">
+        A task happens in a project, and there are none yet. A project is the repository Factory
+        does the work in.
+      </p>
+      <div class="mt-4 flex justify-center">
+        <AppButton
+          label="Add a repository"
+          icon="add"
+          tone="primary"
+          data-testid="new-task-add-project"
+          @click="router.push('/projects/new')"
+        />
+      </div>
+    </div>
+
+    <form v-else class="max-w-2xl" data-testid="new-task-form" @submit.prevent="submit">
       <FieldRow
         label="Name"
         icon="tasks"
@@ -137,11 +170,10 @@ async function submit(): Promise<void> {
       </FieldRow>
 
       <FieldRow
-        v-if="projects.length > 0"
         label="Project"
         icon="project"
         for="task-project"
-        hint="The repository this work happens in. Without one it runs wherever the daemon was started, which is rarely what anybody means."
+        hint="The repository this work happens in. It decides where the steps run and where the worktree goes."
       >
         <select
           id="task-project"
@@ -149,7 +181,6 @@ async function submit(): Promise<void> {
           data-testid="task-project"
           class="field-control"
         >
-          <option value="">No project — run where the daemon started</option>
           <option v-for="project in projects" :key="project.id" :value="project.id">
             {{ project.name }}
           </option>

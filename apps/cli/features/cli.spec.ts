@@ -58,6 +58,20 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     ...over,
   })
 
+  /** A daemon that knows about these projects and nothing else. */
+  const daemonWithProjects = (...names: string[]) => (): void => {
+    asked = []
+    daemon = fakeDaemon((path, method) =>
+      method === 'POST'
+        ? { task: task({ state: 'draft' }), actions: [{ action: 'queue', label: 'Queue' }] }
+        : path.startsWith('/api/projects')
+          ? { items: names.map((name, index) => ({ id: `pr-${index + 1}`, name })) }
+          : { items: [] },
+    )
+  }
+  const createdIn = () =>
+    (asked.find((entry) => entry.method === 'POST')?.body as { projectId?: string })?.projectId
+
   const file = (path: string, contents: string) => {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, contents)
@@ -420,14 +434,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   })
 
   Scenario('a task is created with its workflows in order', ({ Given, When, Then, And }) => {
-    Given('a daemon with no tasks', () => {
-      asked = []
-      daemon = fakeDaemon((path, method) =>
-        method === 'POST'
-          ? { task: task({ state: 'draft' }), actions: [{ action: 'queue', label: 'Queue' }] }
-          : { items: [] },
-      )
-    })
+    // One project, because a task needs one — and with exactly one there is
+    // nothing for the command line to say about it.
+    Given('a daemon with no tasks', daemonWithProjects('work'))
     When('I run "task new Add due dates --workflow worktree-create --workflow development"', () =>
       invoke('task new Add due dates --workflow worktree-create --workflow development'),
     )
@@ -442,6 +451,35 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the output says how to start it', () =>
       expect(output).toContain('factory task queue'),
     )
+  })
+
+  Scenario('a task lands in the only project there is', ({ Given, When, Then }) => {
+    Given('a daemon with one project "work"', daemonWithProjects('work'))
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('the daemon was asked to create it in "work"', () => expect(createdIn()).toBe('pr-1'))
+  })
+
+  Scenario('with no project there is nowhere to put a task', ({ Given, When, Then, And }) => {
+    Given('a daemon with no projects', daemonWithProjects())
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output contains "needs a project"', () =>
+      expect(output).toContain('needs a project'),
+    )
+    And('the output says how to add one', () =>
+      expect(output).toContain('factory project add'),
+    )
+  })
+
+  Scenario('with more than one project the task says which', ({ Given, When, Then, And }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', daemonWithProjects('work', 'elsewhere'))
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output contains "--project"', () => expect(output).toContain('--project'))
+    And('the output names both projects', () => {
+      expect(output).toContain('work')
+      expect(output).toContain('elsewhere')
+    })
   })
 
   Scenario('showing a task lists what it can do next', ({ Given, When, Then }) => {

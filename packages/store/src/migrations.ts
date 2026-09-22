@@ -455,4 +455,116 @@ export const MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    version: 17,
+    describe: 'a task cannot exist without a project',
+    // The rebuild below drops `tasks`, which every run, step, log, evidence row,
+    // history row, workflow entry and dependency edge points at with ON DELETE
+    // CASCADE. See `rebuildsForeignKeys` in migrate.ts: without this, the drop
+    // takes all of them.
+    rebuildsForeignKeys: true,
+    up: (db) => {
+      // Migration 5 made `project_id` nullable with ON DELETE SET NULL,
+      // reasoning that removing a project is bookkeeping and must not delete the
+      // record of work. Right about the record, wrong about the remedy:
+      // orphaning a task does not keep it usable. It ran wherever the daemon
+      // happened to be started, wrote its artifacts beside it, could not be
+      // queued as a batch or given a worktree, and vanished from the board the
+      // moment any project was selected. Removal is refused now instead, which
+      // keeps the record by keeping the project.
+      //
+      // Foreign keys are off for this whole transaction, so ON DELETE CASCADE
+      // does not fire and the orphans' children are deleted by hand — exactly
+      // what the cascade would have done. The ids go into a temp table first,
+      // which is what makes the order below irrelevant: every delete reads the
+      // captured list rather than `tasks`, so removing the tasks early would
+      // not strand anything. `PRAGMA foreign_key_check` at the end is what
+      // proves no table was forgotten — `task_flags` was, once.
+      const orphans =
+        db.get<{ n: number }>('SELECT count(*) AS n FROM tasks WHERE project_id IS NULL')?.n ?? 0
+
+      db.exec(`
+        CREATE TEMP TABLE orphan_tasks AS SELECT id FROM tasks WHERE project_id IS NULL;
+
+        DELETE FROM run_logs WHERE run_id IN
+          (SELECT id FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks));
+        DELETE FROM run_evidence WHERE run_id IN
+          (SELECT id FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks));
+        DELETE FROM run_steps WHERE run_id IN
+          (SELECT id FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks));
+        DELETE FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_workflows WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_flags WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_history WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_dependencies
+          WHERE task_id IN (SELECT id FROM orphan_tasks)
+             OR depends_on_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM tasks WHERE id IN (SELECT id FROM orphan_tasks);
+        DROP TABLE orphan_tasks;
+      `)
+
+      // ON DELETE RESTRICT rather than CASCADE: a project is removable only
+      // while nothing is left in it, and `ProjectRepository.remove` refuses
+      // first so the message can name the count. This is the backstop for
+      // anything that goes round the repository — belt to NOT NULL's braces,
+      // which refuses a SET NULL action on its own.
+      db.exec(`
+        CREATE TABLE tasks_new (
+          id                TEXT PRIMARY KEY,
+          name              TEXT NOT NULL,
+          description       TEXT NOT NULL DEFAULT '',
+          project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+          ticket_id         TEXT,
+          branch            TEXT,
+          directory         TEXT,
+          state             TEXT NOT NULL,
+          queue_position    INTEGER,
+          blocked_reason    TEXT,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL,
+          completed_at      TEXT,
+          runnable_at       TEXT,
+          session_id        TEXT,
+          session_provider  TEXT
+        );
+
+        INSERT INTO tasks_new (
+          id, name, description, project_id, ticket_id, branch, directory, state,
+          queue_position, blocked_reason, created_at, updated_at, completed_at,
+          runnable_at, session_id, session_provider
+        )
+        SELECT
+          id, name, description, project_id, ticket_id, branch, directory, state,
+          queue_position, blocked_reason, created_at, updated_at, completed_at,
+          runnable_at, session_id, session_provider
+        FROM tasks;
+
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks;
+
+        -- The board's main query is "everything in this state, in order", and the
+        -- scheduler's is "the next queued one". Recreated because the index went
+        -- with the old table.
+        CREATE INDEX tasks_by_state ON tasks (state, queue_position);
+      `)
+
+      // Proving the invariant rather than assuming it, the way migration 15
+      // checks for cycles. With enforcement off for this transaction, nothing
+      // else would notice a child left pointing at a task that is gone.
+      const violations = db.all('PRAGMA foreign_key_check')
+      if (violations.length > 0) {
+        throw new Error(
+          `Rebuilding tasks left ${violations.length} foreign key violation(s): ` +
+            JSON.stringify(violations),
+        )
+      }
+
+      // Deleting somebody's tasks is a one-way door and this runs unattended when
+      // a daemon starts, so the count is carried out to the migration log rather
+      // than left only in the schema.
+      return orphans > 0
+        ? `deleted ${orphans} task(s) that belonged to no project, and everything recorded about them`
+        : undefined
+    },
+  },
 ]

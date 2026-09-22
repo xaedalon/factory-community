@@ -249,7 +249,8 @@ export interface Task {
   name: string
   /** Always present — '' when nobody has written one. */
   description: string
-  projectId?: string
+  /** The project the work happens in. Every task has one. */
+  projectId: string
   ticketId?: string
   branch?: string
   directory?: string
@@ -480,13 +481,16 @@ export interface TaskDetail {
   progress?: { completed: number; total: number }
   blockers: TaskBlocker[]
   artifacts: TaskArtifact[]
-  /** Absent for a task belonging to no project: there is nowhere to show. */
+  /**
+   * Absent only when the task's project is missing from the database, which
+   * takes a hand-edited one: every task has a project.
+   */
   workspace?: TaskWorkspace
   /**
    * The buttons this task offers, in the order the plugins asked for.
    *
-   * Beside `actions`, not inside `workspace`: a task with no project has no
-   * workspace, and a tool that needs no directory would be unreachable there.
+   * Beside `actions`, not inside `workspace`: a tool that needs no directory
+   * — a ticket system, say — would be unreachable nested inside one.
    */
   tools: TaskTool[]
 }
@@ -555,7 +559,8 @@ export interface NewTask {
   description?: string
   ticketId?: string
   branch?: string
-  projectId?: string
+  /** Required: it decides where the work happens. */
+  projectId: string
   workflows?: string[]
 }
 

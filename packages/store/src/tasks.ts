@@ -100,7 +100,8 @@ export interface CreateTask {
   readonly name: string
   /** What the work is for. Stored as '' when unwritten, never NULL. */
   readonly description?: string
-  readonly projectId?: string
+  /** Required. A task with nowhere to happen runs wherever the daemon started. */
+  readonly projectId: string
   readonly ticketId?: string
   readonly branch?: string
   readonly directory?: string
@@ -121,6 +122,11 @@ export class TaskRepository {
   }
 
   create(input: CreateTask): Task {
+    // Checked here rather than left to the NOT NULL column, so the refusal says
+    // what is missing instead of surfacing a constraint name.
+    if (input.projectId === undefined || input.projectId.trim() === '') {
+      throw new Error('A task needs a project: it decides where the work happens.')
+    }
     const now = this.#now()
     const id = this.#newId()
     // Slugged whether it was supplied or derived, and then made unique.
@@ -143,7 +149,7 @@ export class TaskRepository {
         id,
         input.name,
         input.description?.trim() ?? '',
-        input.projectId ?? null,
+        input.projectId,
         input.ticketId ?? null,
         input.branch ?? null,
         directory,
@@ -540,10 +546,9 @@ export class TaskRepository {
       if (id === blockerId) {
         throw new Error(`"${task.name}" cannot depend on itself.`)
       }
-      // Ids, so this compares what the graph is keyed by. Both undefined — two
-      // tasks belonging to no project — counts as the same project: they are
-      // equally unowned, and refusing would make dependencies impossible for
-      // anyone not using projects yet.
+      // Ids, so this compares what the graph is keyed by. Both are always set
+      // now — a task cannot exist without a project — so this is the plain
+      // question it looks like.
       if (task.projectId !== blocker.projectId) {
         throw new Error(
           `"${task.name}" and "${blocker.name}" are in different projects, ` +

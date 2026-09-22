@@ -10,6 +10,7 @@ import {
   queueOrder,
 } from '@factory/core'
 import type { ExecutionProfile, Project, ProjectSetting, Task } from '@factory/core'
+import { ProjectHasTasksError } from '@factory/store'
 import type { Runtime } from '@factory/runtime'
 import type { Service } from '../service.js'
 
@@ -383,9 +384,26 @@ export function registerProjectRoutes(
     return { cancelled, signalled, killed }
   })
 
+  /**
+   * Forget a project, if nothing is left in it.
+   *
+   * 409 rather than a cascade: removing a project used to orphan its tasks,
+   * and an orphan ran wherever the daemon was started. The count is in the
+   * body as well as the message, so a client can say "3 tasks" without reading
+   * a sentence.
+   */
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (request, reply) => {
-    if (!projects.remove(request.params.id)) {
-      return reply.code(404).send({ error: `No project ${request.params.id}.` })
+    try {
+      if (!projects.remove(request.params.id)) {
+        return reply.code(404).send({ error: `No project ${request.params.id}.` })
+      }
+    } catch (error) {
+      if (error instanceof ProjectHasTasksError) {
+        return reply
+          .code(409)
+          .send({ error: error.message, tasks: error.count, archived: error.archived })
+      }
+      throw error
     }
     return reply.code(204).send()
   })

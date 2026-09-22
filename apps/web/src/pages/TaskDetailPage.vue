@@ -985,10 +985,10 @@ const stepTone: Record<string, string> = {
           <!-- Beside the plan, which is the other "what will happen" control: the
                plan says what this task will do, this says when it may start.
 
-               Not gated on having a project: the store lets two tasks that belong
-               to no project wait for each other — they are equally unowned — and a
-               control the daemon would accept has to be here, or the rule has two
-               different answers depending on where you ask. -->
+               Never gated on anything this page could work out: the store's rule
+               is that both tasks are in the same project, and a control the daemon
+               would accept has to be here, or the rule has two different answers
+               depending on where you ask. -->
           <section data-testid="task-dependencies">
             <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
               Waits for

@@ -928,8 +928,8 @@ When('I confirm the removal', async ({ page }) => {
   await page.getByTestId('remove-project-confirm').click()
 })
 
-Then('no projects are listed', async ({ page }) => {
-  await expect(page.getByTestId('projects-empty')).toBeVisible()
+Then('{string} is no longer listed', async ({ page }, name: string) => {
+  await expect(page.getByTestId(`project-${name}`)).toHaveCount(0)
 })
 
 // Against the path box, not in a banner at the top of the form. A refusal that
@@ -1046,6 +1046,36 @@ Then('the task finishes', async ({ page }) => {
 })
 
 /* ------------------------------------------------------------------ setup */
+
+// The daemon registers one at startup, because a task cannot be created
+// without it. These scenarios are about the installation before any of that.
+Given('no repositories are registered', async ({ world }) => {
+  await world.startDaemon()
+  await world.removeEveryProject()
+})
+
+When('I open the new task page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/tasks/new')
+})
+
+Then('the page says a task needs a project', async ({ page }) => {
+  await expect(page.getByTestId('new-task-needs-project')).toContainText('happens in a project')
+})
+
+Then('it offers to add a repository', async ({ page }) => {
+  await page.getByTestId('new-task-add-project').click()
+  await expect(page).toHaveURL(/\/projects\/new$/)
+})
+
+Then('the page says {int} task is still in it', async ({ page }, count: number) => {
+  await expect(page.getByTestId('error')).toContainText(`${count} task still in it`)
+})
+
+Then('{string} is still listed', async ({ page }, name: string) => {
+  await page.getByTestId('nav-projects').click()
+  await expect(page.getByTestId(`project-${name}`)).toBeVisible()
+})
 
 When('I open the setup page', async ({ world, page }) => {
   await world.startDaemon()

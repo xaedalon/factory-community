@@ -111,3 +111,48 @@ Feature: Keeping what happened
       When the store is opened
       And a row references a parent that does not exist
       Then the write is refused
+
+  Rule: a migration can say what it did
+
+    A schema change is silent by design: it either applied or it did not, and
+    the version says which. But one that deletes somebody's rows is a one-way
+    door, and it runs unattended when a daemon starts. Such a migration says
+    how much it removed, and the daemon prints it at boot beside what it
+    recovered.
+
+    Scenario: A migration that reports something carries it out to the caller
+      Given a migration that deletes rows and says how many
+      When the store is opened
+      Then the outcome carries that note
+
+    Scenario: A migration with nothing to say carries no note
+      Given two migrations
+      When the store is opened
+      Then no note is carried
+
+  Rule: upgrading an installation that has tasks in no project
+
+    A task used to be able to belong to nowhere, and removing a project left
+    its tasks behind rather than refusing. Those tasks cannot be kept: there is
+    nothing to give them, and what they would do if queued is run agents in
+    whatever directory the daemon happened to be started in. So they are
+    deleted on upgrade, with everything recorded about them, and the upgrade
+    says how many.
+
+    What must not move is everything else. The upgrade rebuilds `tasks`, and
+    every run, step, log, artifact, flag, history row and dependency edge in
+    the database points at that table with ON DELETE CASCADE.
+
+    Scenario: A task that belonged to no project is deleted, and said so
+      Given an installation from before a task needed a project
+      When it is upgraded
+      Then the task that had no project is gone
+      And nothing recorded about it is left behind
+      And the upgrade says it deleted 1 task
+
+    Scenario: A task that had a project keeps everything it recorded
+      Given an installation from before a task needed a project
+      When it is upgraded
+      Then the task in a project is still there
+      And its run, step, log, artifact, flag, history and dependency are still there
+      And no foreign key is violated

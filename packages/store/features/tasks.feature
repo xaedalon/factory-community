@@ -14,6 +14,7 @@ Feature: A task, and the rules about how it moves
 
   Background:
     Given an empty store
+    And a project to put tasks in
 
   Scenario: A new task starts as a draft
     When I create a task "Add due dates"

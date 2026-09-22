@@ -186,7 +186,7 @@ context.provide('task-tool', {
   run: 'detached',
   offer: ({ task, workspace, env }) =>
     workspace === undefined
-      ? { unavailable: 'This task belongs to no project.' }
+      ? { unavailable: 'Factory cannot find the project this task belongs to.' }
       : { command: { command: 'open', args: [`https://runbook.acme.test/${task.id}`] } },
 })
 ```

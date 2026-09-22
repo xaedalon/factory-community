@@ -123,12 +123,14 @@ Feature: The task board
     Then the task finishes
 
   Scenario: The setup page says what is still missing
+    Given no repositories are registered
     When I open the setup page
     Then "Add a repository" is a setup step
     And it is marked essential
     And the page says Factory cannot run work yet
 
   Scenario: A setup step offers the command that fixes it
+    Given no repositories are registered
     When I open the setup page
     Then a setup step offers a command to copy
 
@@ -260,7 +262,19 @@ Feature: The task board
       And I press remove once
       Then the project is still there
       When I confirm the removal
-      Then no projects are listed
+      Then "work" is no longer listed
+
+    Scenario: A project with work still in it is not removed
+      Given the project "work" is registered
+      And the task "Add due dates" exists in "work" on "hello"
+      When I open the projects page
+      And I open the project "work"
+      And I press remove once
+      And I confirm the removal
+      # Said on screen, with the count, rather than the project quietly
+      # vanishing and its task with it.
+      Then the page says 1 task is still in it
+      And "work" is still listed
 
   Rule: The rail says which project the board is about
 
@@ -339,6 +353,14 @@ Feature: The task board
       When I open the tasks page
       And I start a new task
       Then the new task page is open
+
+    Scenario: With no repository there is nowhere to put a task
+      Given no repositories are registered
+      When I open the new task page
+      # A task happens in a project. Rather than a form that refuses on submit,
+      # the one thing worth doing is offered.
+      Then the page says a task needs a project
+      And it offers to add a repository
 
     Scenario: Workflows keep the order they were added in
       Given the project defines the workflow "hello" that prints "hello"

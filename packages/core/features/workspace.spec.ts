@@ -15,7 +15,7 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario }) => {
   let result: Workspace | undefined
 
   BeforeEachScenario(() => {
-    project = undefined
+    project = facilities(false)
     task = { flags: [] }
     onDisk = new Set()
     result = undefined
@@ -129,14 +129,6 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario }) => {
     When('I ask where its steps run', ask)
     Then('the workspace is "/repos/todolist"', workspaceIs('/repos/todolist'))
     And('no worktree was considered', consideredNone)
-  })
-
-  Scenario('A task belonging to no project has no answer here', ({ Given, When, Then }) => {
-    Given('the task belongs to no project', () => {
-      project = undefined
-    })
-    When('I ask where its steps run', ask)
-    Then('there is no workspace', () => expect(result).toBeUndefined())
   })
 
   Rule('the disk is trusted, not the flag', ({ RuleScenario }) => {

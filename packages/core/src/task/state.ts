@@ -77,8 +77,15 @@ export interface Task {
    * "empty" are the same thing for prose.
    */
   readonly description: string
-  /** The project this work happens in. Absent for a task nobody located. */
-  readonly projectId?: string
+  /**
+   * The project this work happens in.
+   *
+   * Required. It used to be optional, and a task without one ran in whatever
+   * directory the daemon was started in, could not be queued as a batch and
+   * could not be given a worktree. It decides where, so there is no task
+   * without it.
+   */
+  readonly projectId: string
   readonly ticketId?: string
   readonly branch?: string
   /** Directory name for a worktree, when the task has one. */

@@ -36,13 +36,21 @@ export interface Migration {
    * transaction with it.
    */
   readonly rebuildsForeignKeys?: boolean
-  up(db: Database): void
+  /**
+   * Returns a note when there is something the operator has to know.
+   *
+   * A schema change is silent by design — it applied or it did not, and the
+   * version says which. One that deletes somebody's rows is a one-way door
+   * running unattended when a daemon starts, and "it is in the schema" is not
+   * telling them.
+   */
+  up(db: Database): void | string
 }
 
 export interface MigrationOutcome {
   readonly from: number
   readonly to: number
-  readonly applied: readonly { version: number; describe: string }[]
+  readonly applied: readonly { version: number; describe: string; note?: string }[]
 }
 
 export function currentVersion(db: Database): number {
@@ -70,7 +78,7 @@ export function migrate(db: Database, migrations: readonly Migration[]): Migrati
     )
   }
 
-  const applied: { version: number; describe: string }[] = []
+  const applied: { version: number; describe: string; note?: string }[] = []
   for (const migration of migrations) {
     if (migration.version <= from) continue
     // Outside the transaction, because that is the only place it does anything —
@@ -78,11 +86,13 @@ export function migrate(db: Database, migrations: readonly Migration[]): Migrati
     // throws does not leave the connection with its foreign keys switched off,
     // which would turn every later write into one nothing checks.
     if (migration.rebuildsForeignKeys === true) db.exec('PRAGMA foreign_keys = OFF')
+    let note: string | undefined
     try {
       // Each migration is its own transaction: a failure leaves the database at
       // the last version that fully applied, which is a state someone can act on.
       db.transaction(() => {
-        migration.up(db)
+        const said = migration.up(db)
+        if (typeof said === 'string') note = said
         // PRAGMA will not take a bound parameter, and the value is a validated
         // integer from our own list rather than anything a caller supplied.
         db.exec(`PRAGMA user_version = ${migration.version}`)
@@ -90,7 +100,11 @@ export function migrate(db: Database, migrations: readonly Migration[]): Migrati
     } finally {
       if (migration.rebuildsForeignKeys === true) db.exec('PRAGMA foreign_keys = ON')
     }
-    applied.push({ version: migration.version, describe: migration.describe })
+    applied.push({
+      version: migration.version,
+      describe: migration.describe,
+      ...(note === undefined ? {} : { note }),
+    })
   }
 
   return { from, to: currentVersion(db), applied }

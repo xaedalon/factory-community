@@ -38,6 +38,8 @@ export class World {
   readonly root = mkdtempSync(join(tmpdir(), 'factory-web-'))
   readonly workDir = join(this.root, 'work')
   readonly projectScope = join(this.workDir, '.xaedalon', '.factory')
+  /** The project the daemon starts with, which every task lands in by default. */
+  defaultProject = ''
   readonly userScope = join(this.root, 'home', '.xaedalon', '.factory')
   /**
    * A second repository, with definitions of its own.
@@ -272,6 +274,10 @@ export default {
       stdio: 'ignore',
     })
     await waitForHealth()
+    // A task cannot be created without a project, so the working directory is
+    // registered as one. Scenarios that are about projects add their own; this
+    // is the one everything else lands in.
+    this.defaultProject = await this.addProject('workspace', this.workDir)
   }
 
   /** Create a task the way the board would, so a scenario can start from one. */
@@ -282,11 +288,21 @@ export default {
       body: JSON.stringify({
         name,
         workflows,
-        ...(projectId === undefined ? {} : { projectId }),
+        projectId: projectId ?? this.defaultProject,
       }),
     })
     const body = (await response.json()) as { task: { id: string } }
     return body.task.id
+  }
+
+  /** Back to an installation with nothing registered. */
+  async removeEveryProject(): Promise<void> {
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/projects`)
+    const body = (await response.json()) as { items: { id: string }[] }
+    for (const item of body.items) {
+      await fetch(`http://127.0.0.1:${PORT}/api/projects/${item.id}`, { method: 'DELETE' })
+    }
+    this.defaultProject = ''
   }
 
   /** Register a project the way the projects page would. */

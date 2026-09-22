@@ -183,17 +183,14 @@ Feature: Deciding what runs next
       When the scheduler ticks
       Then the started tasks are "First, Third" in that order
 
-    Scenario: A task belonging to no project is never held back by one
-      Given a project "api" that works in its own checkout
-      And a queued task "First" in "api"
-      And a queued task "Loose" with no project
+    Scenario: A project no lookup can answer for holds nothing
+      Given a queued task "First" in a project the lookup cannot see
+      And a queued task "Second" in the same project
       When the scheduler ticks
-      Then 2 tasks are started
-
-    Scenario: A project the scheduler cannot look up holds nothing
-      Given a queued task "First" in a project that has since been removed
-      And a queued task "Second" in a project that has since been removed
-      When the scheduler ticks
+      # Not a project somebody removed: removing one that still has tasks is
+      # refused. This is a scheduler built without a project store at all, or a
+      # row edited away by hand. Defaulting to "exclusive" would stall the work
+      # for no reason.
       Then 2 tasks are started
 
     Scenario: A project that gives each task a worktree runs as many as capacity allows
@@ -221,9 +218,10 @@ Feature: Deciding what runs next
 
     Scenario: A busy project does not hold up the queue behind it
       Given a project "api" that works in its own checkout
+      And a project "web" that gives each task a worktree
       And a queued task "First" in "api"
       And a queued task "Second" in "api"
-      And a queued task "Loose" with no project
+      And a queued task "Loose" in "web"
       When the scheduler ticks
       Then the started tasks are "First, Loose" in that order
 

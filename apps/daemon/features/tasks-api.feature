@@ -12,6 +12,7 @@ Feature: Tasks, runs and live updates over HTTP
   Background:
     Given a running daemon with a project scope
     And a workflow "hello" that prints "hello"
+    And a project to create tasks in
 
   Scenario: Creating a task
     When I create the task "Add due dates"
@@ -101,6 +102,28 @@ Feature: Tasks, runs and live updates over HTTP
     Then the response is 201
     And the task belongs to the project
 
+  Scenario: A task without a project is refused
+    When I create the task "Add due dates" naming no project
+    # Not defaulted to anything. The default this used to have was the
+    # directory the daemon happened to be started in, which is how an agent
+    # ended up committing to the wrong repository.
+    Then the response is 400
+    And the response says a task needs a project
+
+  Scenario: A project with nothing in it can be removed
+    Given the project "work" exists
+    When I remove that project
+    Then the response is 204
+
+  Scenario: A project that still has tasks cannot be removed
+    Given the project "work" exists
+    And the task "Add due dates" exists in that project
+    When I remove that project
+    Then the response is 409
+    And the response says 1 task is still in it
+    And the response carries the count
+    And the project is still listed
+
   Scenario: A task in a project runs in that project's directory
     Given a project in a directory the daemon was not started in
     And a workflow "where" that prints the directory it runs in
@@ -119,6 +142,7 @@ Feature: Tasks, runs and live updates over HTTP
     And the second workflow ran inside the worktree
 
   Scenario: Setup says what is still missing
+    Given no repositories have been added
     When I ask what setup is left
     Then the response is 200
     And adding a repository is one of the steps
@@ -480,13 +504,6 @@ Feature: Tasks, runs and live updates over HTTP
       Then its workspace is that worktree
       And the workspace is a worktree
 
-    Scenario: A task belonging to no project has no workspace
-      Given the task "Add due dates" exists with the workflow "hello"
-      When I ask for the task
-      # The daemon's own directory is where such a task would run, but offering
-      # to open it would be offering a directory nobody chose.
-      Then it has no workspace
-
     Scenario: The task list does not carry it
       Given the project "work" exists at the scope's directory
       And the task "Add due dates" exists in it with the workflow "hello"
@@ -509,12 +526,12 @@ Feature: Tasks, runs and live updates over HTTP
       And each tool says which plugin provided it
 
     Scenario: The tools are beside the actions, not inside the workspace
-      Given the task "Add due dates" exists with the workflow "hello"
+      Given the project "work" exists at the scope's directory
+      And the task "Add due dates" exists in it with the workflow "hello"
       When I ask for the task
-      # A task with no project has no workspace at all, and a tool that needs
-      # no directory would be unreachable nested inside one.
-      Then it has no workspace
-      And it still has tools
+      # A tool that needs no directory — a ticket system, say — would be
+      # unreachable nested inside a workspace.
+      Then its tools are beside its workspace, not inside it
 
     Scenario: A terminal tool only changes directory
       Given the project "work" exists at the scope's directory
@@ -916,7 +933,7 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Queue all ignores another project's tasks
       Given the project "work" exists here
       And the task "One" exists in the project with a workflow
-      And a task "Elsewhere" with a workflow in no project
+      And a task "Elsewhere" with a workflow in another project
       When I queue the whole project
       Then 1 task was queued
 
@@ -981,7 +998,7 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Stop all ignores another project's tasks
       Given the project "work" exists here
       And the task "One" exists in the project with a workflow
-      And a task "Elsewhere" with a workflow in no project
+      And a task "Elsewhere" with a workflow in another project
       And the whole project is queued
       And "Elsewhere" is queued
       When I stop the whole project

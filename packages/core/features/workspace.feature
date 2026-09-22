@@ -10,6 +10,11 @@ Feature: Where a task's steps run
   `join`, so the rule can be exercised without a filesystem and core still
   needs no import from `node:fs`.
 
+  There is always an answer. This used to return nothing for a task that
+  belonged to no project, and every caller carried a fallback to the directory
+  the daemon happened to be started in. A task belongs to a project now, so the
+  question is always answerable and the fallbacks are gone.
+
   Scenario: A project that works in place runs in its own checkout
     Given the project "todolist" at "/repos/todolist" works in place
     And the task's directory is "add-due-dates"
@@ -49,13 +54,6 @@ Feature: Where a task's steps run
     When I ask where its steps run
     Then the workspace is "/repos/todolist"
     And no worktree was considered
-
-  Scenario: A task belonging to no project has no answer here
-    Given the task belongs to no project
-    When I ask where its steps run
-    # Not the daemon's cwd: core would have to know what a cwd is. The caller
-    # that has one supplies the fallback.
-    Then there is no workspace
 
   Rule: the disk is trusted, not the flag
 

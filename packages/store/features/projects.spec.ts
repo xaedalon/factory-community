@@ -145,24 +145,68 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the task belongs to "factory"', () => expect(task?.projectId).toBe(project?.id))
   })
 
-  Scenario('A task need not belong to one', ({ When, Then }) => {
+  Scenario('A task cannot be created without one', ({ When, Then, And }) => {
     When('I create a task "Add due dates" with no project', () => {
-      task = tasks.create({ name: 'Add due dates' })
+      // Cast away the requirement on purpose: the type stops this at the call
+      // sites inside Factory, and the check exists for everything that reaches
+      // the repository without passing through the compiler — the API, a
+      // plugin, a migration written later.
+      attempt(() => {
+        task = tasks.create({ name: 'Add due dates' } as unknown as Parameters<
+          TaskRepository['create']
+        >[0])
+      })
     })
-    Then('the task belongs to no project', () => expect(task?.projectId).toBeUndefined())
+    Then('it is refused', () => expect(failure).toBeDefined())
+    And('the error says a task needs a project', () =>
+      expect((failure as Error).message).toContain('needs a project'),
+    )
   })
 
-  Scenario('Removing a project leaves its tasks without one', ({ Given, And, When, Then }) => {
+  Scenario('A project with nothing in it is removed', ({ Given, When, Then }) => {
+    Given('the project "factory" exists', () => add('factory'))
+    When('I remove the project', () => {
+      attempt(() => projects.remove(project?.id as string))
+    })
+    Then('the project is gone', () => expect(projects.list()).toHaveLength(0))
+  })
+
+  Scenario('Removing a project that still has tasks is refused', ({ Given, And, When, Then }) => {
     Given('the project "factory" exists', () => add('factory'))
     And('a task "Add due dates" in "factory"', () => {
       task = tasks.create({ name: 'Add due dates', projectId: project?.id as string })
     })
     When('I remove the project', () => {
-      projects.remove(project?.id as string)
+      attempt(() => projects.remove(project?.id as string))
     })
-    Then('the task still exists', () => expect(tasks.get(task?.id as string)).toBeDefined())
-    And('the task belongs to no project', () =>
-      expect(tasks.get(task?.id as string)?.projectId).toBeUndefined(),
+    Then('it is refused', () => expect(failure).toBeDefined())
+    And('the error says 1 task is still in it', () =>
+      expect((failure as Error).message).toContain('1 task still in it'),
+    )
+    And('the project is still there', () => expect(projects.list()).toHaveLength(1))
+    And('the task still exists', () => expect(tasks.get(task?.id as string)).toBeDefined())
+  })
+
+  // Counted with SQL rather than `list()`, which hides archived tasks. A count
+  // that skipped them would promise a removal the foreign key then refuses.
+  Scenario('An archived task counts, and the refusal says so', ({ Given, And, When, Then }) => {
+    Given('the project "factory" exists', () => add('factory'))
+    And('a task "Add due dates" in "factory"', () => {
+      task = tasks.create({ name: 'Add due dates', projectId: project?.id as string })
+    })
+    And('a task "Ship it" in "factory" that has been archived', () => {
+      const shipped = tasks.create({ name: 'Ship it', projectId: project?.id as string })
+      tasks.act(shipped.id, 'archive')
+    })
+    When('I remove the project', () => {
+      attempt(() => projects.remove(project?.id as string))
+    })
+    Then('it is refused', () => expect(failure).toBeDefined())
+    And('the error says 2 tasks are still in it', () =>
+      expect((failure as Error).message).toContain('2 tasks still in it'),
+    )
+    And('the error says 1 of them is archived', () =>
+      expect((failure as Error).message).toContain('(1 archived)'),
     )
   })
 
@@ -620,6 +664,43 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Given('the project "factory" exists', exists)
       And('its profile column says "sort-of-safe"', columnSays('profile', 'sort-of-safe'))
       Then('it states no profile', unstated)
+    })
+  })
+  Rule('the database refuses it too, not only the repository', ({ RuleScenario }) => {
+    RuleScenario('A task written straight into the database without a project is refused', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      // Raw SQL on purpose: the point is what is true when nothing has been
+      // through `create`, which is where the type and the message live.
+      When('a task with no project is written straight into the database', () =>
+        attempt(() =>
+          store.db.run(
+            `INSERT INTO tasks (id, name, state, created_at, updated_at, project_id)
+             VALUES ('t-1', 'Add due dates', 'draft', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z', NULL)`,
+          ),
+        ),
+      )
+      Then('the database refuses it', () => expect(failure).toBeDefined())
+    })
+
+    RuleScenario('A project deleted straight out of the database is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      And('a task "Add due dates" in "factory"', () => {
+        task = tasks.create({ name: 'Add due dates', projectId: project?.id as string })
+      })
+      When('the project row is deleted straight out of the database', () =>
+        attempt(() => store.db.run('DELETE FROM projects WHERE id = ?', project?.id as string)),
+      )
+      Then('the database refuses it', () => expect(failure).toBeDefined())
+      And('the task still exists', () => expect(tasks.get(task?.id as string)).toBeDefined())
     })
   })
 })

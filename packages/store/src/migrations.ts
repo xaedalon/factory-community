@@ -567,4 +567,15 @@ export const MIGRATIONS: readonly Migration[] = [
         : undefined
     },
   },
+  {
+    version: 18,
+    describe: 'a step records the command it actually ran',
+    up: (db) => {
+      // Nullable, because every step recorded before this ran without anybody
+      // writing it down, and a skipped step never ran one at all. Null is the
+      // truth in both cases; a default would invent a command that was never
+      // executed.
+      db.exec('ALTER TABLE run_steps ADD COLUMN command TEXT')
+    },
+  },
 ]

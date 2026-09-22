@@ -16,6 +16,7 @@ import {
   IGNORED_BY_PRODUCT,
   PRODUCT_FAMILY_DIR,
   fileStamp,
+  toShellString,
 } from '@factory/core'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -539,12 +540,18 @@ export class Engine {
         ...(input.resuming?.resumePhase === undefined
           ? {}
           : { startPhase: input.resuming.resumePhase, approved: true }),
-        onStep: (step, phase) => {
+          onStep: (step, phase) => {
           const stored = this.#runs.startStep(run.id, {
             phase: phase.name,
             index: step.index,
             describe: step.planned.describe,
             uses: step.uses,
+            // What actually ran, not what the phase said it would: "what did
+            // this agent run, and with what authority?" is the first question
+            // any audit asks, and reading the phase file back later answers a
+            // different one as soon as somebody has edited it. Rendered the
+            // way `--dry-run` prints it, so the two cannot disagree.
+            command: toShellString(step.planned),
           })
           stepIds.set(key(phase.name, step.index), stored.id)
         },

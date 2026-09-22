@@ -452,8 +452,13 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
         expect(count('task_history WHERE task_id = ?', 'orphan')).toBe(0)
         expect(count('task_dependencies WHERE task_id = ?', 'orphan')).toBe(0)
       })
+      // By version rather than "the last one applied": this scenario is about
+      // what migration 17 says, and a migration added after it would otherwise
+      // make the assertion about something else.
       And('the upgrade says it deleted 1 task', () =>
-        expect(store?.migration.applied.at(-1)?.note).toContain('deleted 1 task'),
+        expect(
+          store?.migration.applied.find((entry) => entry.version === 17)?.note,
+        ).toContain('deleted 1 task'),
       )
     })
 

@@ -487,6 +487,19 @@ Feature: Tasks, runs and live updates over HTTP
       When I ask for the task
       Then it reports 1 of 1 phases
 
+  Rule: a run says what it actually executed
+
+    A step recorded what the phase said it would do and the kind that ran it.
+    What was executed was nowhere, so "what did this agent run, and with what
+    authority?" could only be answered by reading the phase file back — a
+    different question as soon as anybody has edited it. The profile was
+    recorded for this reason; the argv was still missing.
+
+    Scenario: The step carries the command that ran
+      Given the task "Add due dates" exists with the workflow "hello"
+      When I queue the task and it finishes
+      Then the step says it ran "echo hello"
+
   Rule: a task's artifacts are listed, and one can be read
 
     Artifacts are read out of the evidence rows rather than off disk. That is

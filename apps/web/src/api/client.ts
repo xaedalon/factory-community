@@ -327,6 +327,8 @@ export interface RunStep {
   index: number
   describe: string
   uses: string
+  /** What it actually ran. Absent for a step that ran no process. */
+  command?: string
   state: 'running' | 'completed' | 'failed' | 'timed-out' | 'skipped'
   /** More than one means the step was retried. */
   attempts: number

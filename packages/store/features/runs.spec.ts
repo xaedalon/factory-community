@@ -635,4 +635,31 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('the run\'s profile is "default"', profileIs('default'))
     })
   })
+  Rule('a step records what it actually ran', ({ RuleScenario }) => {
+    RuleScenario('A step keeps the command that was run', ({ When, Then }) => {
+      When('the step "install" runs "npm ci"', () => {
+        startRun()
+        step = runs.startStep(run.id, {
+          phase: 'setup',
+          index: 0,
+          describe: 'install',
+          uses: 'shell',
+          command: 'npm ci',
+        })
+      })
+      Then('the step\'s command is "npm ci"', () =>
+        expect(runs.steps(run.id)[0]?.command).toBe('npm ci'),
+      )
+    })
+
+    RuleScenario('A step that ran nothing records nothing', ({ When, Then }) => {
+      When('the step "install" of phase "setup" runs and succeeds', () => {
+        startRun()
+        ranWith('install', 'setup', 0)
+      })
+      Then('the step states no command', () =>
+        expect(runs.steps(run.id)[0]?.command).toBeUndefined(),
+      )
+    })
+  })
 })

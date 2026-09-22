@@ -1608,6 +1608,27 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a run says what it actually executed', ({ RuleScenario }) => {
+    RuleScenario('The step carries the command that ran', ({ Given, When, Then }) => {
+      Given('the task "Add due dates" exists with the workflow "hello"', () =>
+        create('Add due dates', ['hello']),
+      )
+      When('I queue the task and it finishes', async () => {
+        await call('POST', `/api/tasks/${taskId}/actions/queue`)
+        await until(async () => {
+          await reload()
+          return stateOf() === 'done' || stateOf() === 'blocked'
+        }, 'the task to finish')
+      })
+      Then('the step says it ran "echo hello"', async () => {
+        const runId = (response.body.runs as { id: string }[])[0]?.id
+        await call('GET', `/api/runs/${runId}`)
+        const steps = response.body.steps as { command?: string }[]
+        expect(steps[0]?.command).toContain('echo hello')
+      })
+    })
+  })
+
   Rule("a task's artifacts are listed, and one can be read", ({ RuleScenario }) => {
     const WRITTEN = '# Review\n\nlooks good\n'
 

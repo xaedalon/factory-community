@@ -45,7 +45,7 @@ watch(() => chosen.projectId, load)
     "
   />
 
-  <div class="px-8 py-6">
+  <div class="page-body">
     <div
       v-if="error"
       class="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
@@ -113,7 +113,7 @@ watch(() => chosen.projectId, load)
 
     <p
       v-if="data"
-      class="mt-4 flex items-center gap-2 text-sm text-[var(--color-ink-muted)]"
+      class="flex items-center gap-2 text-sm text-[var(--color-ink-muted)]"
       data-testid="write-target"
     >
       <AppIcon name="edit" :size="13" class="text-[var(--color-ink-faint)]" />

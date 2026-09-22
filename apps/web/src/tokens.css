@@ -285,6 +285,30 @@ body {
 }
 
 /**
+ * The page's own rhythm, declared once.
+ *
+ * Every page had `px-8 py-6` and then decided the distance between its
+ * sections for itself: Settings was `space-y-8`, Plugins `space-y-6`, and
+ * Scopes and Setup had nothing at all, standing their sections apart with an
+ * `mt-4` here and an `mb-6` there. Four pages of the same shape, four
+ * rhythms, and the difference is visible the moment you move between them.
+ *
+ * The same argument as `--text-title` above it: a value repeated by hand in
+ * fifteen files is a value that will disagree with itself, and this one had
+ * already started.
+ *
+ * A flex gap rather than `space-y-*`, because a gap belongs to the container
+ * and cannot be half-cancelled by a child's own margin — which is how the
+ * ad-hoc versions drifted in the first place.
+ */
+.page-body {
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/**
  * A select and a combobox, indistinguishable.
  *
  * They were not: a `<select>` draws the browser's own arrow and inherited the

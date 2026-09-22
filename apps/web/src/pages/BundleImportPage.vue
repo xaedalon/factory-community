@@ -118,7 +118,7 @@ const blocked = () => problems.value.some((problem) => problem.severity === 'err
     subtitle="One file carrying a workflow and everything it needs."
   />
 
-  <div class="max-w-4xl space-y-6 px-8 py-6">
+  <div class="page-body max-w-4xl">
     <FieldRow
       label="File"
       icon="import"

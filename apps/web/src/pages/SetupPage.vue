@@ -45,10 +45,10 @@ onMounted(load)
     </template>
   </PageHeader>
 
-  <div class="px-8 py-6">
+  <div class="page-body">
     <p
       v-if="error"
-      class="mb-4 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
+      class="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
       data-testid="error"
     >
       <AppIcon name="alert" class="mt-0.5 inline-block" />
@@ -57,7 +57,7 @@ onMounted(load)
 
     <div
       v-if="report"
-      class="mb-6 flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm"
+      class="flex items-start gap-2.5 rounded-xl border px-4 py-3 text-sm"
       :class="
         report.ready
           ? 'border-[var(--color-ok)]/40 bg-[var(--color-ok)]/5 text-[var(--color-ok)]'
@@ -78,7 +78,7 @@ onMounted(load)
       </span>
     </div>
 
-    <ol v-if="report" class="space-y-3" data-testid="setup-steps">
+    <ol v-if="report" class="space-y-2" data-testid="setup-steps">
       <li
         v-for="item in report.items"
         :key="item.id"

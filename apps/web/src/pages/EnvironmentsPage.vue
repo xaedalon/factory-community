@@ -94,7 +94,7 @@ const router = useRouter()
     subtitle="Tasks holding an environment their project built for them."
   />
 
-  <div class="px-8 py-6">
+  <div class="page-body">
     <div
       v-if="groups.length === 0 && stray.length === 0"
       class="rounded-xl border border-dashed border-[var(--color-line)] px-6 py-12 text-center"
@@ -120,7 +120,6 @@ const router = useRouter()
     <section
       v-for="group in groups"
       :key="group.project.id"
-      class="mb-6"
       :data-testid="`environments-${group.project.name}`"
     >
       <header class="mb-2 flex items-center gap-2">

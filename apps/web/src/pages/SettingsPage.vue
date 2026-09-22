@@ -62,7 +62,7 @@ onMounted(() => {
 <template>
   <PageHeader title="Settings" subtitle="Preferences, kept beside your definitions." />
 
-  <div class="space-y-8 px-8 py-6">
+  <div class="page-body">
     <p
       v-if="settings.error"
       class="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"

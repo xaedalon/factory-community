@@ -65,10 +65,10 @@ onMounted(load)
     </template>
   </PageHeader>
 
-  <div class="px-8 py-6">
+  <div class="page-body">
     <p
       v-if="error"
-      class="mb-4 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
+      class="flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
       data-testid="error"
     >
       <AppIcon name="alert" class="mt-0.5" />
@@ -77,7 +77,7 @@ onMounted(load)
 
     <div
       v-if="scaffolded.length > 0"
-      class="mb-4 rounded-lg border border-[var(--color-info)]/40 bg-[var(--color-info)]/5 px-4 py-3 text-sm text-[var(--color-info)]"
+      class="rounded-lg border border-[var(--color-info)]/40 bg-[var(--color-info)]/5 px-4 py-3 text-sm text-[var(--color-info)]"
       data-testid="scaffolded"
     >
       <p class="flex items-center gap-2">

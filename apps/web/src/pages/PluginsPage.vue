@@ -65,7 +65,7 @@ const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
     subtitle="Everything installed, what it contributes, and whether it is switched on."
   />
 
-  <div class="space-y-6 px-8 py-6">
+  <div class="page-body">
     <p
       v-if="error"
       class="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"

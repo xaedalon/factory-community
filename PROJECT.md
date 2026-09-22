@@ -779,6 +779,104 @@ aspirational standard moved to `docs/proposals/`, so its path says what its
 banner always said. No token-shaped string appears in any commit of the
 history; no absolute home path does either.
 
+## After 0.1.0 — a task belongs to a project
+
+| # | What | State |
+|--:|------|-------|
+| 91 | **`tasks.project_id` is `NOT NULL`**, with the migration that gets an existing database there | ✅ done |
+| 92 | **Removing a project is refused** while anything is left in it, with the count | ✅ done |
+| 93 | **The fallbacks deleted** — a dozen of them, across core, engine, daemon, board and CLI | ✅ done |
+| 94 | **The scheduler's gates ask about the workflow about to run** | ✅ done |
+| 95 | **Worktree removal leaves the worktree first** | ✅ done |
+
+The column was nullable, and everything downstream carried a fallback for the
+case. A task with no project ran **wherever the daemon happened to be started**
+— `service.ts` spelled it out twice, for the workspace and again for artifacts
+— which is what the doctor's own setup rule calls "fine for a demonstration and
+wrong for work". Removing a project orphaned its tasks rather than refusing, so
+this was not hypothetical: 21 tasks ended up project-less on one installation
+simply because somebody tidied a list.
+
+The justification, written into `projects.feature`, was that `factory run` in a
+directory needs no project. **It was false.** `factory run` creates no task at
+all — `apps/cli/src/commands/run.ts` touches neither repository; it plans
+against the scope chain of wherever it was invoked and runs in the foreground.
+So nothing was ever kept on a task's behalf by allowing one to belong nowhere.
+
+Decisions, each with a defensible alternative:
+
+- **Refuse the removal rather than cascade.** Deleting a project would delete
+  the record of work that really happened; orphaning kept the record in a form
+  nobody could use. Refusing keeps it by keeping the project, and the message
+  names the count — including archived tasks, because the foreign key counts
+  those too and a count that skipped them would promise a removal the database
+  then refuses.
+- **Delete the rows that are already orphaned.** There is nothing to give them.
+  The migration says how many at boot, which is why `up()` can now return a
+  note: deleting somebody's rows is a one-way door that runs unattended when a
+  daemon starts, and "it is in the schema" is not telling them.
+- **The definition library stays browsable without a project.**
+  `chains.for(projectId?)` keeps its optionality — `factory --serve` has no
+  projects at all, and the builder is useful before the first repository is
+  added.
+- **What remains of "no project" is corruption.** A project row that is not
+  there now means a hand-edited database. Read paths tolerate it so the board
+  can still draw the task and say what is wrong; anything that would *run*
+  refuses and names the project it cannot find.
+
+**The landmine, found by measuring rather than by worrying.** `migrate()` opens
+its transaction before `up()` runs, and `PRAGMA foreign_keys` is a documented
+no-op inside one. `DROP TABLE tasks` with enforcement on deletes the parent
+rows first, firing every `ON DELETE CASCADE` child: every run, step, log,
+artifact, flag, history row and dependency edge of **every task**, including the
+ones being kept. A rebuild without the new `rebuildsForeignKeys` opt-in reports
+`expected +0 to be 1` in its own scenario — the child row destroyed. That opt-in
+toggles the pragma outside the transaction, and the migration ends with `PRAGMA
+foreign_key_check` rather than assuming, in the same spirit as migration 15's
+cycle check. It earned its place immediately: `task_flags` had been left out of
+the orphan cleanup, and the check is what said so.
+
+**Verified against a real database**, not only a seeded one — a copy of an
+installation's own file at version 15, with 11 tasks, 1 orphan and 42 runs. The
+orphan and its four runs went; the ten owned tasks kept all 38 runs, 38 steps,
+63 logs, 37 artifacts, 44 history rows, 50 workflow entries and 9 edges, and
+`foreign_key_check` came back empty.
+
+**Two defects landed in the same branch**, because they live in the files this
+one touched.
+
+The scheduler's `#factsFor` read the *newest run's* workflow, falling back to
+`workflows[0]`. Neither is what a queued task is about to run, so a task whose
+first workflow had finished was admitted on the lane and the requirements of
+work that was already over — agents ran in a project's own checkout because the
+flag gate was asked about a workflow needing no worktree, and two `merge`
+workflows overlapped because the lane gate was asked about the parallel one
+before them. No scenario caught it: every one gave its task a single workflow,
+so all three readings coincided. It now follows the task's state, mirroring
+`Engine.start` — a running task is on its newest run's workflow, which after an
+`on_fail` is a recovery workflow that is not in the list at all; anything else
+is on what `start` would pick.
+
+Worktree removal ran **inside the worktree it was removing**: the workspace is
+resolved when the plan is made, while the worktree is still there. Git was left
+with no current directory to read, so the prune never ran, the step failed, and
+`clears: [hasWorktree]` never took effect — the task kept a flag for a worktree
+that was gone. The step kind is given only a path, so the script now finds the
+repository from the worktree while it still exists and moves there first. Both
+halves are asserted with real git, because the old script exited 0 while
+printing `fatal: Unable to read current working directory`.
+
+**Mutation testing found two gaps and two equivalent mutants.** Dropping `NOT
+NULL` from the rebuilt table and swapping `RESTRICT` back to `SET NULL` both
+survived: every path to the database went through a repository that refused
+first, so the constraints themselves were never exercised — the "declared and
+inert" shape this codebase keeps paying for. Two scenarios now write straight
+to the database and expect it to refuse. Afterwards, dropping `NOT NULL` fails;
+`SET NULL` still survives and is genuinely equivalent, because SQLite refuses a
+`SET NULL` action against a `NOT NULL` column. Reordering the orphan cleanup is
+equivalent too, and for a reason worth writing down: the ids go into a temp
+table first, so no delete reads `tasks` and the order cannot matter.
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -941,14 +1039,14 @@ this repository does not contain.
 | `packages/core/features/task-dependencies.feature` | One task waiting for another: met, waiting, dead; the queue order; a ring caught |
 | Pro's `desktop-capability.feature` *(not in this repository)* | Pro is a plugin: same host, same suite, no core changes |
 | Pro's `shell.feature` *(not in this repository)* | The desktop shell: attach or start, the menu bar, what is worth a notification |
-| `packages/store/features/store.feature` | Migrations, transactions, and the guards around both |
+| `packages/store/features/store.feature` | Migrations, transactions, and the guards around both — including a rebuild that must not take its children with it, and what an upgrade that deletes rows says about it |
 | `packages/store/features/tasks.feature` | The task lifecycle: one table of moves, what each state offers, what changing the plan does to its place in it, one task waiting for another, and finishing one by hand |
 | `packages/store/features/runs.feature` | Runs, their steps, and output kept inside a budget |
 | `packages/engine/features/engine.feature` | A task becomes runs: recording, gates, failure, and what a crash leaves |
-| `packages/engine/features/scheduler.feature` | What runs next: order, capacity, lanes read from the task's own project, a dependent held until its blockers are done, and why anything was skipped |
+| `packages/engine/features/scheduler.feature` | What runs next: order, capacity, lanes read from the task's own project, gates asked about the workflow about to run, a dependent held until its blockers are done, and why anything was skipped |
 | `packages/engine/features/doctor.feature` | Doctor rules that only exist where a database does |
-| `packages/store/features/projects.feature` | Projects: where work happens, checked when it is written |
-| `packages/core/features/worktree-steps.feature` | `uses: worktree` — isolation a workflow asks for, idempotently |
+| `packages/store/features/projects.feature` | Projects: where work happens, checked when it is written, and removable only while nothing is left in them |
+| `packages/core/features/worktree-steps.feature` | `uses: worktree` — isolation a workflow asks for, idempotently, and removed from outside the worktree |
 | `packages/core/features/provider-resolution.feature` | Where the agent is on *this* machine, and what to say when it is nowhere |
 | `packages/config/features/provider-config.feature` | `providers.<id>.command` — the way out when discovery cannot help |
 | `packages/config/features/setup.feature` | What is still missing, contributed by whoever knows |

@@ -6,6 +6,29 @@ What changed, per release. The reasoning behind each decision lives in
 Versions follow [semantic versioning](https://semver.org). Until 1.0.0 the public surface — the
 plugin SDK, the scope layout, the HTTP API — may still move, and a minor bump is where it will move.
 
+## Unreleased
+
+**A task belongs to a project.** `project_id` is required, and removing a project that still has
+tasks in it is refused with the count rather than orphaning them. A task with no project ran
+wherever the daemon happened to be started, wrote its artifacts beside it, could not be queued as a
+batch or given a worktree, and disappeared from the board the moment any project was selected.
+
+*Upgrading:* the migration **deletes tasks that belong to no project**, and everything recorded
+about them — runs, logs, artifacts, history. It says how many at boot. Tasks that have a project
+keep everything. If you have project-less tasks worth keeping, give them a project before
+upgrading. `factory run` is unaffected; it never created a task.
+
+*Also:* `POST /api/tasks` requires `projectId` and answers 400 without one. `DELETE
+/api/projects/:id` answers 409 with the count while anything is left in the project. `factory task
+new` falls into the only project there is, and otherwise asks which.
+
+**Fixed.** The scheduler's lane and flag gates asked about the newest run's workflow rather than the
+one about to run, so a task whose first workflow had finished was admitted on the requirements of
+work that was over — agents ran in a project's own checkout, and two `merge` workflows could
+overlap. Removing a worktree ran inside the worktree it was removing, which left git with no current
+directory, so the prune never happened and `hasWorktree` was never cleared. A migration that
+rebuilds a table no longer takes every run, log and history row of every other task with it.
+
 ## 0.1.0 — 2026-09-21
 
 The first release. Factory runs other people's coding agents against your repositories, in an order

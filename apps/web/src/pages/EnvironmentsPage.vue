@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useTasks } from '../stores/tasks.js'
 import { useProjects } from '../stores/projects.js'
-import { initials, toneVariable } from '../identity.js'
+import { markInitials, markTone } from '../identity.js'
 import PageHeader from '../components/PageHeader.vue'
+import AppButton from '../components/AppButton.vue'
+import AppIcon from '../components/AppIcon.vue'
+import Tooltip from '../components/Tooltip.vue'
 import TaskStateBadge from '../components/TaskStateBadge.vue'
 
 /**
@@ -73,6 +76,16 @@ async function teardown(taskId: string): Promise<void> {
     acting.value = undefined
   }
 }
+
+/**
+ * Two clicks, because the second one is somebody's environment.
+ *
+ * Tearing down runs the project's own `environment-delete`, and whatever that
+ * workflow removes is gone. The same idiom the definition editor and the
+ * project page use, for the same reason: no undo.
+ */
+const confirming = ref<string | undefined>(undefined)
+const router = useRouter()
 </script>
 
 <template>
@@ -82,18 +95,27 @@ async function teardown(taskId: string): Promise<void> {
   />
 
   <div class="px-8 py-6">
-    <p
+    <div
       v-if="groups.length === 0 && stray.length === 0"
-      class="text-sm text-[var(--color-ink-muted)]"
+      class="rounded-xl border border-dashed border-[var(--color-line)] px-6 py-12 text-center"
       data-testid="environments-empty"
     >
-      No project uses environments yet. Turn them on for a project and Factory copies in the
-      <code class="value">environment-create</code>, <code class="value">environment-update</code> and
-      <code class="value">environment-delete</code> workflows for you to write.
-      <RouterLink to="/projects" class="text-[var(--color-accent-text)] hover:underline">
-        Projects
-      </RouterLink>
-    </p>
+      <AppIcon name="environment" :size="22" class="mx-auto text-[var(--color-ink-faint)]" />
+      <p class="mx-auto mt-3 max-w-lg text-sm leading-relaxed text-[var(--color-ink-muted)]">
+        No project uses environments yet. Turn them on for a project and Factory copies in the
+        <code class="value">environment-create</code>, <code class="value">environment-update</code>
+        and <code class="value">environment-delete</code> workflows for you to write.
+      </p>
+      <div class="mt-4 flex justify-center">
+        <AppButton
+          label="Go to projects"
+          icon="project"
+          tone="primary"
+          hint="Turn environments on for a project"
+          @click="router.push('/projects')"
+        />
+      </div>
+    </div>
 
     <section
       v-for="group in groups"
@@ -104,12 +126,12 @@ async function teardown(taskId: string): Promise<void> {
       <header class="mb-2 flex items-center gap-2">
         <span
           class="flex h-6 w-6 items-center justify-center rounded text-[10px] font-medium text-white"
-          :style="{ backgroundColor: toneVariable(group.project.name) }"
+          :style="{ backgroundColor: markTone(group.project) }"
           aria-hidden="true"
         >
-          {{ initials(group.project.name) }}
+          {{ markInitials(group.project) }}
         </span>
-        <h2 class="text-sm">{{ group.project.name }}</h2>
+        <h2 class="text-lg leading-snug font-medium">{{ group.project.name }}</h2>
       </header>
 
       <p
@@ -137,21 +159,39 @@ async function teardown(taskId: string): Promise<void> {
             {{ task.name }}
           </RouterLink>
           <TaskStateBadge :state="task.state" />
-          <button
-            type="button"
-            class="rounded-md border border-[var(--color-line-strong)] px-2 py-1 text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-danger)] disabled:opacity-50"
-            :data-testid="`teardown-${task.name}`"
-            :disabled="acting === task.id"
-            @click="teardown(task.id)"
+          <Tooltip
+            v-if="confirming !== task.id"
+            label="Run this project's environment-delete for this task"
           >
-            Tear down
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line-strong)] px-2 py-1 text-xs text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-danger)]/60 hover:text-[var(--color-danger)] disabled:opacity-50"
+              :data-testid="`teardown-${task.name}`"
+              :disabled="acting === task.id"
+              @click="confirming = task.id"
+            >
+              <AppIcon name="remove" :size="12" />
+              Tear down
+            </button>
+          </Tooltip>
+          <button
+            v-else
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-danger)]/60 px-2 py-1 text-xs text-[var(--color-danger)] disabled:opacity-50"
+            :data-testid="`teardown-confirm-${task.name}`"
+            :disabled="acting === task.id"
+            @click="confirming = undefined; teardown(task.id)"
+          >
+            <AppIcon name="remove" :size="12" />
+            Really tear it down?
           </button>
         </li>
       </ul>
     </section>
 
     <section v-if="stray.length > 0" data-testid="stray-environments">
-      <h2 class="mb-2 font-mono text-[10px] tracking-wider text-[var(--color-warn)] uppercase">
+      <h2 class="mb-2 flex items-center gap-2 text-lg leading-snug font-medium text-[var(--color-warn)]">
+        <AppIcon name="alert" :size="15" />
         Holding an environment, in a project that says it has none
       </h2>
       <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-warn)]/40">
@@ -168,14 +208,31 @@ async function teardown(taskId: string): Promise<void> {
             {{ task.name }}
           </RouterLink>
           <TaskStateBadge :state="task.state" />
-          <button
-            type="button"
-            class="rounded-md border border-[var(--color-line-strong)] px-2 py-1 text-xs text-[var(--color-ink-muted)] hover:text-[var(--color-danger)] disabled:opacity-50"
-            :data-testid="`teardown-${task.name}`"
-            :disabled="acting === task.id"
-            @click="teardown(task.id)"
+          <Tooltip
+            v-if="confirming !== task.id"
+            label="Run this project's environment-delete for this task"
           >
-            Tear down
+            <button
+              type="button"
+              class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-line-strong)] px-2 py-1 text-xs text-[var(--color-ink-muted)] transition-colors hover:border-[var(--color-danger)]/60 hover:text-[var(--color-danger)] disabled:opacity-50"
+              :data-testid="`teardown-${task.name}`"
+              :disabled="acting === task.id"
+              @click="confirming = task.id"
+            >
+              <AppIcon name="remove" :size="12" />
+              Tear down
+            </button>
+          </Tooltip>
+          <button
+            v-else
+            type="button"
+            class="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-danger)]/60 px-2 py-1 text-xs text-[var(--color-danger)] disabled:opacity-50"
+            :data-testid="`teardown-confirm-${task.name}`"
+            :disabled="acting === task.id"
+            @click="confirming = undefined; teardown(task.id)"
+          >
+            <AppIcon name="remove" :size="12" />
+            Really tear it down?
           </button>
         </li>
       </ul>

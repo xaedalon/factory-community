@@ -2,6 +2,9 @@
 import { computed, onMounted, ref } from 'vue'
 import { ApiError, api, type PluginEntry, type ProviderEntry } from '../api/client.js'
 import PageHeader from '../components/PageHeader.vue'
+import AppIcon, { type IconName } from '../components/AppIcon.vue'
+import Tooltip from '../components/Tooltip.vue'
+import SwitchInput from '../components/form/SwitchInput.vue'
 
 /**
  * Every plugin, and the switch for each.
@@ -46,6 +49,14 @@ async function toggle(entry: PluginEntry): Promise<void> {
 }
 
 onMounted(load)
+
+/** Where a plugin came from, drawn. */
+const SOURCE_ICON: Record<string, IconName> = {
+  builtin: 'check',
+  scope: 'folder',
+  unknown: 'alert',
+}
+const sourceIcon = (source: string): IconName => SOURCE_ICON[source] ?? 'link'
 </script>
 
 <template>
@@ -60,6 +71,7 @@ onMounted(load)
       class="rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
       data-testid="error"
     >
+      <AppIcon name="alert" class="mr-1 inline-block align-[-2px]" />
       {{ error }}
     </p>
 
@@ -70,6 +82,7 @@ onMounted(load)
       class="rounded-lg border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/5 px-4 py-3 text-sm text-[var(--color-warn)]"
       data-testid="restart-required"
     >
+      <AppIcon name="alert" class="mr-1 inline-block align-[-2px]" />
       Something is switched off but still loaded. Restart Factory to unload it.
     </p>
 
@@ -86,7 +99,7 @@ onMounted(load)
             {{ entry.version }}
           </span>
           <span
-            class="rounded-md px-2 py-0.5 font-mono text-[10px]"
+            class="inline-flex items-center rounded-md px-2 py-0.5 font-mono text-[10px]"
             :class="
               entry.source === 'builtin'
                 ? 'bg-[var(--color-accent-soft)] text-[var(--color-accent-text)]'
@@ -96,34 +109,56 @@ onMounted(load)
             "
             :data-testid="`plugin-source-${entry.id}`"
           >
+            <AppIcon :name="sourceIcon(entry.source)" :size="10" class="mr-1 inline-block align-[-1px]" />
             {{ entry.source === 'scope' ? (entry.scope ?? 'scope') : entry.source }}
           </span>
 
           <!-- Listed with what it contributes but no switch: without these two
                nothing parses or runs, and a control that bricks the
                installation is not a choice worth offering. -->
-          <span
+          <Tooltip
             v-if="entry.essential"
-            class="font-mono text-[10px] text-[var(--color-ink-faint)]"
-            :data-testid="`plugin-essential-${entry.id}`"
+            label="Nothing parses or runs without this, so there is no switch"
           >
-            required
-          </span>
-          <button
+            <span
+              class="inline-flex items-center gap-1 font-mono text-[10px] text-[var(--color-ink-faint)]"
+              :data-testid="`plugin-essential-${entry.id}`"
+            >
+              <AppIcon name="profile" :size="10" />
+              required
+            </span>
+          </Tooltip>
+          <!-- The same switch as every other on/off in the app, rather than a
+               button labelled with the state it is already in. The word stays
+               beside it: a switch says which way it is thrown, and the word
+               says what that means without anybody learning the convention. -->
+          <Tooltip
             v-else
-            type="button"
-            class="rounded-md border border-[var(--color-line-strong)] px-2 py-1 text-xs"
-            :class="
+            :label="
               entry.enabled
-                ? 'text-[var(--color-ok)]'
-                : 'text-[var(--color-ink-faint)] hover:text-[var(--color-ink)]'
+                ? `Switch ${entry.name ?? entry.id} off — it stays loaded until Factory restarts`
+                : `Switch ${entry.name ?? entry.id} on`
             "
-            :disabled="busy === entry.id"
-            :data-testid="`plugin-toggle-${entry.id}`"
-            @click="toggle(entry)"
           >
-            {{ entry.enabled ? 'On' : 'Off' }}
-          </button>
+            <span class="inline-flex items-center gap-2">
+              <!-- The testid goes on the control, not on the word beside it.
+                   A test that clicks a label clicks nothing. -->
+              <SwitchInput
+                :model-value="entry.enabled"
+                :disabled="busy === entry.id"
+                :label="`Enable ${entry.name ?? entry.id}`"
+                :data-testid="`plugin-toggle-${entry.id}`"
+                @update:model-value="toggle(entry)"
+              />
+              <span
+                class="font-mono text-[10px] tracking-wide"
+                :class="entry.enabled ? 'text-[var(--color-ok)]' : 'text-[var(--color-ink-faint)]'"
+                :data-testid="`plugin-state-${entry.id}`"
+              >
+                {{ entry.enabled ? 'on' : 'off' }}
+              </span>
+            </span>
+          </Tooltip>
         </div>
 
         <p
@@ -152,8 +187,12 @@ onMounted(load)
           v-if="entry.provides.length > 0"
           class="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 font-mono text-[10px] text-[var(--color-ink-muted)]"
         >
-          <span v-for="given in entry.provides" :key="`${given.kind}:${given.id}`">
-            {{ given.kind }}:{{ given.id }}
+          <span
+            v-for="given in entry.provides"
+            :key="`${given.kind}:${given.id}`"
+            class="rounded border border-[var(--color-line)] px-1.5 py-0.5"
+          >
+            <span class="text-[var(--color-ink-faint)]">{{ given.kind }}</span>:{{ given.id }}
           </span>
         </p>
       </li>
@@ -162,7 +201,8 @@ onMounted(load)
     <!-- Availability is about the CLI, not about the plugin, so it keeps its
          own section rather than being folded into a row above. -->
     <section v-if="providers.length > 0" data-testid="providers">
-      <h2 class="mb-3 font-mono text-[11px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+      <h2 class="mb-3 flex items-center gap-2 text-lg leading-snug font-medium">
+        <AppIcon name="profile" :size="15" class="text-[var(--color-ink-muted)]" />
         Agents
       </h2>
       <ul class="space-y-2">
@@ -174,9 +214,10 @@ onMounted(load)
         >
           <span class="value w-24">{{ provider.id }}</span>
           <span
-            class="font-mono text-[10px] tracking-wide"
+            class="inline-flex items-center gap-1 font-mono text-[10px] tracking-wide"
             :class="provider.available ? 'text-[var(--color-ok)]' : 'text-[var(--color-warn)]'"
           >
+            <AppIcon :name="provider.available ? 'check' : 'alert'" :size="10" />
             {{ provider.available ? 'installed' : 'not installed' }}
           </span>
           <span

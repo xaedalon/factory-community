@@ -27,9 +27,12 @@ export type IconName =
   | 'environment'
   | 'export'
   | 'folder'
+  | 'go'
   | 'import'
   | 'info'
+  | 'light'
   | 'link'
+  | 'night'
   | 'play'
   | 'profile'
   | 'project'
@@ -38,6 +41,7 @@ export type IconName =
   | 'search'
   | 'settings'
   | 'stop'
+  | 'system'
   | 'tasks'
   | 'terminal'
   | 'worktree'
@@ -54,9 +58,13 @@ const PATHS: Record<IconName, string> = {
   environment: 'M12 2 2 7l10 5 10-5-10-5ZM2 17l10 5 10-5M2 12l10 5 10-5',
   export: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z',
+  go: 'M5 12h14M12 5l7 7-7 7',
   import: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12',
   info: 'M12 16v-4M12 8h.01M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z',
+  light:
+    'M12 4V2M12 22v-2M4 12H2M22 12h-2M6.3 6.3 4.9 4.9M19.1 19.1l-1.4-1.4M17.7 6.3l1.4-1.4M4.9 19.1l1.4-1.4M12 17a5 5 0 1 0 0-10 5 5 0 0 0 0 10Z',
   link: 'M15 3h6v6M10 14 21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6',
+  night: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z',
   play: 'M6 3.5v17l14-8.5Z',
   profile: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z',
   project: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2ZM9 13h6',
@@ -65,6 +73,7 @@ const PATHS: Record<IconName, string> = {
   search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM21 21l-4.3-4.3',
   settings: 'M4 6h16M4 12h16M4 18h16M9 6v0M15 12v0M7 18v0',
   stop: 'M6 6h12v12H6z',
+  system: 'M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1ZM8 20h8M12 16v4',
   tasks: 'M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01',
   terminal: 'M3 5a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v14a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1ZM7 10l2.5 2.5L7 15M12.5 15h4',
   worktree: 'M6 3v6a3 3 0 0 0 3 3h6M6 3a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3ZM6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM18 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z',

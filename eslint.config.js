@@ -54,6 +54,19 @@ const OS_PATH_BAN = [
     selector: "CallExpression[callee.name='tmpdir']",
     message: `tmpdir()${RESOLVER_ONLY}`,
   },
+  // The same rule, for the same reason, and the omission that cost the most.
+  // Everything below an entry point receives its environment rather than
+  // reaching for it — which is what makes the CLI exercisable without spawning
+  // a process, and what keeps a plugin testable on a machine it is not running
+  // on. The runner spawned every agent with the daemon's full environment for
+  // sixteen increments because it read `process.env` itself; the call site was
+  // fixed, and this is what stops it coming back.
+  {
+    selector: "MemberExpression[object.name='process'][property.name='env']",
+    message:
+      'process.env is only read at an entry point. Take the environment as a parameter — ' +
+      'every module below bin.ts already does, which is why they can be tested.',
+  },
 ]
 
 export default tseslint.config(
@@ -85,6 +98,12 @@ export default tseslint.config(
     // point receives its environment rather than reaching for it, which is why
     // the whole CLI can be exercised without spawning a process.
     files: ['**/src/bin.ts'],
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
+    // Build and test tooling, which runs before any of this exists: a vite
+    // config has no runtime to receive an environment from.
+    files: ['**/*.config.ts', '**/*.config.js'],
     rules: { 'no-restricted-syntax': 'off' },
   },
   {

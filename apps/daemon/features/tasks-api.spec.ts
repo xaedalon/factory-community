@@ -879,7 +879,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
-  Scenario('The live stream carries what happens', ({ Given, When, Then }) => {
+  Scenario('The live stream carries what happens', ({ Given, When, Then, And }) => {
     Given('I am listening to the live stream', async () => {
       // A real socket: `inject` has no streaming response to read from, and the
       // thing being tested is that the response streams.
@@ -919,6 +919,16 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         'the event to arrive',
       ),
     )
+    And('the event was not named on the wire', () =>
+      expect((stream?.lines ?? []).join('')).not.toContain('event:'),
+    )
+    And('the event carries its name in the payload', () => {
+      const data = (stream?.lines ?? [])
+        .join('')
+        .split('\n')
+        .find((line) => line.startsWith('data:'))
+      expect(JSON.parse((data as string).slice('data:'.length)).name).toBe('task.created')
+    })
   })
 
   Scenario('Stopping does not wait for a live stream for ever', ({ Given, When, Then }) => {

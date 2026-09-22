@@ -20,34 +20,6 @@ export interface LiveConnection {
   close(): void
 }
 
-/**
- * Named events carry their name in the SSE `event:` field, so each is listened for.
- *
- * A second, partial copy of `FactoryEvents` — every new event has to be added
- * here too, and forgetting is invisible: the board simply stops updating for
- * that one. `approval.granted` was missing for exactly that reason. It should
- * be derived from the registry rather than maintained here; until it is, this
- * comment is the warning.
- */
-const EVENTS = [
-  'task.created',
-  'task.transitioned',
-  'task.assigned',
-  'task.deleted',
-  'task.flags.changed',
-  'run.started',
-  'run.completed',
-  'step.started',
-  'step.completed',
-  'step.failed',
-  'approval.requested',
-  'approval.granted',
-  'permission.requested',
-  'project.added',
-  'project.changed',
-  'project.removed',
-] as const
-
 const subscribers = new Set<(name: string) => void>()
 let source: EventSource | undefined
 
@@ -65,8 +37,12 @@ function open(): void {
       // A malformed frame is not worth breaking the page over.
     }
   }
+  // One listener, because the daemon sends every event as an ordinary
+  // `message` frame. It used to name each frame after its event, which meant
+  // this file carried its own list of names to listen for — 14 of the 23, as
+  // it turned out, and an event missing from it was one the board silently
+  // stopped updating for.
   source.addEventListener('message', forward)
-  for (const name of EVENTS) source.addEventListener(name, forward as EventListener)
 }
 
 export function live(onEvent: (name: string) => void): LiveConnection {

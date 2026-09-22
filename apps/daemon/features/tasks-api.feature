@@ -208,6 +208,13 @@ Feature: Tasks, runs and live updates over HTTP
     Given I am listening to the live stream
     When I create the task "Add due dates"
     Then the stream delivers "task.created"
+    # As an ordinary `message` frame, not one named after the event. A named
+    # frame only reaches a client that already knew to listen for that name, so
+    # naming them made every consumer keep its own copy of the vocabulary — and
+    # the board's copy had 14 of the 23 names in it, which is not an error
+    # anywhere: the board simply stopped updating for the others.
+    And the event was not named on the wire
+    And the event carries its name in the payload
 
   # The board holds this stream open for as long as it is on screen, so this is
   # the ordinary case rather than an edge one: quit the app, and the engine has

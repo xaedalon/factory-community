@@ -22,12 +22,29 @@ upgrading. `factory run` is unaffected; it never created a task.
 /api/projects/:id` answers 409 with the count while anything is left in the project. `factory task
 new` falls into the only project there is, and otherwise asks which.
 
+**The event stream stopped naming its frames.** `GET /api/events` sent each event as an SSE frame
+named after the event, which only reaches a client that already knows to listen for that name — so
+every consumer kept its own copy of the event vocabulary, and the board's copy had 14 of the 23
+names in it. A name missing from such a list is not an error anywhere: the board simply stops
+updating for that event. Frames are ordinary `message` frames now, and the name is in the payload
+where it cannot go out of date. A client that filtered on the SSE event name should read
+`payload.name` instead.
+
+**Plugins can refuse or adjust a definition.** `validateDefinition` and `beforeDefinitionWrite`
+have been documented since the plugin host was built and were never called. They now run on the one
+path every definition takes to disk — the API, the CLI, a bundle import, and the copies a project
+is given when it turns worktrees on.
+
 **Fixed.** The scheduler's lane and flag gates asked about the newest run's workflow rather than the
 one about to run, so a task whose first workflow had finished was admitted on the requirements of
 work that was over — agents ran in a project's own checkout, and two `merge` workflows could
-overlap. Removing a worktree ran inside the worktree it was removing, which left git with no current
-directory, so the prune never happened and `hasWorktree` was never cleared. A migration that
-rebuilds a table no longer takes every run, log and history row of every other task with it.
+overlap; a sequential workflow anywhere but first in a task's list was never serialised at all, and
+an approval gate let two of them resume together. Removing a worktree ran inside the worktree it
+was removing, which left git with no current directory, so the prune never happened and
+`hasWorktree` was never cleared. Rejecting an approval left its run paused for ever, and a retry
+afterwards resumed past the gate that had just been refused. `stdin:` on a step was printed and
+never opened. A migration that rebuilds a table no longer takes every run, log and history row of
+every other task with it.
 
 ## 0.1.0 — 2026-09-21
 

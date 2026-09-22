@@ -71,6 +71,25 @@ export interface HookSignatures {
 
 export type HookName = keyof HookSignatures
 
+/**
+ * Every hook name, at runtime.
+ *
+ * `HookSignatures` is a type, so anything that needs to iterate the hooks —
+ * the conformance report, `factory doctor` — wrote its own copy, and a third
+ * hook added above and not added to that copy would be invisible in every
+ * plugin's report.
+ *
+ * `satisfies Record<HookName, true>` is the point: a hook added to the
+ * signatures and not here does not compile, and one left here after being
+ * removed does not compile either. An array would have checked neither.
+ */
+const DECLARED = {
+  validateDefinition: true,
+  beforeDefinitionWrite: true,
+} satisfies Record<HookName, true>
+
+export const HOOK_NAMES = Object.keys(DECLARED) as readonly HookName[]
+
 /** The function shape a hook of a given name expects. */
 export type HookHandler<N extends HookName> =
   HookSignatures[N] extends CollectHook<infer I, infer Item>

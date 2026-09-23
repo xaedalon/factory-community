@@ -19,7 +19,7 @@ This document is the source of truth, written as the project is built.
 point a task at a repository, queue it, and the daemon gives it a worktree, runs the agents, keeps
 what they printed and what they produced, stops at the gate you asked for, and continues when you
 approve. From a terminal, from the board, or from Pro's desktop app — the same API either way.
-**6,956 Gherkin steps green below the browser** across 51 feature files, 157 of them in a real
+**6,975 Gherkin steps green below the browser** across 51 feature files, 185 of them in a real
 browser, and smoke runs against the real agent CLIs. Every one of those runs in CI, on macOS and
 Linux, alongside a job that installs from a clean clone and asks the daemon for a page.
 
@@ -1125,7 +1125,32 @@ wrote; everything a command printed is attached to the step that printed it, and
 steps now, as `factory task logs` does for a person, and each line says which
 step it came from. Nothing below a real process would have caught it.
 
-**Thirty-nine mutations broken and watched to fail** across the six commits.
+**Verified against a real MCP client, which is the half no suite can answer.** The official
+`@modelcontextprotocol/sdk` client — installed outside the repository, so Factory still takes no
+dependency on it — drove `factory mcp` over a real pipe against a throwaway installation on its own
+port and scope. It connected, negotiated, listed the sixteen tools, resolved the project from three
+directories down as `matchedBy: "ancestor"`, created a task, queued it, and watched a real
+`hello-world` run park at its approval gate with *"A person has to approve or reject this before it
+goes any further."* An agent stamped as running inside that task was refused when it tried to cancel
+it; one stamped with a run at depth 3 was refused a new task; and asking to approve was refused by
+the schema before it reached the server. stdout carried frames and nothing else throughout.
+
+**Three defects it found that every scenario had passed over**, each because a fixture was wrong
+about the real thing rather than because a rule was:
+
+- `factory_run_logs` returned an empty string for any run. A run's own log holds what the engine
+  wrote; everything a command printed is attached to the step that printed it. It walks the steps
+  now, as `factory task logs` does for a person.
+- The disclaimer never reached the agent. `DISCLAIMER` is a document — a version, a summary, five
+  points and a caveat — and the check was for a string, so the one refusal an agent cannot act on
+  alone came back as a generic error. The scenario now uses the real constant rather than a
+  sentence somebody made up.
+- A coded refusal said the same sentence twice and named no code, because the body's own `error`
+  key won the spread that was meant to add detail to it. And `FAN_OUT_LIMIT` was missing from the
+  code list entirely — a run that had asked for eleven tasks was told `FACTORY_ERROR`. The list is
+  spread from core's now.
+
+**Forty-three mutations broken and watched to fail** across the eight commits.
 Three found scenarios that passed for the wrong reason, and all three are the
 same shape — an assertion that counted rather than identified. A frame split
 across two chunks was asserted by counting frames, and a server that threw the

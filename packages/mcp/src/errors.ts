@@ -1,3 +1,4 @@
+import { ORCHESTRATION_REFUSALS } from '@factory/core'
 import { asApiFailure } from './api.js'
 
 /**
@@ -17,9 +18,11 @@ export const TOOL_ERROR_CODES = [
   'VALIDATION_ERROR',
   'NOT_ACCEPTED',
   'ACTION_NOT_AVAILABLE',
-  'RECURSION_LIMIT',
-  'SELF_ORCHESTRATION_BLOCKED',
-  'APPROVAL_SEPARATION',
+  // Spread from core rather than listed again. They were listed again for one
+  // afternoon, and `FAN_OUT_LIMIT` was the one that got missed — so a run that
+  // had asked for eleven tasks was told "FACTORY_ERROR", which is the least
+  // useful thing Factory knows how to say.
+  ...ORCHESTRATION_REFUSALS,
   'DAEMON_UNAVAILABLE',
   'FACTORY_ERROR',
 ] as const
@@ -65,9 +68,14 @@ export function asToolError(error: unknown, fallback: ToolErrorCode = 'FACTORY_E
     )
   }
   // The disclaimer travels with the refusal because the agent cannot accept it:
-  // somebody has to read what an agent run can reach and agree to it, and the
-  // text is what they are agreeing to.
-  if (typeof body.disclaimer === 'string') {
+  // somebody has to read what an agent run can reach and agree to it, and this
+  // is what they are agreeing to.
+  //
+  // Passed through whatever shape it has rather than checked for a string. It
+  // is a document — a version, a summary, five points and a caveat — and a
+  // fixture that made it a string is how this was wrong for a day: the
+  // scenario passed and the real refusal came back as an unhelpful generic.
+  if (body.disclaimer !== undefined) {
     return new ToolError('NOT_ACCEPTED', said, {
       disclaimer: body.disclaimer,
       accept: 'A person has to run `factory accept` once, after reading it.',
@@ -83,7 +91,12 @@ export function asToolError(error: unknown, fallback: ToolErrorCode = 'FACTORY_E
     })
   }
   if (typeof body.code === 'string' && (TOOL_ERROR_CODES as readonly string[]).includes(body.code)) {
-    return new ToolError(body.code as ToolErrorCode, said, body)
+    // The sentence and the code are dropped from the details rather than
+    // spread in: `error` on the result is the *code*, and a body carrying its
+    // own `error` key would overwrite it with the sentence — which is how a
+    // refusal came back saying the same thing twice and naming no code at all.
+    const { error: _sentence, code: _code, ...rest } = body
+    return new ToolError(body.code as ToolErrorCode, said, rest)
   }
   if (failed.status === 400) return new ToolError('VALIDATION_ERROR', said)
   return new ToolError(fallback, said)

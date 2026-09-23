@@ -226,3 +226,23 @@ Feature: The tools an agent is given
       Then an agent may ask to "queue"
       And an agent may ask to "cancel"
       And an agent may ask to "mark_done"
+
+  Rule: a refusal says which refusal it is
+
+    The reader is a program deciding what to do next, and the difference
+    between "the daemon said no" and "you are four levels deep" is the whole
+    value of the reply. The codes come from core rather than a list kept here,
+    because a list kept here is a list that was once missing `FAN_OUT_LIMIT` —
+    and a run that had asked for eleven tasks was told `FACTORY_ERROR`.
+
+    Scenario: A coded refusal carries its code, not its sentence twice
+      Given a Factory that refuses with RECURSION_LIMIT
+      When the agent creates a task
+      Then it is refused as RECURSION_LIMIT
+      And the refusal does not repeat the sentence in place of the code
+
+    Scenario: Every refusal the orchestration rules can make is recognised
+      Then "RECURSION_LIMIT" is a code this surface knows
+      And "FAN_OUT_LIMIT" is a code this surface knows
+      And "SELF_ORCHESTRATION_BLOCKED" is a code this surface knows
+      And "APPROVAL_SEPARATION" is a code this surface knows

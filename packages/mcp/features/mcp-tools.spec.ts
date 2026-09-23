@@ -1,8 +1,14 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
-import type { Project, Task, TaskState } from '@factory/core'
-import { AGENT_ACTIONS, factoryTools, type McpTool, type ToolError } from '../src/index.js'
+import { DISCLAIMER, type Project, type Task, type TaskState } from '@factory/core'
+import {
+  AGENT_ACTIONS,
+  TOOL_ERROR_CODES,
+  factoryTools,
+  type McpTool,
+  type ToolError,
+} from '../src/index.js'
 import { FakeFactory } from './support.js'
 
 const feature = await loadFeature(fileURLToPath(new URL('./mcp-tools.feature', import.meta.url)))
@@ -535,13 +541,16 @@ describeFeature(feature, ({ Background, Rule }) => {
         factory.answer('/api/tasks/task-add-due-dates/actions/queue', {
           status: 409,
           message: 'Nobody has accepted what an agent run can reach.',
-          body: { disclaimer: 'An agent run can read and write inside the workspace…' },
+          // The real one, imported rather than invented: it is a document, not
+          // a sentence, and a fixture that made it a string is how a scenario
+          // came to pass while the refusal an agent actually saw said nothing.
+          body: { disclaimer: DISCLAIMER },
         })
       })
       When('the agent queues a task', queue)
       Then('it is refused as NOT_ACCEPTED', () => expect(failure?.code).toBe('NOT_ACCEPTED'))
       And('the refusal carries the disclaimer', () =>
-        expect(failure?.details.disclaimer).toContain('An agent run can read and write'),
+        expect(failure?.details.disclaimer).toEqual(DISCLAIMER),
       )
       And('it says a person has to accept it', () =>
         expect(String(failure?.details.accept)).toContain('factory accept'),
@@ -655,6 +664,54 @@ describeFeature(feature, ({ Background, Rule }) => {
       Then('an agent may ask to "queue"', may('queue'))
       And('an agent may ask to "cancel"', may('cancel'))
       And('an agent may ask to "mark_done"', may('mark_done'))
+    })
+  })
+  Rule('a refusal says which refusal it is', ({ RuleScenario }) => {
+    RuleScenario('A coded refusal carries its code, not its sentence twice', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a Factory that refuses with RECURSION_LIMIT', () => {
+        factory.answer('/api/tasks', {
+          status: 409,
+          message: 'This would be 4 levels of work starting work.',
+          // Exactly what the route sends, `error` key and all — which is the
+          // key that used to win the spread.
+          body: {
+            error: 'This would be 4 levels of work starting work.',
+            code: 'RECURSION_LIMIT',
+          },
+        })
+      })
+      When('the agent creates a task', () =>
+        call('factory_task_create', { name: 'Too deep' }).catch((error: unknown) => {
+          failure = error as ToolError
+        }),
+      )
+      Then('it is refused as RECURSION_LIMIT', () =>
+        expect(failure?.code).toBe('RECURSION_LIMIT'),
+      )
+      And('the refusal does not repeat the sentence in place of the code', () => {
+        expect(failure?.details.error).toBeUndefined()
+        expect(failure?.details.code).toBeUndefined()
+      })
+    })
+
+    RuleScenario('Every refusal the orchestration rules can make is recognised', ({
+      Then,
+      And,
+    }) => {
+      const known = (code: string) => () =>
+        expect(TOOL_ERROR_CODES as readonly string[]).toContain(code)
+      Then('"RECURSION_LIMIT" is a code this surface knows', known('RECURSION_LIMIT'))
+      And('"FAN_OUT_LIMIT" is a code this surface knows', known('FAN_OUT_LIMIT'))
+      And(
+        '"SELF_ORCHESTRATION_BLOCKED" is a code this surface knows',
+        known('SELF_ORCHESTRATION_BLOCKED'),
+      )
+      And('"APPROVAL_SEPARATION" is a code this surface knows', known('APPROVAL_SEPARATION'))
     })
   })
 })

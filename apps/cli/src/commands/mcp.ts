@@ -19,24 +19,30 @@ import type { DaemonClient } from '../daemon.js'
 export async function mcp(
   context: CliContext,
   daemon: DaemonClient,
-  streams: McpStreams | undefined,
+  io: { readonly streams?: McpStreams; readonly atATerminal?: boolean } = {},
 ): Promise<CommandResult> {
-  if (streams === undefined) {
+  // A terminal on stdin means a person typed this, and no client is coming.
+  // Reading it would wait for a frame that will never arrive — a hang, which
+  // is what this did until somebody tried it. Nothing is read: the explanation
+  // is the whole answer.
+  if (io.streams === undefined || io.atATerminal === true) {
     return failed([
       '`factory mcp` speaks the Model Context Protocol over stdin and stdout.',
       'An MCP client starts it; there is nothing to serve when it is run by hand.',
       '',
       'Point a client at it:',
       '  {"mcpServers": {"factory": {"command": "factory", "args": ["mcp"]}}}',
+      '',
+      'Or ask your agent to do it for you: "add Factory to my MCP servers".',
     ])
   }
 
   const server = createMcpServer({
     tools: factoryTools,
     context: { api: daemon, cwd: context.cwd, env: context.env },
-    diagnose: diagnoseTo(streams),
+    diagnose: diagnoseTo(io.streams),
   })
 
-  await serve(server, streams)
+  await serve(server, io.streams)
   return ok([])
 }

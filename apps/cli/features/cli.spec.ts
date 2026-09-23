@@ -1351,10 +1351,14 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     let sent: string[] = []
     let written: string[] = []
     let errors: string[] = []
+    /** Whether anything ever asked stdin for a chunk. */
+    let read = false
+    let atATerminal = false
 
     const pipe = () => ({
       input: {
         async *[Symbol.asyncIterator]() {
+          read = true
           for (const chunk of sent) yield chunk
         },
       },
@@ -1372,18 +1376,24 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       streamed = []
       written = []
       errors = []
+      read = false
       result = await run({
         argv: ['mcp'],
         cwd: workDir,
         env: { FACTORY_HOME: userScope, FACTORY_URL: 'http://127.0.0.1:9', PATH: '/usr/bin:/bin' },
         write: (text) => streamed.push(text),
+        // Handed over exactly as `bin.ts` hands them over: always, with the
+        // terminal reported separately. Leaving them out here would specify a
+        // shape the product does not produce, which is how the hang survived.
         streams: pipe(),
+        stdinIsTty: atATerminal,
       })
       output = [...streamed, ...result.lines].join('\n')
     }
 
     RuleScenario('It answers a client over the pipe it was given', ({ Given, When, Then, And }) => {
       Given('a client that initializes and lists the tools', () => {
+        atATerminal = false
         sent = [
           `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'a-client' } } })}\n`,
           `${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`,
@@ -1402,14 +1412,37 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       )
     })
 
-    RuleScenario('Run by hand it explains what it is for', ({ When, Then, And }) => {
-      When('I run "mcp" with no pipe at all', () => invoke('mcp'))
+    RuleScenario('At a terminal it explains itself rather than waiting', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a person typing it, with a terminal on stdin', () => {
+        atATerminal = true
+        // A frame is waiting, so a server that read stdin would find one and
+        // answer it. Nothing should.
+        sent = [`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })}\n`]
+      })
+      When('I run "mcp"', serveIt)
       Then('it fails', () => expect(result.exitCode).not.toBe(0))
       And('the output says an MCP client starts it', () =>
         expect(output).toContain('An MCP client starts it'),
       )
       And("the output shows what to put in a client's configuration", () =>
         expect(output).toContain('"mcpServers"'),
+      )
+      And('nothing was read from stdin', () => {
+        expect(read).toBe(false)
+        expect(written).toEqual([])
+      })
+    })
+
+    RuleScenario('Given no streams at all it says the same thing', ({ When, Then, And }) => {
+      When('I run "mcp" with no pipe at all', () => invoke('mcp'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+      And('the output says an MCP client starts it', () =>
+        expect(output).toContain('An MCP client starts it'),
       )
     })
 

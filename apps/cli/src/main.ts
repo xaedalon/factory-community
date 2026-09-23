@@ -133,6 +133,15 @@ export interface RunOptions {
    * lets the whole protocol be specified without spawning a process.
    */
   readonly streams?: McpStreams
+  /**
+   * Whether a person is typing, rather than a client piping.
+   *
+   * `factory mcp` is the one command that needs to know. A terminal on stdin
+   * means no client is coming and nothing will ever arrive, so waiting on it is
+   * a hang; a pipe means a client is on the other end. Reported by `bin.ts`,
+   * decided in the command, for the reason every other process fact is.
+   */
+  readonly stdinIsTty?: boolean
 }
 
 /**
@@ -166,6 +175,7 @@ export async function run(options: RunOptions): Promise<CommandResult> {
       // in one lump when it finishes.
       write: options.write ?? (() => {}),
       ...(options.streams === undefined ? {} : { streams: options.streams }),
+      stdinIsTty: options.stdinIsTty === true,
     },
     false,
     options.daemon,
@@ -180,7 +190,12 @@ async function dispatch(
   rest: string[],
   context: CliContext,
   style: ReturnType<typeof styleFor>,
-  io: { isTty: boolean; write: (line: string) => void; streams?: McpStreams },
+  io: {
+    isTty: boolean
+    write: (line: string) => void
+    streams?: McpStreams
+    stdinIsTty?: boolean
+  },
   dryRun: boolean,
   daemon?: DaemonClient,
 ): Promise<CommandResult> {
@@ -210,7 +225,10 @@ async function dispatch(
     }
 
     case 'mcp':
-      return mcp(context, daemon ?? createDaemonClient(context.env), io.streams)
+      return mcp(context, daemon ?? createDaemonClient(context.env), {
+        ...(io.streams === undefined ? {} : { streams: io.streams }),
+        atATerminal: io.stdinIsTty === true,
+      })
 
     case 'init': {
       const index = rest.indexOf('--scope')

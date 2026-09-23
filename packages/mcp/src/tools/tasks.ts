@@ -35,8 +35,16 @@ export const briefTask = (item: TaskListItem) => ({
   name: item.name,
   state: item.state,
   projectId: item.projectId,
+  // Omitted while empty rather than sent as '': a model reading
+  // `description: ""` treats it as a description that says nothing, which is
+  // not the same as nobody having written one.
+  ...(item.description === '' ? {} : { description: item.description }),
   ...(item.ticketId === undefined ? {} : { ticketId: item.ticketId }),
   ...(item.branch === undefined ? {} : { branch: item.branch }),
+  // Where the work came from, when it was not a person. An agent following a
+  // tree it is part of needs to see the edges it cannot infer.
+  ...(item.createdBy === undefined ? {} : { createdBy: item.createdBy }),
+  ...(item.createdByRunId === undefined ? {} : { createdByRun: item.createdByRunId }),
   workflows: item.workflows.map((entry) => ({
     workflow: entry.workflow,
     enabled: entry.enabled,
@@ -117,8 +125,16 @@ export const taskReadTools: readonly McpTool[] = [
     schema: z.object({ task: z.string().describe('The task id.') }),
     run: async (input, context) => {
       const detail = await getTask(context, input.task)
+      // The task itself, with the three things the route computes alongside it
+      // — named rather than spread, so what reaches `briefTask` is readable
+      // without knowing which half of a spread wins.
       return {
-        ...briefTask({ ...detail.task, ...detail }),
+        ...briefTask({
+          ...detail.task,
+          actions: detail.actions,
+          ...(detail.progress === undefined ? {} : { progress: detail.progress }),
+          ...(detail.blockers === undefined ? {} : { blockers: detail.blockers }),
+        }),
         ...(detail.workspace?.path === undefined ? {} : { workspace: detail.workspace.path }),
         runs: detail.runs.map(briefRun),
         artifacts: (detail.artifacts ?? []).map((artifact) => ({

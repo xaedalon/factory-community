@@ -25,7 +25,7 @@ const aProject = (name: string, id: string): Project => ({
 const aTask = (name: string, projectId: string, state: TaskState = 'draft'): Task => ({
   id: `task-${name.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-')}`,
   name,
-  description: '',
+  description: 'Tasks should be able to have a due date.',
   projectId,
   state,
   workflows: [{ id: 'entry-1', workflow: 'development', enabled: true, ran: false }],
@@ -108,6 +108,27 @@ describeFeature(feature, ({ Background, Rule }) => {
       Then('the actions offered are "queue"', () => expect(answer.actions).toEqual(['queue']))
       And('it is told to queue it when the plan is right', () =>
         expect(answer.next).toContain('Queue it'),
+      )
+      And('it says what the work is for', () =>
+        expect(answer.description).toBe('Tasks should be able to have a due date.'),
+      )
+    })
+
+    RuleScenario('A task an agent asked for says which run asked', ({ Given, When, Then, And }) => {
+      Given('a task "Add due dates" that a run asked for', () => {
+        const task = {
+          ...aTask('Add due dates', 'project-1'),
+          createdBy: 'mcp:a-client/1.0',
+          createdByRunId: 'run-1',
+        }
+        tasks.push(task)
+        detail(task, ['queue'])
+        publishTasks()
+      })
+      When('the agent reads that task', () => call('factory_task_get', { task: 'task-add-due-dates' }))
+      Then('it says which run asked for it', () => expect(answer.createdByRun).toBe('run-1'))
+      And('it says what that client called itself', () =>
+        expect(answer.createdBy).toBe('mcp:a-client/1.0'),
       )
     })
 

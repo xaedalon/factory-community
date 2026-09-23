@@ -26,6 +26,15 @@ Feature: The tools an agent is given
       When the agent reads that task
       Then the actions offered are "queue"
       And it is told to queue it when the plan is right
+      # What the work is *for* is the thing a model most needs and the thing a
+      # summary most easily drops.
+      And it says what the work is for
+
+    Scenario: A task an agent asked for says which run asked
+      Given a task "Add due dates" that a run asked for
+      When the agent reads that task
+      Then it says which run asked for it
+      And it says what that client called itself
 
     Scenario: A task waiting for a person says a person has to decide
       Given a task "Add due dates" waiting for approval

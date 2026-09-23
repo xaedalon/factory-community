@@ -11,7 +11,7 @@ import {
   queueOrder,
 } from '@factory/core'
 import type { ExecutionProfile, Project, ProjectSetting, Task } from '@factory/core'
-import { ProjectHasTasksError } from '@factory/store'
+import { AmbiguousProjectError, ProjectHasTasksError } from '@factory/store'
 import type { Runtime } from '@factory/runtime'
 import type { Service } from '../service.js'
 
@@ -92,6 +92,69 @@ export function registerProjectRoutes(
       }
     }
   }
+
+  /**
+   * Which project is this directory in?
+   *
+   * Here rather than in whichever client is asking, because three of them want
+   * the same answer: an MCP client resolving the directory its agent was
+   * started in, the CLI, which today resolves a project by *name* with a prefix
+   * rule, and the board. A client that worked it out for itself would disagree
+   * with this one the first time the rule changed, which is the shape this
+   * codebase keeps paying for.
+   *
+   * 404 rather than 200-with-nothing: "no project here" is an answer a caller
+   * acts on, and it is the one case where telling somebody the directory they
+   * are standing in is not registered is the whole point of the reply.
+   *
+   * Ambiguity is 409 and names both, like every other refusal that has two
+   * candidates. Picking one would queue somebody's work in the wrong
+   * repository.
+   */
+  app.get<{ Querystring: { path?: string } }>('/api/projects/at', async (request, reply) => {
+    const path = request.query.path
+    if (path === undefined || path.trim() === '') {
+      return reply.code(400).send({ error: 'Which directory? Pass ?path=<absolute path>.' })
+    }
+
+    let found
+    try {
+      found = projects.at(path)
+    } catch (error) {
+      if (error instanceof AmbiguousProjectError) {
+        return reply.code(409).send({ error: error.message, projects: error.names })
+      }
+      return reply
+        .code(400)
+        .send({ error: error instanceof Error ? error.message : String(error) })
+    }
+    if (found === undefined) {
+      return reply
+        .code(404)
+        .send({ error: `${path} is not inside any project Factory knows about.` })
+    }
+
+    // Looked up here rather than in the repository: a worktree directory is a
+    // task's, and the project repository writes project rows. One of the two
+    // has to know how a worktree path is built, and it is already the one that
+    // stores `worktreesRoot`.
+    const task =
+      found.taskDirectory === undefined
+        ? undefined
+        : tasks
+            .list({ includeArchived: true })
+            .find(
+              (candidate) =>
+                candidate.projectId === found.project.id &&
+                candidate.directory === found.taskDirectory,
+            )
+
+    return {
+      project: found.project,
+      matchedBy: found.matchedBy,
+      ...(task === undefined ? {} : { task }),
+    }
+  })
 
   app.get('/api/projects', async () => ({
     items: projects.list().map((project) => ({

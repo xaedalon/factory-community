@@ -2949,4 +2949,85 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the findings say nothing about git', () => expect(aboutGit()).toHaveLength(0))
     })
   })
+  Rule('a directory can ask which project it is in', ({ RuleScenario }) => {
+    const status = (code: number) => (): void => expect(response.statusCode).toBe(code)
+    let repository = ''
+    const ask = (path: string) =>
+      call('GET', `/api/projects/at?path=${encodeURIComponent(path)}`)
+    const givenProject = async (): Promise<void> => {
+      repository = makeRepository(join(root, 'resolvable'))
+      await addProject('factory', repository)
+    }
+
+    RuleScenario('A directory inside a project resolves to it', ({ Given, When, Then, And }) => {
+      Given('a project "factory" at a repository', givenProject)
+      When('I ask which project is at a directory inside it', async () => {
+        const deep = join(repository, 'packages', 'core', 'src')
+        mkdirSync(deep, { recursive: true })
+        await ask(deep)
+      })
+      Then('the response is 200', status(200))
+      And('the project is "factory"', () =>
+        expect((response.body.project as { name: string }).name).toBe('factory'),
+      )
+      And('it matched an ancestor', () => expect(response.body.matchedBy).toBe('ancestor'))
+    })
+
+    RuleScenario('A directory nobody registered is not found', ({ Given, When, Then }) => {
+      Given('a project "factory" at a repository', givenProject)
+      When('I ask which project is at a directory outside every project', async () => {
+        const elsewhere = join(root, 'elsewhere')
+        mkdirSync(elsewhere, { recursive: true })
+        await ask(elsewhere)
+      })
+      Then('the response is 404', status(404))
+    })
+
+    RuleScenario('A task\'s worktree resolves to the project and the task', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      let worktree = ''
+      Given('a project "factory" at a repository', givenProject)
+      And('a task "Add due dates" in it with a worktree on disk', async () => {
+        await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+        const project = (
+          await app.inject({ method: 'GET', url: '/api/projects' })
+        ).json() as { items: { id: string; worktreesRoot: string }[] }
+        const root_ = project.items.find((item) => item.id === projectId)?.worktreesRoot ?? ''
+        worktree = join(root_, 'add-due-dates')
+        mkdirSync(worktree, { recursive: true })
+      })
+      When('I ask which project is at that worktree', () => ask(worktree))
+      Then('the response is 200', status(200))
+      And('the project is "factory"', () =>
+        expect((response.body.project as { name: string }).name).toBe('factory'),
+      )
+      And('the answer names the task "Add due dates"', () =>
+        expect((response.body.task as { name: string } | undefined)?.name).toBe('Add due dates'),
+      )
+    })
+
+    RuleScenario('Two projects at one directory are a conflict', ({ Given, And, When, Then }) => {
+      Given('a project "factory" at a repository', givenProject)
+      And('a second project "factory-again" at the same repository', () =>
+        addProject('factory-again', repository),
+      )
+      When('I ask which project is at that repository', () => ask(repository))
+      Then('the response is 409', status(409))
+      And('both project names are in the answer', () =>
+        expect(response.body.projects).toEqual(['factory', 'factory-again']),
+      )
+    })
+
+    RuleScenario('Asking without a path is a usage error', ({ When, Then, And }) => {
+      When('I ask which project is at no path at all', () => call('GET', '/api/projects/at'))
+      Then('the response is 400', status(400))
+      And('the answer says what to pass instead', () =>
+        expect(response.body.error).toContain('?path='),
+      )
+    })
+  })
 })

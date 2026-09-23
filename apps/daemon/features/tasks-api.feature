@@ -1138,3 +1138,47 @@ Feature: Tasks, runs and live updates over HTTP
       When I GET "/api/doctor"
       Then the response is 200
       And the findings say nothing about git
+
+  Rule: a directory can ask which project it is in
+
+    Everything that asks the daemon about a project has so far known its id or
+    its name, because a person picked it. An agent knows the directory it was
+    started in and nothing else, so the question has to be answerable over the
+    wire — and answerable *here*, because the CLI and the board want the same
+    answer and a client that worked it out for itself would disagree with this
+    one the first time the rule changed.
+
+    Scenario: A directory inside a project resolves to it
+      Given a project "factory" at a repository
+      When I ask which project is at a directory inside it
+      Then the response is 200
+      And the project is "factory"
+      And it matched an ancestor
+
+    Scenario: A directory nobody registered is not found
+      Given a project "factory" at a repository
+      When I ask which project is at a directory outside every project
+      Then the response is 404
+
+    Scenario: A task's worktree resolves to the project and the task
+      Given a project "factory" at a repository
+      And a task "Add due dates" in it with a worktree on disk
+      When I ask which project is at that worktree
+      Then the response is 200
+      And the project is "factory"
+      And the answer names the task "Add due dates"
+
+    Scenario: Two projects at one directory are a conflict
+      Given a project "factory" at a repository
+      And a second project "factory-again" at the same repository
+      When I ask which project is at that repository
+      Then the response is 409
+      And both project names are in the answer
+
+    Scenario: Asking without a path is a usage error
+      When I ask which project is at no path at all
+      Then the response is 400
+      # The status alone would pass without the guard: unguarded, the missing
+      # path reaches the repository and comes back as a TypeError about a
+      # string, which is a 400 that tells nobody what to do.
+      And the answer says what to pass instead

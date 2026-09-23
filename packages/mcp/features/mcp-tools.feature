@@ -82,8 +82,19 @@ Feature: The tools an agent is given
 
   Rule: logs are bounded, and a log that lost its middle says so
 
+    A run's own log holds what the engine wrote. Everything a *command* printed
+    is attached to the step that printed it, so asking for a run's output and
+    reading only the run's own log returns almost nothing — which is what this
+    tool did until a scenario ran a real command and read back an empty string.
+
+    Scenario: The output of every step is gathered, and each line says which
+      Given a run with two steps that each printed something
+      When the agent reads that run's logs
+      Then both steps' output comes back
+      And each line says which step printed it
+
     Scenario: Only the tail comes back
-      Given a run that printed 500 lines
+      Given a run whose step printed 500 lines
       When the agent reads the last 10 lines of it
       Then 10 lines come back
       And it says 490 older lines were not sent
@@ -96,9 +107,10 @@ Feature: The tools an agent is given
       Then it says Factory dropped something
 
     Scenario: One step's output can be asked for on its own
-      Given a run that printed 500 lines
+      Given a run whose step printed 500 lines
       When the agent reads the logs of step 3
       Then Factory was asked for step 3 only
+      And nothing else was asked for
 
   Rule: what is waiting for a person is reported, not answered
 
@@ -182,3 +194,26 @@ Feature: The tools an agent is given
       Given the project has a workflow "development" that needs "analysis"
       When the agent copies it as "development-fast"
       Then it was written into the project's own scope
+
+  Rule: approving is a person's, and the surface says so by not offering it
+
+    Factory can tell an agent it launched from a person's own session: the
+    first carries the run it is inside, the second carries nothing. What it
+    cannot tell apart is a person's session from an agent acting unasked in
+    that session, because they are the same process with the same environment.
+
+    An approval an agent can give is not a gate, only a delay. So it is not
+    offered here at all — which is the strongest form the rule can take, and
+    the only one that does not depend on knowing who is typing.
+
+    The daemon still refuses an approval from inside the branch that asked for
+    the work, because this surface is not its only client.
+
+    Scenario: The action list does not include approving
+      Then an agent may not ask to "approve"
+      And an agent may not ask to "reject"
+
+    Scenario: Everything else a person can ask for is offered
+      Then an agent may ask to "queue"
+      And an agent may ask to "cancel"
+      And an agent may ask to "mark_done"

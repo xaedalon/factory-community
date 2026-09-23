@@ -7,6 +7,7 @@ import {
   success,
 } from './jsonrpc.js'
 import { asToolError } from './errors.js'
+import { initiatorFrom } from './initiator.js'
 import type { McpTool, ToolContext } from './tool.js'
 
 /**
@@ -133,8 +134,17 @@ export function createMcpServer(options: McpServerOptions): McpServer {
     // request was well formed and the answer is "Factory refused, and here is
     // what to do about it". A protocol error here would reach the model as a
     // transport fault, which is the one reading that suggests retrying.
+    // Rebuilt per call rather than captured: the client's name arrives at
+    // `initialize`, which is after the context was made, and the run this
+    // server is inside is read from the environment every time so a scenario
+    // can change it without rebuilding the server.
+    const from = initiatorFrom(options.context.env, client)
+    const context: ToolContext = {
+      ...options.context,
+      ...(from === undefined ? {} : { initiator: from }),
+    }
     try {
-      const value = await tool.run(parsed.value, options.context)
+      const value = await tool.run(parsed.value, context)
       return { result: content(value) }
     } catch (error) {
       const problem = asToolError(error)

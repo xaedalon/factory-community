@@ -56,6 +56,8 @@ interface TaskRow {
   completed_at: string | null
   session_id: string | null
   session_provider: string | null
+  created_by: string | null
+  created_by_run_id: string | null
 }
 
 export interface TaskRepositoryOptions {
@@ -107,6 +109,10 @@ export interface CreateTask {
   readonly branch?: string
   readonly directory?: string
   readonly workflows?: readonly WorkflowSelection[]
+  /** A label for whoever asked, when it was not a person. Read by people only. */
+  readonly createdBy?: string
+  /** The run whose agent asked for this, from the environment Factory stamped. */
+  readonly createdByRunId?: string
 }
 
 export class TaskRepository {
@@ -145,8 +151,10 @@ export class TaskRepository {
 
     return this.#db.transaction(() => {
       this.#db.run(
-        `INSERT INTO tasks (id, name, description, project_id, ticket_id, branch, directory, state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+        `INSERT INTO tasks
+           (id, name, description, project_id, ticket_id, branch, directory, state,
+            created_by, created_by_run_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
         id,
         input.name,
         input.description?.trim() ?? '',
@@ -154,6 +162,8 @@ export class TaskRepository {
         input.ticketId ?? null,
         input.branch ?? null,
         directory,
+        input.createdBy ?? null,
+        input.createdByRunId ?? null,
         now,
         now,
       )
@@ -168,6 +178,24 @@ export class TaskRepository {
   get(id: string): Task | undefined {
     const row = this.#db.get<TaskRow>('SELECT * FROM tasks WHERE id = ?', id)
     return row === undefined ? undefined : this.#hydrate(row)
+  }
+
+  /**
+   * How many tasks one run's agent has asked for.
+   *
+   * Counted rather than kept on the run, because the answer has to survive a
+   * task being deleted: a counter would say ten after somebody tidied five
+   * away, and an agent would be refused work it had every right to ask for.
+   *
+   * Archived ones are counted. A task that was archived still happened, and a
+   * run that could reset its own budget by archiving is not budgeted.
+   */
+  countCreatedBy(runId: string): number {
+    const row = this.#db.get<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM tasks WHERE created_by_run_id = ?',
+      runId,
+    )
+    return row?.total ?? 0
   }
 
   /**
@@ -863,6 +891,8 @@ export class TaskRepository {
     if (row.session_id !== null && row.session_provider !== null) {
       task.session = { id: row.session_id, provider: row.session_provider }
     }
+    if (row.created_by !== null) task.createdBy = row.created_by
+    if (row.created_by_run_id !== null) task.createdByRunId = row.created_by_run_id
     return task as unknown as Task
   }
 }

@@ -2,7 +2,7 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import type { Project, Task, TaskState } from '@factory/core'
-import { factoryTools, type McpTool, type ToolError } from '../src/index.js'
+import { AGENT_ACTIONS, factoryTools, type McpTool, type ToolError } from '../src/index.js'
 import { FakeFactory } from './support.js'
 
 const feature = await loadFeature(fileURLToPath(new URL('./mcp-tools.feature', import.meta.url)))
@@ -292,19 +292,63 @@ describeFeature(feature, ({ Background, Rule }) => {
   })
 
   Rule('logs are bounded, and a log that lost its middle says so', ({ RuleScenario }) => {
-    const lines = (count: number, dropped = 0): void => {
-      factory.answer('/api/runs/run-1/logs', {
-        lines: Array.from({ length: count }, (_value, index) => ({
-          at: '2026-01-01T00:00:00Z',
-          stream: 'stdout',
-          text: `line ${index}`,
+    const printing = (count: number, dropped = 0, steps = [1]): void => {
+      factory.answer('/api/runs/run-1', {
+        run: {
+          id: 'run-1',
+          workflow: 'development',
+          state: 'completed',
+          attempt: 1,
+          workflowIndex: 0,
+          depth: 0,
+          startedAt: '2026-01-01T00:00:00Z',
+        },
+        steps: steps.map((id) => ({
+          id,
+          runId: 'run-1',
+          phase: `phase-${id}`,
+          index: id - 1,
+          describe: `step ${id}`,
+          uses: 'shell',
+          state: 'completed',
+          attempts: 1,
+          startedAt: '2026-01-01T00:00:00Z',
         })),
-        dropped,
+        evidence: [],
       })
+      // The run's own log: what the engine wrote, which is usually nothing.
+      factory.answer('/api/runs/run-1/logs', { lines: [], dropped })
+      for (const id of steps) {
+        factory.answer(`/api/runs/run-1/logs?step=${id}`, {
+          lines: Array.from({ length: count }, (_value, index) => ({
+            at: '2026-01-01T00:00:00Z',
+            stream: 'stdout',
+            text: `step ${id} line ${index}`,
+          })),
+          dropped: 0,
+        })
+      }
     }
+    const texts = () => (answer.lines as { text: string }[]).map((line) => line.text)
+
+    RuleScenario('The output of every step is gathered, and each line says which', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a run with two steps that each printed something', () => printing(1, 0, [1, 2]))
+      When("the agent reads that run's logs", () => call('factory_run_logs', { run: 'run-1' }))
+      Then("both steps' output comes back", () =>
+        expect(texts()).toEqual(['step 1 line 0', 'step 2 line 0']),
+      )
+      And('each line says which step printed it', () =>
+        expect((answer.lines as { step?: number }[]).map((line) => line.step)).toEqual([1, 2]),
+      )
+    })
 
     RuleScenario('Only the tail comes back', ({ Given, When, Then, And }) => {
-      Given('a run that printed 500 lines', () => lines(500))
+      Given('a run whose step printed 500 lines', () => printing(500))
       When('the agent reads the last 10 lines of it', () =>
         call('factory_run_logs', { run: 'run-1', tail: 10 }),
       )
@@ -317,7 +361,7 @@ describeFeature(feature, ({ Background, Rule }) => {
       When,
       Then,
     }) => {
-      Given('a run whose log Factory had to trim by 2048 bytes', () => lines(10, 2048))
+      Given('a run whose log Factory had to trim by 2048 bytes', () => printing(10, 2048))
       When("the agent reads that run's logs", () => call('factory_run_logs', { run: 'run-1' }))
       Then('it says Factory dropped something', () => {
         expect(answer.droppedByFactory).toBe(2048)
@@ -325,16 +369,18 @@ describeFeature(feature, ({ Background, Rule }) => {
       })
     })
 
-    RuleScenario("One step's output can be asked for on its own", ({ Given, When, Then }) => {
-      Given('a run that printed 500 lines', () => {
-        lines(500)
-        factory.answer('/api/runs/run-1/logs?step=3', { lines: [], dropped: 0 })
-      })
+    RuleScenario("One step's output can be asked for on its own", ({ Given, When, Then, And }) => {
+      Given('a run whose step printed 500 lines', () => printing(500))
       When('the agent reads the logs of step 3', () =>
-        call('factory_run_logs', { run: 'run-1', step: 3 }),
+        call('factory_run_logs', { run: 'run-1', step: 3 }).catch(() => undefined),
       )
       Then('Factory was asked for step 3 only', () =>
         expect(factory.asked).toContain('GET /api/runs/run-1/logs?step=3'),
+      )
+      // The run detail is not read at all: one step was named, so there are no
+      // other steps to walk.
+      And('nothing else was asked for', () =>
+        expect(factory.asked).toEqual(['GET /api/runs/run-1/logs?step=3']),
       )
     })
   })
@@ -571,6 +617,23 @@ describeFeature(feature, ({ Background, Rule }) => {
       Then("it was written into the project's own scope", () =>
         expect(written().scope).toBe('project'),
       )
+    })
+  })
+  Rule("approving is a person's, and the surface says so by not offering it", ({
+    RuleScenario,
+  }) => {
+    const may = (action: string) => () => expect(AGENT_ACTIONS).toContain(action)
+    const mayNot = (action: string) => () => expect(AGENT_ACTIONS).not.toContain(action)
+
+    RuleScenario('The action list does not include approving', ({ Then, And }) => {
+      Then('an agent may not ask to "approve"', mayNot('approve'))
+      And('an agent may not ask to "reject"', mayNot('reject'))
+    })
+
+    RuleScenario('Everything else a person can ask for is offered', ({ Then, And }) => {
+      Then('an agent may ask to "queue"', may('queue'))
+      And('an agent may ask to "cancel"', may('cancel'))
+      And('an agent may ask to "mark_done"', may('mark_done'))
     })
   })
 })

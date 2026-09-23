@@ -75,8 +75,9 @@ export const runTools: readonly McpTool[] = [
     name: 'factory_run_logs',
     title: 'What a run printed',
     description:
-      'The tail of a run’s output, or of one step of it. Always bounded. If the daemon had ' +
-      'to drop the middle of a log to stay inside its budget, the reply says how much.',
+      'The tail of a run\u2019s output. Always bounded, and lines say which step printed them. ' +
+      'If the daemon had to drop the middle of a log to stay inside its budget, the reply says ' +
+      'how much.',
     schema: z.object({
       run: z.string().describe('The run id.'),
       step: z.number().int().optional().describe('Only this step, by its id from factory_run_get.'),
@@ -89,27 +90,76 @@ export const runTools: readonly McpTool[] = [
         .describe(`The last N lines. Default ${DEFAULT_TAIL}.`),
     }),
     run: async (input, { api }) => {
-      const query = input.step === undefined ? '' : `?step=${input.step}`
-      let view: LogView
+      const tail = input.tail ?? DEFAULT_TAIL
+      const ask = async (step?: number): Promise<LogView> => {
+        const query = step === undefined ? '' : `?step=${step}`
+        try {
+          return await api.request<LogView>(
+            `/api/runs/${encodeURIComponent(input.run)}/logs${query}`,
+          )
+        } catch (error) {
+          throw asToolError(error, 'RUN_NOT_FOUND')
+        }
+      }
+
+      if (input.step !== undefined) {
+        const view = await ask(input.step)
+        return shape(input.run, view.lines, view.dropped, tail, input.step)
+      }
+
+      // Without a step, one request answers almost nothing: a run's own log
+      // holds what the engine wrote, and everything a command printed is
+      // attached to the step that printed it. So the steps are walked, which is
+      // what `factory task logs` does for a person and for the same reason —
+      // a line with no step beside it is a line nobody can place.
+      let detail: RunDetail
       try {
-        view = await api.request<LogView>(
-          `/api/runs/${encodeURIComponent(input.run)}/logs${query}`,
-        )
+        detail = await api.request<RunDetail>(`/api/runs/${encodeURIComponent(input.run)}`)
       } catch (error) {
         throw asToolError(error, 'RUN_NOT_FOUND')
       }
-      const tail = input.tail ?? DEFAULT_TAIL
-      const lines = view.lines.slice(-tail)
-      return {
-        run: input.run,
-        ...(input.step === undefined ? {} : { step: input.step }),
-        lines: lines.map((line) => ({ stream: line.stream, text: line.text })),
-        // Two different losses, and conflating them would be a lie in one
-        // direction or the other: `dropped` is what the daemon's log budget
-        // discarded, `older` is what this call asked not to be sent.
-        droppedByFactory: view.dropped,
-        older: Math.max(view.lines.length - lines.length, 0),
+
+      const collected: (LogLine & { step?: number; phase?: string })[] = []
+      let dropped = (await ask()).dropped
+      for (const line of (await ask()).lines) collected.push(line)
+      for (const step of detail.steps) {
+        const view = await ask(step.id)
+        dropped += view.dropped
+        for (const line of view.lines) {
+          collected.push({ ...line, step: step.id, phase: step.phase })
+        }
       }
+      return shape(input.run, collected, dropped, tail)
     },
   }),
 ]
+
+/**
+ * The tail, and an honest account of what is missing from it.
+ *
+ * Two different losses, and conflating them is a lie in one direction or the
+ * other: `droppedByFactory` is what the daemon's log budget discarded from the
+ * middle, `older` is what this call asked not to be sent. A truncated log that
+ * reads like a complete one is how an agent concludes a build passed.
+ */
+const shape = (
+  run: string,
+  lines: readonly (LogLine & { step?: number; phase?: string })[],
+  dropped: number,
+  tail: number,
+  step?: number,
+) => {
+  const kept = lines.slice(-tail)
+  return {
+    run,
+    ...(step === undefined ? {} : { step }),
+    lines: kept.map((line) => ({
+      stream: line.stream,
+      text: line.text,
+      ...(line.step === undefined ? {} : { step: line.step }),
+      ...(line.phase === undefined ? {} : { phase: line.phase }),
+    })),
+    droppedByFactory: dropped,
+    older: Math.max(lines.length - kept.length, 0),
+  }
+}

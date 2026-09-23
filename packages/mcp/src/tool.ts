@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import type { Initiator } from '@factory/core'
 import type { FactoryApi } from './api.js'
 
 /**
@@ -20,6 +21,14 @@ export interface ToolContext {
   /** Where `factory mcp` was started, handed over rather than read. */
   readonly cwd: string
   readonly env: Readonly<Record<string, string | undefined>>
+  /**
+   * Where this request is coming from, when Factory itself started the agent.
+   *
+   * Sent with everything that changes something, so the daemon can bound how
+   * far work starts work. Absent for a client Factory did not launch, which is
+   * a person's own session and is treated as a person.
+   */
+  readonly initiator?: Initiator
 }
 
 export interface McpTool {

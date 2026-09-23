@@ -608,3 +608,28 @@ Feature: A task, and the rules about how it moves
       # assertion that loops over the list it is checking passes whatever that
       # list happens to say, including a new move with `internal` forgotten.
       Then a client may ask for exactly "queue, approve, reject, mark_done, retry, cancel, archive, restore"
+
+  Rule: how many tasks a run has asked for is counted, never kept
+
+    A counter on the run would say ten after somebody tidied five away, and an
+    agent would be refused work it had every right to ask for. Counting the
+    rows is the only answer that survives a deletion.
+
+    Scenario: A run that has asked for nothing has asked for nothing
+      Then "run-1" has asked for 0 tasks
+
+    Scenario: Tasks a run asked for are counted
+      Given two tasks created by "run-1"
+      Then "run-1" has asked for 2 tasks
+
+    Scenario: A task somebody else asked for is not counted
+      Given two tasks created by "run-1"
+      And a task created by "run-2"
+      Then "run-1" has asked for 2 tasks
+
+    Scenario: An archived task still counts
+      # A task that was archived still happened. A run that could reset its own
+      # budget by archiving is not budgeted.
+      Given two tasks created by "run-1"
+      And one of them is archived
+      Then "run-1" has asked for 2 tasks

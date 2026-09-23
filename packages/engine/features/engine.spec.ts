@@ -1727,4 +1727,93 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
     })
   })
+  Rule('an agent is told where it is in the tree', ({ RuleScenario }) => {
+    /**
+     * Everything the newest run printed, as one string.
+     *
+     * Gathered per step, because a run's own log holds what the engine wrote
+     * and everything a command printed is attached to the step that printed it.
+     */
+    const printed = (): string => {
+      const run = newest()
+      return runs
+        .steps(run.id)
+        .flatMap((step) => runs.logs(run.id, { stepId: step.id }).lines)
+        .map((line) => line.text)
+        .join('\n')
+    }
+
+    RuleScenario('A step can see the run and the task it belongs to', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task has the workflow "development"', () => assign('development'))
+      And('"development" prints what it was told about itself', () =>
+        givePlan('development', [
+          shellPhase(
+            'work',
+            'echo "run=$FACTORY_RUN_ID task=$FACTORY_TASK_ID depth=$FACTORY_ORCHESTRATION_DEPTH"',
+          ),
+        ]),
+      )
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('the output names the run it is part of', () =>
+        expect(printed()).toContain(`run=${newest().id}`),
+      )
+      And('the output names the task it is part of', () =>
+        expect(printed()).toContain(`task=${task.id}`),
+      )
+      And('the output says it is at depth 0', () => expect(printed()).toContain('depth=0'))
+    })
+  })
+
+  Rule('a run remembers who asked for its task', ({ RuleScenario }) => {
+    RuleScenario('A task a person created starts a run at the top of the tree', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task has the workflow "development"', () => assign('development'))
+      And('"development" prints "building" and succeeds', () =>
+        givePlan('development', [shellPhase('work', 'echo building')]),
+      )
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('the run is at depth 0', () => expect(newest().depth).toBe(0))
+      And('the run came from nowhere', () => expect(newest().originRunId).toBeUndefined())
+    })
+
+    RuleScenario('A task an agent asked for starts a run one deeper', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      let earlier = ''
+      Given('a finished run "run-earlier" at depth 0', () => {
+        earlier = runs.start({ workflow: 'development', depth: 0 }).id
+        runs.finish(earlier, 'completed')
+      })
+      And('a task created by "run-earlier"', () => {
+        task = tasks.create({
+          name: 'Asked for by an agent',
+          projectId: task.projectId,
+          createdByRunId: earlier,
+          createdBy: 'mcp:a-client/1.0',
+        })
+      })
+      And('that task has a workflow that succeeds', () => {
+        assign('development')
+        givePlan('development', [shellPhase('work', 'echo building')])
+      })
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('the run is at depth 1', () => expect(newest().depth).toBe(1))
+      And('the run came from "run-earlier"', () => expect(newest().originRunId).toBe(earlier))
+    })
+  })
 })

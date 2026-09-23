@@ -1108,4 +1108,46 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       )
     })
   })
+  Rule('how many tasks a run has asked for is counted, never kept', ({ RuleScenario }) => {
+    let made: Task[] = []
+    const createdBy = (runId: string, count: number) => () => {
+      made = []
+      for (let index = 0; index < count; index += 1) {
+        made.push(
+          tasks.create({
+            name: `Asked for ${runId} ${index}`,
+            projectId: home,
+            createdByRunId: runId,
+          }),
+        )
+      }
+    }
+    const asked = (runId: string, count: number) => () =>
+      expect(tasks.countCreatedBy(runId)).toBe(count)
+
+    RuleScenario('A run that has asked for nothing has asked for nothing', ({ Then }) => {
+      Then('"run-1" has asked for 0 tasks', asked('run-1', 0))
+    })
+
+    RuleScenario('Tasks a run asked for are counted', ({ Given, Then }) => {
+      Given('two tasks created by "run-1"', createdBy('run-1', 2))
+      Then('"run-1" has asked for 2 tasks', asked('run-1', 2))
+    })
+
+    RuleScenario('A task somebody else asked for is not counted', ({ Given, And, Then }) => {
+      Given('two tasks created by "run-1"', createdBy('run-1', 2))
+      And('a task created by "run-2"', () => {
+        tasks.create({ name: 'Elsewhere', projectId: home, createdByRunId: 'run-2' })
+      })
+      Then('"run-1" has asked for 2 tasks', asked('run-1', 2))
+    })
+
+    RuleScenario('An archived task still counts', ({ Given, And, Then }) => {
+      Given('two tasks created by "run-1"', createdBy('run-1', 2))
+      And('one of them is archived', () => {
+        tasks.act((made[0] as Task).id, 'archive')
+      })
+      Then('"run-1" has asked for 2 tasks', asked('run-1', 2))
+    })
+  })
 })

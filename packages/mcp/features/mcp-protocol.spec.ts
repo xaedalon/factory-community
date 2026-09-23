@@ -306,4 +306,84 @@ describeFeature(feature, ({ Background, Rule, Scenario }) => {
       )
     })
   })
+  Rule('Factory is told where a request came from, and the client does not say', ({
+    RuleScenario,
+  }) => {
+    const insideARun = (): void => {
+      server = createMcpServer({
+        tools: factoryTools,
+        context: {
+          api: factory,
+          cwd: '/repos/factory',
+          // Exactly what the engine stamps, and nothing else: the point is that
+          // this server reads its own position rather than being told it.
+          env: { FACTORY_RUN_ID: 'run-7', FACTORY_TASK_ID: 'task-3' },
+        },
+        diagnose: diagnoseTo(pipe),
+      })
+    }
+    const createATask = async (): Promise<void> => {
+      factory.answer(`/api/projects/at?path=${encodeURIComponent('/repos/factory')}`, {
+        project: { id: 'project-1', name: 'factory', path: '/repos/factory' },
+        matchedBy: 'directory',
+      })
+      factory.answer('/api/tasks', {
+        task: { id: 'task-9', name: 'Add due dates', state: 'draft', projectId: 'project-1', workflows: [] },
+        actions: [],
+      })
+      await send(
+        request(10, 'tools/call', {
+          name: 'factory_task_create',
+          arguments: { name: 'Add due dates' },
+        }),
+      )
+    }
+    const sentInitiator = () =>
+      (factory.bodies.get('POST /api/tasks') as { initiator?: Record<string, string> } | undefined)
+        ?.initiator
+
+    RuleScenario('A server Factory did not start looks like a person', ({ When, Then }) => {
+      When('the client creates a task', createATask)
+      Then('nothing was said about where the request came from', () =>
+        expect(sentInitiator()).toBeUndefined(),
+      )
+    })
+
+    RuleScenario('A server started inside a run says which run, and which task', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('Factory started this server inside run "run-7" on task "task-3"', insideARun)
+      When('the client creates a task', createATask)
+      Then('Factory was told the request came from run "run-7"', () =>
+        expect(sentInitiator()?.runId).toBe('run-7'),
+      )
+      And('Factory was told it came from inside task "task-3"', () =>
+        expect(sentInitiator()?.taskId).toBe('task-3'),
+      )
+    })
+
+    RuleScenario("The client's own name travels as a label", ({ Given, When, Then }) => {
+      Given('Factory started this server inside run "run-7" on task "task-3"', insideARun)
+      When('the client initializes as "a-client" version "1.0.0" and creates a task', async () => {
+        await initialize('2025-06-18')
+        await createATask()
+      })
+      Then('Factory was told the client calls itself "mcp:a-client/1.0.0"', () =>
+        expect(sentInitiator()?.label).toBe('mcp:a-client/1.0.0'),
+      )
+    })
+
+    RuleScenario('No tool lets a client say where it came from', ({ When, Then }) => {
+      When('the client lists the tools', () => send(request(11, 'tools/list')))
+      Then('no tool takes an initiator', () => {
+        const tools = result()?.tools as { inputSchema: { properties?: Record<string, unknown> } }[]
+        for (const tool of tools) {
+          expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain('initiator')
+        }
+      })
+    })
+  })
 })

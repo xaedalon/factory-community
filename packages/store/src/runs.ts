@@ -59,6 +59,8 @@ interface RunRow {
   finished_at: string | null
   detail: string | null
   profile: string | null
+  origin_run_id: string | null
+  depth: number
   dropped_bytes: number
 }
 
@@ -119,6 +121,10 @@ export interface StartRun {
   readonly entryId?: string
   /** How much authority this run is given. Straight off the plan. */
   readonly profile?: ExecutionProfile
+  /** The run whose agent asked for this work, when an agent did. */
+  readonly originRunId?: string
+  /** How far from the person who started all this. Defaults to 0: they did. */
+  readonly depth?: number
 }
 
 export interface StartStep {
@@ -177,8 +183,10 @@ export class RunRepository {
     }
 
     this.#db.run(
-      `INSERT INTO runs (id, task_id, workflow, state, attempt, workflow_index, entry_id, profile, started_at)
-       VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?)`,
+      `INSERT INTO runs
+         (id, task_id, workflow, state, attempt, workflow_index, entry_id, profile,
+          origin_run_id, depth, started_at)
+       VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?)`,
       id,
       input.taskId ?? null,
       input.workflow,
@@ -186,6 +194,8 @@ export class RunRepository {
       input.workflowIndex ?? 0,
       input.entryId ?? null,
       input.profile ?? null,
+      input.originRunId ?? null,
+      input.depth ?? 0,
       now,
     )
     this.#events?.emit('run.started', { runId: id, workflow: input.workflow })
@@ -638,6 +648,7 @@ function hydrateRun(row: RunRow): Run {
     attempt: row.attempt,
     workflowIndex: row.workflow_index,
     ...(row.entry_id === null ? {} : { entryId: row.entry_id }),
+    depth: row.depth,
     startedAt: row.started_at,
   }
   if (row.task_id !== null) run.taskId = row.task_id
@@ -645,6 +656,7 @@ function hydrateRun(row: RunRow): Run {
   if (row.finished_at !== null) run.finishedAt = row.finished_at
   if (row.detail !== null) run.detail = row.detail
   if (isExecutionProfile(row.profile)) run.profile = row.profile
+  if (row.origin_run_id !== null) run.originRunId = row.origin_run_id
   return run as unknown as Run
 }
 

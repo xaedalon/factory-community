@@ -77,6 +77,17 @@ export interface Run {
    * profiles existed, because nothing knew.
    */
   readonly profile?: ExecutionProfile
+  /**
+   * The run whose agent asked for this work, when an agent did.
+   *
+   * Absent for anything a person started, which is every run recorded before
+   * Factory served MCP. No foreign key behind it, deliberately: a lineage
+   * pointer that could cascade would let a tidy-up of one finished run delete
+   * the record of everything it started.
+   */
+  readonly originRunId?: string
+  /** How far from the person who started all this. 0 when they started it. */
+  readonly depth: number
   readonly startedAt: string
   readonly finishedAt?: string
   /** Why it ended the way it did, when that needs saying. */

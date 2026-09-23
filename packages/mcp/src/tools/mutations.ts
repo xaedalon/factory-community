@@ -24,6 +24,28 @@ interface TaskReply {
   readonly actions: readonly AvailableAction[]
 }
 
+/**
+ * What an agent may ask for, which is not everything a person may.
+ *
+ * `approve` and `reject` are absent, and that is the enforcement rather than a
+ * suggestion. Factory can tell an agent it launched from a person's own session
+ * — the first carries the run it is inside, the second carries nothing — but it
+ * cannot tell a person's session from an agent acting unasked *in* that
+ * session, because they are the same process with the same environment. An
+ * approval an agent can give is not a gate, so it is not offered here at all.
+ *
+ * The daemon still refuses an approval from inside the branch that asked for
+ * the work: this surface is not the only client, and a rule only one client
+ * enforces is advice.
+ *
+ * Everything else comes from core's published list rather than a copy — the CLI
+ * kept one of those, with a comment saying the daemon had the final say, which
+ * is right until somebody adds a ninth move.
+ */
+export const AGENT_ACTIONS: readonly string[] = REQUESTABLE_ACTIONS.filter(
+  (action) => action !== 'approve' && action !== 'reject',
+)
+
 const PROJECT = z
   .string()
   .optional()
@@ -139,7 +161,7 @@ export const mutationTools: readonly McpTool[] = [
     schema: z.object({
       task: z.string().describe('The task id.'),
       action: z
-        .enum(REQUESTABLE_ACTIONS as unknown as [string, ...string[]])
+        .enum(AGENT_ACTIONS as unknown as [string, ...string[]])
         .describe('One of the actions the task currently offers.'),
       reason: z.string().optional().describe('Why, for the task’s history.'),
     }),
@@ -232,16 +254,28 @@ export const mutationTools: readonly McpTool[] = [
   }),
 ]
 
+/**
+ * A request that changes something, with where it came from attached.
+ *
+ * The initiator rides on every one of these rather than on a header, because a
+ * body is what the daemon already validates and a header is a second door. It
+ * is absent for a client Factory did not launch, and the daemon reads that as
+ * a person.
+ */
 const request = async <T>(
   context: ToolContext,
   path: string,
   method: string,
   body?: unknown,
 ): Promise<T> => {
+  const sending =
+    method === 'GET' || context.initiator === undefined
+      ? body
+      : { ...((body ?? {}) as Record<string, unknown>), initiator: context.initiator }
   try {
     return await context.api.request<T>(path, {
       method,
-      ...(body === undefined ? {} : { body }),
+      ...(sending === undefined ? {} : { body: sending }),
     })
   } catch (error) {
     throw asToolError(error)

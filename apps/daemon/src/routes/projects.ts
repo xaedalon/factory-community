@@ -3,6 +3,8 @@ import { SCOPE_DIR, createScope, scaffoldProjectDefinitions } from '@factory/con
 import { join } from 'node:path'
 import {
   DISCLAIMER,
+  admitAction,
+  parseInitiator,
   EXECUTION_PROFILES,
   NOT_ACCEPTED,
   PROJECT_TONES,
@@ -57,6 +59,14 @@ export function registerProjectRoutes(
    * the one live copy.
    */
   const accepted = (): boolean => hasAccepted(runtime.settings.current().security.acceptedVersion)
+
+  /** The same facts the task routes use, built from the same repositories. */
+  const facts = {
+    depthOf: (runId: string) => service.runs.get(runId)?.depth,
+    tasksCreatedBy: (runId: string) => tasks.countCreatedBy(runId),
+    creatorOf: (taskId: string) => tasks.get(taskId)?.createdByRunId,
+    originOf: (runId: string) => service.runs.get(runId)?.originRunId,
+  }
 
 
   /**
@@ -382,7 +392,9 @@ export function registerProjectRoutes(
    * Never `done` or `cancelled` — one click must not set five agents on work
    * that already finished.
    */
-  app.post<{ Params: { id: string } }>('/api/projects/:id/queue', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { initiator?: unknown } }>(
+    '/api/projects/:id/queue',
+    async (request, reply) => {
     const project = projects.get(request.params.id)
     if (project === undefined) {
       return reply.code(404).send({ error: `No project ${request.params.id}.` })
@@ -391,6 +403,15 @@ export function registerProjectRoutes(
     // to an agent running, whether it is one task or ten.
     if (!accepted()) {
       return reply.code(409).send({ error: NOT_ACCEPTED, disclaimer: DISCLAIMER })
+    }
+
+    let initiator
+    try {
+      initiator = parseInitiator(request.body?.initiator)
+    } catch (error) {
+      return reply
+        .code(400)
+        .send({ error: error instanceof Error ? error.message : String(error) })
     }
 
     const candidates = tasks
@@ -423,10 +444,19 @@ export function registerProjectRoutes(
         skipped.push({ task, reason: 'nothing in its plan is ticked' })
         continue
       }
+      // An agent pressing Queue all from inside one of these tasks skips its
+      // own rather than failing the batch. The other nine are somebody's work
+      // and there is no reason not to start them.
+      const refusal = admitAction({ initiator, action: 'queue', taskId: id, facts })
+      if (refusal !== undefined) {
+        skipped.push({ task, reason: refusal.message })
+        continue
+      }
       queued.push(tasks.act(id, 'queue'))
     }
     return { queued, skipped }
-  })
+    },
+  )
 
   /**
    * Stop everything in flight in this project.

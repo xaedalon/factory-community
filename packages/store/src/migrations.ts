@@ -578,4 +578,33 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('ALTER TABLE run_steps ADD COLUMN command TEXT')
     },
   },
+  {
+    version: 19,
+    describe: 'work knows who asked for it',
+    up: (db) => {
+      // Until now every run was equally anonymous, which was fine while the
+      // only things that could start work were a person at the board and a
+      // person at a terminal. An agent Factory launched can reach the daemon —
+      // it is on 127.0.0.1, there is no authentication, and `FACTORY_URL` is
+      // not credential-shaped so it survives the environment filter. Serving
+      // MCP does not create that reach; it makes it ergonomic, which is reason
+      // enough to be able to answer "who asked for this, and from inside what".
+      //
+      // No foreign key on either run pointer, and the reason is written down
+      // in migration 17: `runs.entry_id` has none for the same one. A lineage
+      // pointer must not be able to delete the thing it points at, and
+      // `ON DELETE CASCADE` from a run to its own descendants would do exactly
+      // that — a tidy-up of one finished run taking the record of everything it
+      // started.
+      //
+      // `depth` is NOT NULL with a default of 0, which is the truth for every
+      // row that already exists: a person started it.
+      db.exec(`
+        ALTER TABLE runs ADD COLUMN origin_run_id TEXT;
+        ALTER TABLE runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN created_by TEXT;
+        ALTER TABLE tasks ADD COLUMN created_by_run_id TEXT;
+      `)
+    },
+  },
 ]

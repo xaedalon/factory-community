@@ -12,6 +12,7 @@
  */
 export * from './api.js'
 export * from './errors.js'
+export * from './initiator.js'
 export * from './jsonrpc.js'
 export * from './project.js'
 export * from './serve.js'

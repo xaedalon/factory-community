@@ -127,3 +127,36 @@ Feature: Speaking MCP
       When the client calls that tool
       Then one frame came back
       And the error stream says what failed
+
+  Rule: Factory is told where a request came from, and the client does not say
+
+    Factory puts the run and the task into the environment of every agent it
+    launches. An MCP server the agent then starts inherits them, so
+    it can report its own position in the orchestration tree without anybody
+    having to trust it — and a server Factory did not launch has none of them
+    and looks like a person, which is the direction that loses authority rather
+    than gaining it.
+
+    The client's own name is the one self-reported part. It is a label on a row
+    somebody reads, and no rule anywhere uses it.
+
+    Scenario: A server Factory did not start looks like a person
+      When the client creates a task
+      Then nothing was said about where the request came from
+
+    Scenario: A server started inside a run says which run, and which task
+      Given Factory started this server inside run "run-7" on task "task-3"
+      When the client creates a task
+      Then Factory was told the request came from run "run-7"
+      And Factory was told it came from inside task "task-3"
+
+    Scenario: The client's own name travels as a label
+      Given Factory started this server inside run "run-7" on task "task-3"
+      When the client initializes as "a-client" version "1.0.0" and creates a task
+      Then Factory was told the client calls itself "mcp:a-client/1.0.0"
+
+    Scenario: No tool lets a client say where it came from
+      # The only input that could claim a position in the tree is one that does
+      # not exist. What a client can do is stay quiet, which makes it a person.
+      When the client lists the tools
+      Then no tool takes an initiator

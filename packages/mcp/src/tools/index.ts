@@ -23,3 +23,4 @@ export const factoryTools: readonly McpTool[] = [
 export { projectTools, taskReadTools, definitionTools, runTools, mutationTools }
 export { briefProject } from './projects.js'
 export { briefTask, briefRun } from './tasks.js'
+export { AGENT_ACTIONS } from './mutations.js'

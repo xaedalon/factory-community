@@ -136,6 +136,17 @@ export interface Task {
    * an edit to a phase disagree with what actually ran.
    */
   readonly session?: { readonly id: string; readonly provider: string }
+  /**
+   * Who asked for this task, when it was not a person at a keyboard.
+   *
+   * A label an MCP client gave for itself — `mcp:claude-code/2.1` — which is
+   * self-reported and is read by people, never by a rule. What the rules use is
+   * the run below, which a client cannot claim because Factory stamped it into
+   * the environment of the process it launched.
+   */
+  readonly createdBy?: string
+  /** The run whose agent asked for this task. Absent when a person did. */
+  readonly createdByRunId?: string
 }
 
 /**

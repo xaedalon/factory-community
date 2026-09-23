@@ -1576,6 +1576,23 @@ Then('{string} says it gives each task an environment', async ({ page }, name: s
   await expect(page.getByTestId(`environments-${name}`)).toBeVisible()
 })
 
+When('I add a project at a repository with no Factory directory', async ({ world, page }) => {
+  await world.startDaemon()
+  const repository = world.makeRepository('fresh')
+  await page.goto('/projects/new')
+  await page.getByTestId('project-name').fill('fresh')
+  await page.getByTestId('project-path').fill(repository)
+  await page.getByTestId('save-project').click()
+})
+
+Then('the page lists the worktree definitions it copied in', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded')).toContainText('worktree-create')
+})
+
+Then('the page lists the scope it created', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded')).toContainText('.xaedalon/.factory')
+})
+
 Then('the page lists what it copied in', async ({ page }) => {
   await expect(page.getByTestId('scaffolded')).toContainText('environment-create')
 })

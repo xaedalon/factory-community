@@ -296,6 +296,18 @@ export default {
     return body.task.id
   }
 
+  /**
+   * A directory that looks like a git repository and has no Factory scope.
+   *
+   * Registering one is what a person does the first time, and it is the case
+   * where Factory writes into their repository.
+   */
+  makeRepository(name: string): string {
+    const path = join(this.root, name)
+    mkdirSync(join(path, '.git'), { recursive: true })
+    return path
+  }
+
   /** Back to an installation with nothing registered. */
   async removeEveryProject(): Promise<void> {
     const response = await fetch(`http://127.0.0.1:${PORT}/api/projects`)

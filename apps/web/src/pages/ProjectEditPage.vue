@@ -131,7 +131,12 @@ async function save(): Promise<void> {
       // Back to the list, the way the definition editors do it. The list is
       // where the change is visible — the badges, the branch, the name — and
       // "I added it, there it is" is the whole confirmation anyone wants.
-      await leaveWith(created.scaffolded?.written ?? [])
+      // The scope directory counts as something written into somebody's
+      // repository, and it is the one the rest of the list goes inside.
+      await leaveWith(
+        created.scaffolded?.written ?? [],
+        created.scope?.created === true ? created.scope.root : undefined,
+      )
       return
     }
     const result = await api.setProjectSetting(id.value as string, {
@@ -168,10 +173,11 @@ async function save(): Promise<void> {
  * `git status` they were not expecting, and they should have been told which
  * files before they get there.
  */
-async function leaveWith(written: readonly string[]): Promise<void> {
+async function leaveWith(written: readonly string[], scopeRoot?: string): Promise<void> {
+  const files = scopeRoot === undefined ? [...written] : [scopeRoot, ...written]
   await router.push({
     path: '/projects',
-    ...(written.length > 0 ? { state: { scaffolded: [...written] } } : {}),
+    ...(files.length > 0 ? { state: { scaffolded: files } } : {}),
   })
 }
 

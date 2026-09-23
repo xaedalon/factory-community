@@ -279,6 +279,14 @@ Feature: The task board
       When I confirm the removal
       Then "work" is no longer listed
 
+    Scenario: Adding a repository says what it put in it
+      When I add a project at a repository with no Factory directory
+      # The next thing that happens to this person is a `git status` they were
+      # not expecting. The scope directory is part of what was written, and it
+      # is the one everything else went inside.
+      Then the page lists the scope it created
+      And the page lists the worktree definitions it copied in
+
     Scenario: A project with work still in it is not removed
       Given the project "work" is registered
       And the task "Add due dates" exists in "work" on "hello"

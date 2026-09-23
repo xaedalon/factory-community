@@ -36,6 +36,12 @@ export type ScopeKind = 'project' | 'user' | 'builtin'
 export type DefinitionKind = 'workflow' | 'phase' | 'agent'
 
 /** What turning a project setting on copied into the repository. */
+/** Whether adding a project had to create its `.xaedalon/.factory` directory. */
+export interface ScopeReport {
+  created: boolean
+  root: string
+}
+
 export interface ScaffoldReport {
   written: string[]
   kept: string[]
@@ -809,7 +815,7 @@ export const api = {
     usesWorktrees?: boolean
     usesEnvironments?: boolean
   }) =>
-    request<{ project: Project; scaffolded: ScaffoldReport }>('/api/projects', {
+    request<{ project: Project; scope: ScopeReport; scaffolded: ScaffoldReport }>('/api/projects', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

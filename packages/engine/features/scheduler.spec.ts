@@ -630,6 +630,27 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
       )
     })
 
+      RuleScenario('The reason says when the project is held by a person, not by work', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project "api" that works in its own checkout', () => givenProject('api', false))
+      And('a task "Waiting" in "api" is awaiting approval', () => {
+        queuedIn('Waiting', 'api')
+        tasks.act(idOf('Waiting'), 'start')
+        tasks.act(idOf('Waiting'), 'await_approval')
+      })
+      And('a queued task "Next" in "api"', () => queuedIn('Next', 'api'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('the reason given to "Next" says it is waiting for approval', () =>
+        expect(reasonFor('Next')).toContain('waiting for approval'),
+      )
+    })
+
       RuleScenario('An approved task is picked back up even though its project is busy with it', ({
       Given,
       And,

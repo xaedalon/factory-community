@@ -225,6 +225,17 @@ Feature: Deciding what runs next
       When the scheduler ticks
       Then the started tasks are "First, Loose" in that order
 
+    Scenario: The reason says when the project is held by a person, not by work
+      Given a project "api" that works in its own checkout
+      And a task "Waiting" in "api" is awaiting approval
+      And a queued task "Next" in "api"
+      When the scheduler ticks
+      # "One task at a time" reads as a throughput limit. It is also what
+      # happens while somebody has not answered an approval — three tasks
+      # waited behind one that was waiting for a person, and nothing said the
+      # queue was stalled on a human rather than on work.
+      Then the reason given to "Next" says it is waiting for approval
+
     Scenario: An approved task is picked back up even though its project is busy with it
       Given a project "api" that works in its own checkout
       And a task "Waiting" in "api" that was approved and is holding a paused run

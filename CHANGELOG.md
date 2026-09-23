@@ -35,6 +35,25 @@ have been documented since the plugin host was built and were never called. They
 path every definition takes to disk — the API, the CLI, a bundle import, and the copies a project
 is given when it turns worktrees on.
 
+**A task can be moved to another project.** `PATCH /api/tasks/:id` takes `projectId`, and `factory
+task move <id> <project>` takes the project by name. Refused while the task is in flight, and while
+anything depends on it — an edge may only join two tasks in the same project.
+
+**A step records the command it ran.** `run_steps.command` holds the rendered argv, shown on the
+task page above that step's output. "What did this agent run, and with what authority?" could only
+be answered by reading the phase file back, which is a different question once somebody has edited
+it. Not the environment: the profile already records how much of it the step could see.
+
+**Adding a project creates its scope.** A repository with no `.xaedalon/.factory` used to leave
+every write that asked for the project scope failing with a 500 — including the copies made as the
+project is registered. The reply says whether a scope was created, and the board lists it with the
+definitions that went inside.
+
+**Exporting a workflow follows `needs`,** not only `on_fail`, so a pipeline is one export rather
+than five and a merge by hand.
+
+**Doctor reports a task waiting for something that cannot finish** before it is queued.
+
 **Fixed.** The scheduler's lane and flag gates asked about the newest run's workflow rather than the
 one about to run, so a task whose first workflow had finished was admitted on the requirements of
 work that was over — agents ran in a project's own checkout, and two `merge` workflows could

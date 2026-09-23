@@ -877,6 +877,66 @@ to the database and expect it to refuse. Afterwards, dropping `NOT NULL` fails;
 equivalent too, and for a reason worth writing down: the ids go into a temp
 table first, so no delete reads `tasks` and the order cannot matter.
 
+## After 0.1.0 — the improvements list, worked through
+
+| # | What | State |
+|--:|------|-------|
+| 96 | **The two definition hooks run** — declared, documented and never called | ✅ done |
+| 97 | **`stdin:` is honoured**, and `RunState 'declined'` has a writer | ✅ done |
+| 98 | **One copy of the event vocabulary**, one of the hook names, `process.env` banned | ✅ done |
+| 99 | **A project gets a scope**; a missing one is a 400 rather than a 500 | ✅ done |
+| 100 | **A setting cannot be dropped silently** by a merge that was not told about it | ✅ done |
+| 101 | **A step records the command it ran** | ✅ done |
+| 102 | **A task can be moved to another project** | ✅ done |
+| 103 | **Doctor reports a dead blocker** before the queue reaches it | ✅ done |
+| 104 | **Export follows `needs`** | ✅ done |
+| 105 | **The board says what to add first**, and `pnpm mutate` makes the discipline a command | ✅ done |
+
+`improvements.md` is a list kept in the commercial workspace of things noticed
+while building something else — each one a file and a line rather than a
+feeling. This is the session that worked through it. Eighteen entries are
+struck through there now, each with the commit that closed it.
+
+Four findings are worth repeating here, because they are about how this
+codebase fails rather than about any one defect.
+
+**A seam that is declared and never called is the recurring shape.** Both
+definition hooks had been on the plugin SDK since the host was built: counted
+in every conformance report, described in `docs/plugins.md`, and never invoked
+once. `PlannedStep.stdin` was set from a descriptor, carried onto the planned
+step, printed by `--dry-run` as `< file`, and dropped by a runner that
+hard-coded `stdio: ['ignore', …]`. `RunState 'declined'` had no writer — and
+that one was not cosmetic: `reject` left its run paused for ever, so a retry
+*resumed past the gate that had just been refused*. A comment promising
+`beforeStepRun` "once there is a Step type" was the same defect in prose, and
+says why there is no third hook now instead.
+
+**A guarantee enforced at one point is a hint everywhere else.**
+`scheduling: sequential` was checked where the scheduler admits a task, and a
+task stays `running` from its first workflow to its last — so a sequential
+workflow anywhere but first was serialised against nothing. Two `merge`
+workflows ran 20ms apart, twice. The lane is held by the engine now, around the
+execution of each plan that asks for one, which is the unit the field is about.
+
+**A constraint nothing exercises can be dropped without anybody noticing.** Two
+mutations survived their first round — removing `NOT NULL` from the rebuilt
+`tasks` table, and swapping `RESTRICT` back to `SET NULL` — because every path
+to the database went through a repository that refused first. Two scenarios now
+write straight to the database and expect it to refuse. (The second is an
+equivalent mutant: SQLite raises on a `SET NULL` action against a `NOT NULL`
+column, so the two spellings cannot be told apart.)
+
+**A wire format that needs the receiver to know the vocabulary guarantees a
+second copy of it.** `GET /api/events` named each SSE frame after its event,
+which only reaches a client already listening for that name — so the board kept
+its own list, with 14 of the 23 names in it, and an event missing from it was
+one the board silently stopped updating for. Unnamed frames need no list at all.
+
+The discipline itself is a command now. `pnpm mutate` takes a file, a string, a
+replacement and a suite — or a JSON file of them — restores the source whatever
+happens, and exits non-zero if a mutation survived *or could not be applied*,
+because a mutation nobody ran is not a mutation that passed.
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -1097,6 +1157,7 @@ pnpm test          # every .feature below the browser
 pnpm test:e2e      # the browser ones (runs bddgen first — always use this script)
 pnpm typecheck
 pnpm lint
+pnpm mutate        # break a guard on purpose and watch a scenario fail
 
 pnpm dev           # the builder, on http://127.0.0.1:5317
 node apps/daemon/dist/bin.js   # the daemon it talks to, on 127.0.0.1:7317

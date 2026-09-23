@@ -327,10 +327,19 @@ export class Scheduler {
       const shared = this.#sharedCheckoutOf(task)
       const holder = shared === undefined ? undefined : busyProjects.get(shared)
       if (shared !== undefined && holder !== undefined) {
+        // Which task has it, and — when it is a person the project is waiting
+        // on rather than work — that too. "One task at a time" reads as a
+        // throughput limit, and it is also what happens while an approval goes
+        // unanswered: three tasks waited behind one that was waiting for
+        // somebody, and nothing said the queue was stalled on a human.
+        const held =
+          holder.state === 'awaiting_approval'
+            ? `"${holder.name}" has it, waiting for approval`
+            : `"${holder.name}" has it`
         skipped.push({
           task,
           reason: 'the project runs one task at a time',
-          detail: `${this.#project(shared)?.name ?? shared} — "${holder.name}" has it`,
+          detail: `${this.#project(shared)?.name ?? shared} — ${held}`,
         })
         continue
       }

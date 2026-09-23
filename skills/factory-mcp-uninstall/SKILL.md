@@ -69,11 +69,15 @@ If neither client names it, go to *If it is not installed* at the bottom.
 
 ## 2. Ask which, and take them out
 
-Ask, with the default being all of them:
+**One place holds it** — the ordinary case — then rule one has already named it and said you would
+remove it. Do that; do not ask the same question twice.
+
+**Several hold it**, which is how somebody ends up with Factory configured everywhere *and* in one
+repository, then ask, with the default being all of them:
 
 > I found it in *<these>*. Take it out of all of them, or just one?
 
-Then, for whichever they said:
+Then, for whichever applies:
 
 ```bash
 claude mcp remove factory      # from whichever scope holds it

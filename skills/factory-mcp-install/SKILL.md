@@ -43,9 +43,10 @@ says to stop.
 ## Rule two: three things are theirs, not yours
 
 1. **Never approve a project-scoped server for them.** Claude Code holds a `.mcp.json` entry at
-   `⏸ Pending approval` on purpose — approving a server is agreeing to let it run. Tell them it is
-   waiting and how to clear it. This is the same gate as Factory's own security disclaimer, which
-   `factory-setup` also refuses to accept on anybody's behalf.
+   `⏸ Pending approval` on purpose — approving a server is agreeing to let something run. Tell them
+   it is waiting, and that clearing it means starting `claude` in that directory and approving when
+   it asks. This is the same gate as Factory's own security disclaimer, which `factory-setup` also
+   refuses to accept on anybody's behalf.
 2. **Never commit `.mcp.json`.** Writing it into a repository is a change to their repository. Say
    it is there and let them decide between a commit and a line in `.gitignore`.
 3. **Never install a coding-agent CLI.** Configure the ones that are there; report the ones that are
@@ -117,8 +118,9 @@ Say which you found before you write anything.
 
 ## 4. Write the entry
 
-Use each client's own command. Do not hand-edit JSON: the two clients' configuration files differ in
-detail — Copilot's entries carry a `type`, Claude's do not — and each CLI knows its own format.
+Use each client's own command. Do not hand-edit JSON: the two formats differ in detail — both write
+a `type`, and it is `stdio` for Claude Code and `local` for Copilot, which also adds a `tools` list
+— and each CLI knows its own.
 
 **Everywhere on this machine** — the default:
 
@@ -191,7 +193,8 @@ Report, briefly:
   `~/.copilot/mcp-config.json`, or `<repo>/.mcp.json`
 - **that the daemon has to be running**, and how they start it
 - **for a `.mcp.json`**: that it is in their `git status` now, that committing it shares Factory with
-  their team, and that Claude Code is holding it until they approve it in a session
+  their team, and that Claude Code is holding it at *pending approval* until they start `claude` in
+  that directory and say yes
 - **what the agent can and cannot do** — it can create tasks, queue them and read runs; it cannot
   accept Factory's security notice and cannot approve anything, both of which stay with them.
   [`docs/mcp.md`](../../docs/mcp.md) is the short version

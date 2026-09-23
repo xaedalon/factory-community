@@ -1091,3 +1091,50 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Stopping a project that is not there is not found
       When I stop a project that does not exist
       Then the response is 404
+
+  Rule: adding a project leaves the repository exactly as it was
+
+    Most repositories that exist are not using Factory, and somebody may want
+    to use it on this machine only. So registering one writes nothing git can
+    see: the `.xaedalon/.gitignore` Factory creates contains `*`, which hides
+    the family directory and that file with it.
+
+    Asserted against real git rather than against the file's contents, because
+    the contents are the mechanism and `git status` is the promise.
+
+    Scenario: Registering a project adds nothing to git status
+      Given a repository with nothing to commit
+      When I add it as a project
+      Then the response is 201
+      And it has a Factory scope of its own
+      And git still has nothing to say about it
+
+    Scenario: A repository that already shares its definitions is left sharing them
+      Given a repository whose Factory definitions are committed
+      When I add it as a project
+      Then the response is 201
+      # Never over a directory Factory did not create. The other half of that
+      # decision is this: the worktree definitions copied in as the project is
+      # registered are *visible*, because this repository shares its
+      # definitions and its team should see the new ones and commit them.
+      And no ignore file was written
+      And the definitions it copied in are there for the team to commit
+
+  Rule: doctor asks git what it can see of a project
+
+    The rule itself is specified against a stub in the engine's own suite. What
+    only a real repository can answer is whether the question Factory asks git
+    is the one it means — the flags, the NUL-separated records, and every way
+    of not getting an answer at all.
+
+    Scenario: A committed artifact is found in a real repository
+      Given a project that is a real repository with a committed task artifact
+      When I GET "/api/doctor"
+      Then the response is 200
+      And the findings say a run's output is committed
+
+    Scenario: A project that is not a repository produces no finding
+      Given a project that is a plain directory
+      When I GET "/api/doctor"
+      Then the response is 200
+      And the findings say nothing about git

@@ -13,7 +13,7 @@ import {
   type StopReport,
   type Task,
   type TaskWorkflowEntry,
-  IGNORED_BY_PRODUCT,
+  IGNORE_WHAT_RUNS_PRODUCE,
   PRODUCT_FAMILY_DIR,
   fileStamp,
   toShellString,
@@ -750,18 +750,24 @@ export class Engine {
   /**
    * Keep a run's output out of `git status`.
    *
-   * Definitions under `.xaedalon/.factory` are meant to be committed; what a run
-   * produced is not, and a repository that grows a diff every time an agent
-   * thinks is a repository nobody wants. Written once, next to the directory it
-   * is about, and never touched again if it is already there — it is the user's
-   * file the moment it exists.
+   * A repository that grows a diff every time an agent thinks is a repository
+   * nobody wants. Written once, next to the directory it is about, and never
+   * touched again if it is already there — it is the user's file the moment it
+   * exists.
+   *
+   * The **narrow** body, not the one `createScope` writes. This fires for a
+   * directory Factory did not create: one from before it wrote an ignore file
+   * at all, or one somebody has already shared. Hiding the whole directory
+   * there would hide a team's next workflow from `git status` while leaving
+   * the ones already committed in plain sight — the half-state
+   * `doctor.definitionsIgnored` exists to catch.
    */
   #ignoreProductOutput(artifactPath: string): void {
     const family = artifactPath.indexOf(`${sep}${PRODUCT_FAMILY_DIR}${sep}`)
     if (family === -1) return
     const file = join(artifactPath.slice(0, family), PRODUCT_FAMILY_DIR, '.gitignore')
     if (existsSync(file)) return
-    writeFileSync(file, `${IGNORED_BY_PRODUCT}\n`)
+    writeFileSync(file, IGNORE_WHAT_RUNS_PRODUCE)
   }
 
   /**

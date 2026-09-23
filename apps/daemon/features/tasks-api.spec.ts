@@ -2825,4 +2825,128 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('the response is 404', status(404))
     })
   })
+  Rule('adding a project leaves the repository exactly as it was', ({ RuleScenario }) => {
+    let repository = ''
+    /** Real git, because `git status` is the promise and the file is only how. */
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: repository,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      })
+
+    RuleScenario('Registering a project adds nothing to git status', ({ Given, When, Then, And }) => {
+      Given('a repository with nothing to commit', () => {
+        repository = makeRepository(join(root, 'fresh'))
+        expect(git('status', '--porcelain').trim()).toBe('')
+      })
+      When('I add it as a project', () => addProject('fresh', repository))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('it has a Factory scope of its own', () =>
+        expect(existsSync(join(repository, '.xaedalon', '.factory', 'config.yaml'))).toBe(true),
+      )
+      // `-uall` so an untracked *directory* cannot hide its contents behind one
+      // line, which is the shape this could have passed under by accident.
+      And('git still has nothing to say about it', () =>
+        expect(git('status', '--porcelain', '-uall').trim()).toBe(''),
+      )
+    })
+
+    RuleScenario('A repository that already shares its definitions is left sharing them', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a repository whose Factory definitions are committed', () => {
+        repository = makeRepository(join(root, 'shared'))
+        file(
+          join(repository, '.xaedalon', '.factory', 'config.yaml'),
+          'kind: factory.scope/v1\nscope: project\n',
+        )
+        file(
+          join(repository, '.xaedalon', '.factory', 'workflows', 'theirs.workflow.yaml'),
+          'name: theirs\nphases: []\n',
+        )
+        git('add', '-A')
+        git('commit', '-m', 'share the definitions')
+      })
+      When('I add it as a project', () => addProject('shared', repository))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('no ignore file was written', () =>
+        expect(existsSync(join(repository, '.xaedalon', '.gitignore'))).toBe(false),
+      )
+      // Visible, deliberately. An ignore file here would hide these from the
+      // team that is sharing the rest, and they are the definitions the
+      // project just gained.
+      And('the definitions it copied in are there for the team to commit', () => {
+        const untracked = git('status', '--porcelain', '-uall').trim()
+        expect(untracked).toContain('.xaedalon/.factory/workflows/worktree-create.workflow.yaml')
+      })
+    })
+  })
+  Rule('doctor asks git what it can see of a project', ({ RuleScenario }) => {
+    const findings = () => (response.body.problems as { rule?: string; message: string }[]) ?? []
+    const aboutGit = () =>
+      findings().filter(
+        (problem) =>
+          problem.rule === 'doctor.productOutputTracked' ||
+          problem.rule === 'doctor.definitionsIgnored',
+      )
+    /** A project row for a directory this scenario made, added straight to the store. */
+    const register = async (name: string, path: string): Promise<void> => {
+      await call('POST', '/api/projects', { name, path })
+    }
+
+    RuleScenario('A committed artifact is found in a real repository', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is a real repository with a committed task artifact', async () => {
+        const repository = join(root, 'tracked')
+        mkdirSync(repository, { recursive: true })
+        const git = (...args: string[]) =>
+          execFileSync('git', args, {
+            cwd: repository,
+            env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+          })
+        git('init', '--initial-branch=main')
+        git('config', 'user.email', 'test@example.com')
+        git('config', 'user.name', 'Factory Test')
+        file(
+          join(repository, '.xaedalon', '.factory', 'tasks', 'add-due-dates', 'artifacts', 'r.md'),
+          'what the agent wrote\n',
+        )
+        // Forced, because Factory's own ignore file is doing its job — which is
+        // how somebody gets here: `git add -f` is the wrong opt-in.
+        git('add', '-f', '.xaedalon')
+        git('commit', '-m', 'oops')
+        await register('tracked', repository)
+      })
+      When('I GET "/api/doctor"', () => call('GET', '/api/doctor'))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And("the findings say a run's output is committed", () => {
+        expect(aboutGit().map((problem) => problem.rule)).toEqual(['doctor.productOutputTracked'])
+        expect(aboutGit()[0]?.message).toContain('artifacts')
+      })
+    })
+
+    RuleScenario('A project that is not a repository produces no finding', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is a plain directory', async () => {
+        const plain = join(root, 'plain')
+        mkdirSync(plain, { recursive: true })
+        await register('plain', plain)
+      })
+      When('I GET "/api/doctor"', () => call('GET', '/api/doctor'))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the findings say nothing about git', () => expect(aboutGit()).toHaveLength(0))
+    })
+  })
 })

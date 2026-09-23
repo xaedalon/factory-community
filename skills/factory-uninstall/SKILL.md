@@ -14,7 +14,7 @@ That last clause is the whole job. Factory writes in four places, and only two o
 |---|---|
 | the checkout it was built in | Factory's |
 | the scope in force, and the database inside it | Factory's, but it is **their history** |
-| `.xaedalon/` inside each repository — definitions, some of them committed, and task artifacts | **theirs** |
+| `.xaedalon/` inside each repository — definitions, usually ignored by git rather than committed, and task artifacts | **theirs** |
 | a worktree, at whatever path that project stores, and the branch it was made on | **theirs**, and a git checkout besides |
 
 Do not assume the scope is in their home directory. `FACTORY_HOME` overrides it, `FACTORY_SCOPES`
@@ -184,7 +184,11 @@ difference between a backup and a hope.
 
 - **tracked** definitions — `git -C <repo> rm -r --cached .xaedalon/.factory` and a commit, or
   `git rm -r` to delete them as well. Their repository, their commit.
-- **untracked** ones, and the `.xaedalon/.gitignore` Factory wrote — an ordinary `rm -rf`.
+- **untracked** ones, and the `.xaedalon/.gitignore` Factory wrote — an ordinary `rm -rf`. This is
+  now the usual case, because that file ignores the whole directory including itself: `git status`
+  will not list any of it and `git ls-files` returns nothing. **Say what is there before removing
+  it** — `ls -R <repo>/.xaedalon` — because this is the one step in this runbook where git cannot
+  tell them what they are about to lose.
 
 **Artifacts**, per project, with size:
 

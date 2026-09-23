@@ -24,6 +24,35 @@ board lists it with whatever was copied in. `POST /api/tasks` requires `projectI
 without one. `DELETE /api/projects/:id` answers 409 with the count while anything is left in the
 project. `factory task new` falls into the only project there is, and otherwise asks which.
 
+**Factory no longer puts anything in your `git status`.** The `.xaedalon/.gitignore` written when
+Factory creates that directory now contains `*`, so the directory — and that file with it — is
+invisible to git. Registering a project, or running `factory init`, leaves a repository exactly as
+it was. Most repositories that exist are not using Factory, and trying it on your own machine
+should not turn into a commit.
+
+*Sharing is the opt-in, and one edit:* replace the `*` with the three lines the file names —
+`.factory/tasks/`, `.factory/state/`, `.factory/.trash/` — and commit `.xaedalon`. Deleting the
+file does the same thing. A repository that already committed its definitions is untouched:
+Factory never writes an ignore file over a directory it did not create, and the narrow file it
+writes beside an existing one now covers the database and bundle backups as well as task output,
+neither of which was ignored before.
+
+*Two consequences worth knowing:* `git clean -xdf` deletes ignored files, so it now takes your
+definitions and the database if it lives in that repository — plain `git clean -fd` leaves them
+alone. And your editor probably hides ignored paths, so the notice the board shows after
+registering a project may be the only place you see the files named.
+
+**`factory doctor` shows what the daemon found.** Half the rules need the database the daemon owns
+— the ones about tasks, worktrees and what git can see of a project — and until now nothing printed
+them: the command built its own host without a database, and the board declares the endpoint and
+calls it from nowhere. It asks a running daemon and merges, deduplicating what both halves found,
+and says plainly when there is no daemon to ask.
+
+**Doctor reports what git can see of a project.** Silent for both coherent states — everything
+ignored, everything committed — and a finding for the two that are not: a task's artifacts or the
+database committed by accident, and definitions committed into a directory that has since been
+ignored, where the workflows already there keep working while every new one is invisible.
+
 **The event stream stopped naming its frames.** `GET /api/events` sent each event as an SSE frame
 named after the event, which only reaches a client that already knows to listen for that name — so
 every consumer kept its own copy of the event vocabulary, and the board's copy had 14 of the 23

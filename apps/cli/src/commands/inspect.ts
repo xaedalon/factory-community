@@ -1,7 +1,14 @@
-import { PROVIDER_KIND, STEP_KIND, type ProviderCapability, type StepKindCapability } from '@factory/core'
+import {
+  PROVIDER_KIND,
+  STEP_KIND,
+  type ProviderCapability,
+  type Problem,
+  type StepKindCapability,
+} from '@factory/core'
 import { DOCTOR_RULE_KIND, doctorContext, runDoctor } from '@factory/config'
 import { columns, renderProblem, type Style } from '../render.js'
 import { failed, ok, type CliContext, type CommandResult } from '../context.js'
+import type { DaemonClient } from '../daemon.js'
 
 /**
  * Every plugin, and whether it is switched on.
@@ -106,13 +113,35 @@ export function capabilities(context: CliContext, style: Style): CommandResult {
  * Warnings do not fail the command. A shadowed definition or an agent that is
  * not installed on this particular machine is worth saying out loud, but it is
  * not a reason for a CI job to go red.
+ *
+ * Two halves, because half the answer is in a database this process does not
+ * own. The rules about tasks, worktrees, a project's own git state and the
+ * runs a restart had to close are registered only where there is a store —
+ * so they live in the daemon, and until now **nothing printed them**: this
+ * command built its own host without one, and the board declares the endpoint
+ * and calls it from nowhere. A rule nobody can see is a rule that does not
+ * exist.
+ *
+ * Merged rather than replaced: the two run over their own scope chains, which
+ * can differ — the daemon's is where it was started, this one's is where you
+ * are standing. Deduplicated on the rule and the sentence, because a problem
+ * both of them find is one problem.
  */
-export async function doctor(context: CliContext, style: Style): Promise<CommandResult> {
+export async function doctor(
+  client: DaemonClient,
+  context: CliContext,
+  style: Style,
+): Promise<CommandResult> {
   const report = await runDoctor(
     doctorContext({ chain: context.chain, host: context.host, env: context.env }),
   )
 
-  const problems = [...context.startupProblems, ...report.problems]
+  const running = await askTheDaemon(client)
+  const problems = dedupe([
+    ...context.startupProblems,
+    ...report.problems,
+    ...(running?.problems ?? []),
+  ])
   const errors = problems.filter((problem) => problem.severity === 'error')
   const warnings = problems.filter((problem) => problem.severity === 'warning')
 
@@ -136,8 +165,45 @@ export async function doctor(context: CliContext, style: Style): Promise<Command
       (errors.length === 0 ? ' Nothing here blocks a run.' : ''),
   )
 
+  if (running === undefined) {
+    lines.push(
+      style.dim(
+        'Checks that need a running daemon — tasks, worktrees, what git can see of a project — ' +
+          'were not run. Start one and ask again.',
+      ),
+    )
+  }
+
   const result = { problems, checked: report.checked }
   return errors.length > 0 ? failed(lines, result) : ok(lines, result)
+}
+
+/**
+ * What the daemon's own rules found, or nothing if there is no daemon.
+ *
+ * Not reaching one is the ordinary case — plenty of people run `factory
+ * doctor` before they have ever started it — so it is reported as a dim line
+ * rather than as a failure of the command.
+ */
+async function askTheDaemon(
+  client: DaemonClient,
+): Promise<{ problems: Problem[] } | undefined> {
+  try {
+    return await client.request<{ problems: Problem[] }>('/api/doctor')
+  } catch {
+    return undefined
+  }
+}
+
+/** One problem is one problem, however many rules found it. */
+const dedupe = (problems: readonly Problem[]): Problem[] => {
+  const seen = new Set<string>()
+  return problems.filter((problem) => {
+    const key = `${problem.rule ?? ''}|${problem.message}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 /** `factory provider list` — agents Factory can drive, and whether they are here. */

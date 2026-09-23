@@ -1,5 +1,8 @@
 import type { Problem } from '@factory/core'
 import {
+  PRODUCT_DIR,
+  PRODUCT_FAMILY_DIR,
+  PRODUCT_OUTPUT_DIRS,
   dependencyStatus,
   isSettled,
   needsOutOfOrder,
@@ -9,7 +12,7 @@ import {
   type Project,
   type Task,
 } from '@factory/core'
-import type { FactoryPlugin } from '@factory/core'
+import type { FactoryPlugin, GitQuery } from '@factory/core'
 import { DOCTOR_RULE_KIND, type DoctorRuleCapability } from '@factory/config'
 import { SETUP_STEP_KIND, type SetupStepCapability } from '@factory/core'
 import { existsSync } from 'node:fs'
@@ -44,7 +47,30 @@ export interface RunningDoctorOptions {
   readonly reconciliation: ReconcileReport
   /** The same workflow lookup the scheduler uses, so the two cannot disagree. */
   readonly workflow: (name: string, projectId?: string) => WorkflowFacts | undefined
+  /**
+   * How to ask git a read-only question about a project's directory.
+   *
+   * Absent means the rule that needs it says nothing — which is also what a
+   * machine with no git gets. Injected rather than imported for the reason
+   * every spawner here is: a rule that spawns on its own is a rule no scenario
+   * can pin down.
+   */
+  readonly git?: GitQuery
 }
+
+/**
+ * Names that do not exist, asked about on purpose.
+ *
+ * The question is "would a workflow written tomorrow be seen", not "is the one
+ * already committed ignored" — and git's own answer to the second is "no,
+ * because it is tracked", which is true and useless here. One per kind,
+ * because somebody may have re-included only one of the three.
+ */
+const DEFINITION_PROBES = [
+  'workflows/a-new-one.workflow.yaml',
+  'phases/a-new-one.phase.yaml',
+  'agents/a-new-one.agent.yaml',
+]
 
 export function runningDoctorRules(
   options: RunningDoctorOptions,
@@ -394,8 +420,101 @@ export function runningDoctorRules(
     },
   }
 
+  /**
+   * What git can see of each project's Factory directory.
+   *
+   * Two states are coherent and say nothing: everything ignored, which is
+   * somebody trying Factory out on their own machine and is the default, and
+   * everything committed, which is a team sharing its workflows. The middle is
+   * what this is for.
+   *
+   * Only git can answer it. Reading `.gitignore` files and matching them here
+   * would be a second implementation of a specification we do not own, and the
+   * answer has to include the user's own `core.excludesFile` as well as every
+   * file between here and the repository root.
+   */
+  const inGit: DoctorRuleCapability = {
+    id: 'factory-files-in-git',
+    summary: "What git can see of each project's Factory directory.",
+    check() {
+      const ask = options.git
+      if (ask === undefined) return []
+
+      const problems: Problem[] = []
+      for (const project of projects.list()) {
+        // Not a repository, or gone: `doctor.projectPathMissing` already says
+        // so, and spawning into a directory that is not there would look like
+        // git being absent.
+        if (!project.isRepository || !existsSync(project.path)) continue
+
+        const tracked = ask(project.path, ['ls-files', '-z', '--', PRODUCT_FAMILY_DIR])
+        if (tracked === undefined) continue
+        const paths = tracked.stdout.split('\0').filter((line) => line !== '')
+        const output = paths.filter((path) =>
+          PRODUCT_OUTPUT_DIRS.some((directory) =>
+            path.startsWith(`${PRODUCT_FAMILY_DIR}/${PRODUCT_DIR}/${directory}/`),
+          ),
+        )
+        if (output.length > 0) {
+          const named = output.slice(0, 3).join(', ')
+          const rest = output.length > 3 ? ` and ${output.length - 3} more` : ''
+          problems.push({
+            severity: 'warning',
+            message:
+              `Project "${project.name}" has Factory's own output committed to git: ` +
+              `${named}${rest}. A task's artifacts, Factory's database or what a bundle ` +
+              `import replaced — written by a run rather than by a person, and it will grow ` +
+              `and conflict on every one. Untrack it with "git rm -r --cached ` +
+              `${PRODUCT_FAMILY_DIR}/${PRODUCT_DIR}/<directory>".`,
+            rule: 'doctor.productOutputTracked',
+          })
+        }
+
+        // Everything tracked is output, which includes tracking nothing at all
+        // — the coherent everything-ignored state, and the common one. Either
+        // way there are no definitions to ask a second question about, so the
+        // common case costs one spawn rather than two.
+        if (paths.length === output.length) continue
+
+        // Would a workflow written tomorrow be seen? Asked about names that do
+        // not exist on purpose: `check-ignore` hides tracked paths unless it is
+        // told otherwise, so asking about a definition that is already
+        // committed answers a different question — and this is the question.
+        const probe = DEFINITION_PROBES.map(
+          (relative) => `${PRODUCT_FAMILY_DIR}/${PRODUCT_DIR}/${relative}\0`,
+        ).join('')
+        const ignored = ask(project.path, ['check-ignore', '--stdin', '-z', '-v'], probe)
+        if (ignored === undefined || ignored.code !== 0) continue
+
+        // `<source>\0<line>\0<pattern>\0<path>\0`, in fours. A pattern
+        // beginning with `!` is a re-inclusion: somebody ignored the directory
+        // and then took it back for the definitions, which is exactly right and
+        // must not be reported.
+        const fields = ignored.stdout.split('\0')
+        const excluded: string[] = []
+        for (let at = 0; at + 3 < fields.length; at += 4) {
+          const [source, line, pattern] = [fields[at], fields[at + 1], fields[at + 2]]
+          if (pattern?.startsWith('!') === false) excluded.push(`${source}:${line}:${pattern}`)
+        }
+        if (excluded.length === 0) continue
+
+        problems.push({
+          severity: 'error',
+          message:
+            `Project "${project.name}" has its Factory definitions committed, but git is now ` +
+            `ignoring the directory they are in — ${excluded[0]}. The ones already committed ` +
+            `still resolve, so nothing looks wrong; a new workflow would never appear in ` +
+            `"git status", and nobody would find out it was missing.`,
+          rule: 'doctor.definitionsIgnored',
+        })
+      }
+      return problems
+    },
+  }
+
   return [
     recovered,
+    inGit,
     dependencies,
     stuck,
     outOfOrder,

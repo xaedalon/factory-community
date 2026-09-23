@@ -281,11 +281,13 @@ Feature: The task board
 
     Scenario: Adding a repository says what it put in it
       When I add a project at a repository with no Factory directory
-      # The next thing that happens to this person is a `git status` they were
-      # not expecting. The scope directory is part of what was written, and it
-      # is the one everything else went inside.
+      # Not because a `git status` is coming — one is not, which is the point.
+      # Git ignores the directory Factory just created and the editor's file
+      # tree probably hides it, so this notice is the only place the files are
+      # named at all.
       Then the page lists the scope it created
       And the page lists the worktree definitions it copied in
+      And the page says git ignores all of it
 
     Scenario: A project with work still in it is not removed
       Given the project "work" is registered

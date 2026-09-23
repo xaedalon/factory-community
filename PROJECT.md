@@ -939,6 +939,82 @@ replacement and a suite — or a JSON file of them — restores the source whate
 happens, and exits non-zero if a mutation survived *or could not be applied*,
 because a mutation nobody ran is not a mutation that passed.
 
+## After 0.1.0 — a repository is the user's
+
+| # | What | State |
+|--:|------|-------|
+| 106 | **`.xaedalon/` is ignored the moment Factory creates it** — including the ignore file itself | ✅ done |
+| 107 | **The narrow ignore covers the database and bundle backups**, which were never ignored | ✅ done |
+| 108 | **Doctor asks git** what it can see of a project, and says nothing when both answers are coherent | ✅ done |
+| 109 | **`factory doctor` merges the daemon's report**, which nothing had ever printed | ✅ done |
+
+Two questions, and the first one had no code in it.
+
+**Does `.xaedalon` belong in a worktree?** No, and it never did: a task's
+artifacts, their dated copies and the ignore file are all written under the
+*project*, whatever workspace the steps ran in, and worktrees live outside the
+repository entirely. Evidence is copied into the database as well as left on
+disk for exactly this reason. What does land in a worktree is whatever the
+steps themselves write — a project's own environment build, deliberately — and
+`.xaedalon/.factory` as **tracked files git checked out**, when the definitions
+are committed. The one exception is `factory run`, which has no project and so
+writes beside whatever workspace it is given. All of that is now said in
+`docs/workflows.md` rather than only implied by comments.
+
+**Should Factory write an ignore file?** It already did, and it was the wrong
+one. `.xaedalon/.gitignore` ignored `.factory/tasks/`, which left the
+definitions untracked-and-visible — so registering a project dropped a
+directory of unexplained files into somebody's `git status` and invited a
+commit they had not decided to make.
+
+The default is reversed. The file Factory writes when it **creates** the
+directory contains `*`, which hides everything under it including the file
+itself, so adding a project leaves a repository exactly as it was. Sharing is
+then a decision, and it costs one edit — which is why most of that file is a
+comment explaining how to make it. This is deliberately the opposite of the
+recipe written everywhere else, `*` followed by `!.gitignore`; the point here
+is that git sees nothing at all, and the constant carries a note saying so
+before somebody "fixes" it.
+
+Decisions taken with the owner:
+
+- **The same rule for `factory init` and for the board.** Both go through
+  `createScope`, so there is one behaviour to explain and one file to delete.
+- **A directory Factory did not create keeps the narrow ignore.** It may
+  already be committed and shared, and hiding it wholesale would hide that
+  team's *next* workflow while leaving the ones already committed in plain
+  sight — the half-state the new doctor rule exists to catch. That narrow body
+  also gained `.factory/state/` and `.factory/.trash/`: the database and the
+  backups a bundle import takes were never ignored, so a shared repository had
+  them sitting in `git status` all along.
+- **Doctor may spawn git.** Only git can answer what git ignores, and matching
+  `.gitignore` files here would be a second implementation of a specification
+  we do not own — the shape this codebase keeps paying for. It is the first
+  thing outside the step runner to spawn anything, and every way of failing to
+  get an answer is classified in one place so a caller never reads an exit
+  code.
+
+**The rule would have been invisible, which is its own finding.** Rules that
+need the database are registered only inside the daemon; `factory doctor`
+builds its own host without one, and the board declares `api.doctor()` and
+calls it from nowhere. So `doctor.taskBlocked`, `doctor.worktreeMissing` and
+`doctor.runRecovered` have never been printed by anything a person runs.
+`factory doctor` now asks the daemon and merges, deduplicating on the rule and
+the sentence because both halves run the installation rules over their own
+scope chains.
+
+**What the mutations taught, again.** Six survived the first round. Two were
+equivalent — a guard whose outcome the next guard already produced, and a
+spawn-failure branch the status check subsumed — and both were *deleted*
+rather than explained, because a line no scenario can distinguish is a line
+that can be dropped in a rewrite without anybody noticing. Two were assertions
+that iterated the very constant under test: dropping two of the three output
+directories from `PRODUCT_OUTPUT_DIRS` changed what the file said *and* what
+the test expected, so it passed. They name the three literally now. The last
+two were scenarios that passed for the wrong reason — one never set up the
+condition it was about, and one could not tell "the rule said nothing" from
+"the rule threw and doctor swallowed it".
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -1079,6 +1155,8 @@ this repository does not contain.
 | `packages/core/features/located-errors.feature` | Problems carry a file, line and column |
 | `packages/config/features/scope-discovery.feature` | Finding `.factory`; `$HOME` is never a project |
 | `packages/config/features/layered-resolution.feature` | Which definition wins, and what it shadows |
+| `packages/config/features/new-scope.feature` | A scope Factory creates: ignored entirely until somebody shares it, and never written over one that is already there |
+| `packages/core/features/git.feature` | Asking git a read-only question, and every way of not getting an answer looking the same |
 | `packages/config/features/scaffold.feature` | What turning a project setting on copies into the repository, and what it refuses to overwrite |
 | `packages/config/features/scope-plugins.feature` | A project ships its plugins in its own repo |
 | `packages/plugins/provider-claude/features/providers.feature` | Rendering, model roles, capability awareness, conformance |
@@ -1106,7 +1184,7 @@ this repository does not contain.
 | `packages/store/features/runs.feature` | Runs, their steps, and output kept inside a budget |
 | `packages/engine/features/engine.feature` | A task becomes runs: recording, gates, failure, and what a crash leaves |
 | `packages/engine/features/scheduler.feature` | What runs next: order, capacity, lanes read from the task's own project, gates asked about the workflow about to run, a dependent held until its blockers are done, and why anything was skipped |
-| `packages/engine/features/doctor.feature` | Doctor rules that only exist where a database does |
+| `packages/engine/features/doctor.feature` | Doctor rules that only exist where a database does, including what git can see of a project |
 | `packages/store/features/projects.feature` | Projects: where work happens, checked when it is written, and removable only while nothing is left in them |
 | `packages/core/features/worktree-steps.feature` | `uses: worktree` — isolation a workflow asks for, idempotently, and removed from outside the worktree |
 | `packages/core/features/provider-resolution.feature` | Where the agent is on *this* machine, and what to say when it is nowhere |

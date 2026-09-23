@@ -13,6 +13,7 @@ import {
   artifactsRoot,
   resolveProfile,
   systemCanonical,
+  systemGitQuery,
   taskTokenValues,
   workspaceFor,
 } from '@factory/core'
@@ -291,7 +292,17 @@ export async function createService(
   // the catalogue. Loading here would put a plugin in the host that the plugins
   // page cannot see, and a page that omits a loaded plugin is a page that lies.
   await runtime.load(
-    runningInstallationPlugin({ tasks, runs, projects, reconciliation, workflow }),
+    runningInstallationPlugin({
+      tasks,
+      runs,
+      projects,
+      reconciliation,
+      workflow,
+      // The one rule that cannot answer its own question: only git knows what
+      // git ignores. Built from the daemon's environment rather than read from
+      // the process, like every other thing here that reaches outside.
+      git: systemGitQuery(runtime.env),
+    }),
   )
 
   const stopWatching = options.autoStart === false ? () => {} : scheduler.watch()

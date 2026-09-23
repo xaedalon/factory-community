@@ -177,7 +177,12 @@ async function leaveWith(written: readonly string[], scopeRoot?: string): Promis
   const files = scopeRoot === undefined ? [...written] : [scopeRoot, ...written]
   await router.push({
     path: '/projects',
-    ...(files.length > 0 ? { state: { scaffolded: files } } : {}),
+    // `hidden` only when Factory created the directory: that is the one case
+    // where "git ignores all of it" is true, because Factory never writes an
+    // ignore file over a scope somebody may already be sharing.
+    ...(files.length > 0
+      ? { state: { scaffolded: files, hidden: scopeRoot !== undefined } }
+      : {}),
   })
 }
 
@@ -319,7 +324,7 @@ onMounted(load)
           label="An environment per task"
           icon="environment"
           data-testid="project-environments-field"
-          when-on="Environment workflows are copied into the repository for you to edit and commit."
+          when-on="Environment workflows are copied into the repository for you to edit."
           when-off="Tasks run against whatever is already installed in the workspace."
         />
       </div>
@@ -376,7 +381,7 @@ onMounted(load)
       >
         <p class="flex items-center gap-2">
           <AppIcon name="info" />
-          Copied into the project, ready to edit and commit:
+          Copied into the project:
         </p>
         <ul class="mt-1 space-y-0.5">
           <li v-for="file in scaffolded" :key="file" class="font-mono text-xs">{{ file }}</li>

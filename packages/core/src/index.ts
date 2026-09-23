@@ -14,6 +14,7 @@ export * from './conformance.js'
 export * from './setup.js'
 export * from './terminal.js'
 export * from './tools.js'
+export * from './git.js'
 
 export * from './schema/common.js'
 export * from './schema/step.js'

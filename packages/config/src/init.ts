@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { IGNORED_BY_PRODUCT } from '@factory/core'
+import { IGNORE_EVERYTHING_HERE } from '@factory/core'
 import { DEFINITION_DIRECTORIES } from './store.js'
 import { SCOPE_CONFIG_FILE } from './scopes.js'
 
@@ -31,12 +31,20 @@ export function createScope(options: { root: string; kind: 'project' | 'user' })
     mkdirSync(join(root, directory), { recursive: true })
   }
 
-  // What a run produces is not what a project committed. Written next to the
-  // directory it is about, and only when it is not already there — the moment
-  // it exists it is the user's file to edit.
+  // Git is told to ignore the whole directory, this file included.
+  //
+  // A repository is the user's. Most of them are not using Factory, somebody
+  // trying it out should not have to explain a directory of untracked files to
+  // their team, and registering a project has to leave `git status` exactly as
+  // it was. Sharing the definitions is then a decision they make, and the file
+  // says how to make it.
+  //
+  // Only when it is not already there — the moment it exists it is the user's
+  // file to edit — and only for a project. A home directory is not a
+  // repository, and where it is one it is somebody's dotfiles.
   if (kind === 'project') {
     const ignore = join(root, '..', '.gitignore')
-    if (!existsSync(ignore)) writeFileSync(ignore, `${IGNORED_BY_PRODUCT}\n`)
+    if (!existsSync(ignore)) writeFileSync(ignore, IGNORE_EVERYTHING_HERE)
   }
 
   writeFileSync(join(root, SCOPE_CONFIG_FILE), kind === 'project' ? PROJECT_CONFIG : USER_CONFIG)
@@ -46,11 +54,12 @@ export function createScope(options: { root: string; kind: 'project' | 'user' })
 const PROJECT_CONFIG = [
   '# Factory definitions for this project.',
   '#',
-  '# Commit this directory. Anyone who clones the repository gets these',
-  '# workflows, phases and plugins with no separate install step, and they',
-  '# take precedence over anything in ~/.xaedalon/.factory.',
+  '# Yours alone for now: ../.gitignore hides this whole directory from git,',
+  '# so nothing here is in your next commit. That file says how to share these',
+  '# workflows with your team when you want to — and once you do, anyone who',
+  '# clones the repository gets them with no separate install step.',
   '#',
-  '# What runs produce lives beside it, under tasks/, and is ignored.',
+  '# Whatever is here takes precedence over ~/.xaedalon/.factory.',
   'kind: factory.scope/v1',
   'scope: project',
   '',

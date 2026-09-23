@@ -1,5 +1,13 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect } from 'vitest'
@@ -16,6 +24,12 @@ import type {
   Run,
   Scheduling,
   Task,
+} from '@factory/core'
+import {
+  PRODUCT_FAMILY_DIR,
+  artifactFile,
+  artifactsRoot,
+  joinPath,
 } from '@factory/core'
 import {
   MIGRATIONS,
@@ -1599,6 +1613,118 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         expect(task.state).toBe('awaiting_approval'),
       )
       And('there are 2 runs', () => expect(allRuns()).toHaveLength(2))
+    })
+  })
+  Rule('what a run produced is kept out of git, and nothing else is', ({ RuleScenario }) => {
+    /**
+     * An artifact path of the shape a real project has.
+     *
+     * Built through core's own `artifactsRoot` rather than typed out: every
+     * artifact scenario above puts its files in `<work>/artifacts`, which has
+     * no `.xaedalon` segment — so `#ignoreProductOutput` took its early return
+     * in every one of them and this writer had never executed in a test.
+     */
+    const inFamilyDirectory = (name: string) =>
+      artifactFile(artifactsRoot(work, 'add-due-dates', joinPath), name, joinPath)
+    const familyIgnore = () => join(work, PRODUCT_FAMILY_DIR, '.gitignore')
+
+    const artifactAt = (path: string) => (): void => {
+      plans.set('review', {
+        plan: planOf('review', [
+          {
+            name: 'work',
+            approval: 'none',
+            cwd: process.cwd(),
+            steps: [
+              {
+                index: 0,
+                uses: 'shell',
+                planned: {
+                  describe: 'write it',
+                  command: 'bash',
+                  args: ['-c', `echo "looks good" > ${path}`],
+                },
+                raw: { uses: 'shell', run: 'write it' },
+                artifact: { name: 'report', path },
+              },
+            ],
+          },
+        ]),
+        problems: [],
+      })
+    }
+
+    RuleScenario('A run writes an ignore file for the output it produced', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a workflow whose step writes an artifact under a Factory directory', () =>
+        artifactAt(inFamilyDirectory('report'))(),
+      )
+      And("it is the task's only workflow", () => assign('review'))
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('the family directory has an ignore file', () =>
+        expect(existsSync(familyIgnore())).toBe(true),
+      )
+      // Named literally rather than looped over `PRODUCT_OUTPUT_DIRS`, which
+      // is the thing under test: an assertion that iterates the constant it is
+      // checking passes whatever that constant says, and dropping two of the
+      // three from it went unnoticed exactly that way.
+      And('it ignores the task directories, the database and the bundle backups', () => {
+        const lines = readFileSync(familyIgnore(), 'utf8').split('\n')
+        expect(lines).toContain('.factory/tasks/')
+        expect(lines).toContain('.factory/state/')
+        expect(lines).toContain('.factory/.trash/')
+      })
+      // The whole reason this body is narrower than the one `createScope`
+      // writes: the directory may already be shared.
+      And('it leaves the definitions alone', () => {
+        const text = readFileSync(familyIgnore(), 'utf8')
+        expect(text.split('\n')).not.toContain('*')
+        expect(text).not.toContain('.factory/workflows')
+      })
+    })
+
+    RuleScenario('An ignore file already there is left exactly as it is', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a workflow whose step writes an artifact under a Factory directory', () =>
+        artifactAt(inFamilyDirectory('report'))(),
+      )
+      And('an ignore file somebody wrote by hand', () => {
+        mkdirSync(join(work, PRODUCT_FAMILY_DIR), { recursive: true })
+        writeFileSync(familyIgnore(), '# mine\n')
+      })
+      And("it is the task's only workflow", () => assign('review'))
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('the ignore file still says what they wrote', () =>
+        expect(readFileSync(familyIgnore(), 'utf8')).toBe('# mine\n'),
+      )
+    })
+
+    RuleScenario('An artifact outside a Factory directory writes no ignore file', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a workflow whose step writes an artifact somewhere of its own', () =>
+        artifactAt(join(work, 'elsewhere', 'report.md'))(),
+      )
+      And("it is the task's only workflow", () => assign('review'))
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('no ignore file was written', () => {
+        expect(existsSync(familyIgnore())).toBe(false)
+        expect(existsSync(join(work, 'elsewhere', '.gitignore'))).toBe(false)
+      })
     })
   })
 })

@@ -113,7 +113,7 @@ Undo it with `pnpm --filter @factory/cli unlink --global`.
 |---|---|
 | `~/.xaedalon/.factory/` | the user scope: `config.yaml`, `workflows/`, `phases/`, `agents/` |
 | `~/.xaedalon/.factory/state/factory.db` | tasks, runs, logs and evidence — inside the scope, not beside it |
-| `<repo>/.xaedalon/.factory/` | a project's own definitions, committed with the repository |
+| `<repo>/.xaedalon/.factory/` | a project's own definitions. Ignored by git when Factory created the directory; committed once somebody shares them — see [workflows.md](workflows.md) |
 | `FACTORY_HOME` | overrides the user scope — what the test suites use, and what a second installation on one machine would use |
 | `FACTORY_PORT`, `FACTORY_WEB_PORT` | the daemon's port and the dev server's; both default to loopback only |
 
@@ -121,6 +121,14 @@ Undo it with `pnpm --filter @factory/cli unlink --global`.
 directory, a project scope in a repository, and the database inside whichever scope is in force.
 The database follows the *writable* scope, so a daemon started inside a repository that has its own
 `.xaedalon/.factory/` keeps its database there rather than in your home.
+
+**And git is told to ignore all of it.** The `.xaedalon/.gitignore` Factory writes when it creates
+the directory contains `*`, so the directory hides itself and registering a project leaves your
+`git status` exactly as it was. `git status --ignored` is how you see what is there, and your
+editor's file tree probably hides it too. Two things follow: `git clean -xdf` deletes ignored
+files, which now means your definitions and the database if it lives in this repository — plain
+`git clean -fd` leaves them alone — and `git stash --all` takes them where `git stash -u` does not.
+[workflows.md](workflows.md) says how to share them instead.
 
 The exception is **worktrees**, and it is deliberate. A project that gives each task its own
 worktree puts them at the path that project stores — by default `.factory-worktrees/<project>`
@@ -158,7 +166,7 @@ That is the software. Your **data is a separate decision**, and Factory will not
 | | |
 |---|---|
 | the scope | `factory config path` says where it is. `rm -rf <scope>` takes your definitions, settings, accepted notice, any Pro licence, and every task and run — the database holds the only copy of run logs and evidence. |
-| a repository's `.xaedalon/` | your files. Some are committed: `git ls-files .xaedalon` says which, and they go with a commit, not an `rm`. |
+| a repository's `.xaedalon/` | your files. Usually **none** are committed, because Factory ignores the directory it creates: `git ls-files .xaedalon` says which are, if any, and those go with a commit rather than an `rm`. |
 | artifacts | `<repo>/.xaedalon/.factory/tasks/*/artifacts/` — what the agents wrote, and usually the reason to keep a run. |
 | worktrees | only if that project uses them, at the path it stores. `git worktree list`, then `git worktree remove` — never `rm -rf`, which leaves `.git/worktrees/` behind. The branches stay; they are your work. |
 

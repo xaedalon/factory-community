@@ -1,7 +1,7 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
-import type { Problem, Scheduling } from '@factory/core'
+import type { GitQuery, Problem, Scheduling } from '@factory/core'
 import { CapabilityHost } from '@factory/core'
 import {
   runDoctor,
@@ -54,6 +54,8 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       // scenario reports its recovered runs against this one's clean store,
       // which looks exactly like a rule misfiring.
       report = undefined
+      git = undefined
+      asked = []
       store = openStore({ file: ':memory:', migrations: MIGRATIONS })
       let ids = 0
       tasks = new TaskRepository({ db: store.db, now, newId: () => `task-${++ids}` })
@@ -86,6 +88,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
           projects,
           reconciliation: report ?? { closedRuns: [], blockedTasks: [] },
           workflow: (name) => facts.get(name),
+          // Undefined unless a scenario sets one, so every scenario above this
+          // rule is unaffected and the rule itself stays silent for them.
+          ...(git === undefined ? {} : { git }),
         }),
       )
     }
@@ -103,6 +108,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   }
 
   let report: ReturnType<typeof reconcile> | undefined
+  /** Set only by the scenarios about git; absent leaves that rule silent. */
+  let git: GitQuery | undefined
+  let asked: string[] = []
 
   const says = (text: string) => problems.some((problem) => problem.message.includes(text))
 
@@ -688,6 +696,179 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
       When('doctor runs', () => doctor(true))
       Then('nothing is reported about the graph', () => expect(graphProblems()).toHaveLength(0))
+    })
+  })
+  Rule('a Factory directory git has half an opinion about is reported', ({ RuleScenario }) => {
+    const gitProblems = () =>
+      problems.filter(
+        (problem) =>
+          problem.rule === 'doctor.productOutputTracked' ||
+          problem.rule === 'doctor.definitionsIgnored',
+      )
+
+    const projectIn = (repository: boolean) => (): void => {
+      const path = join(root, 'work')
+      if (repository) mkdirSync(join(path, '.git'), { recursive: true })
+      else mkdirSync(path, { recursive: true })
+      projects.add({ name: 'work', path, ...(repository ? {} : { usesWorktrees: false }) })
+    }
+
+    /**
+     * Git, as a lookup from argv to an answer.
+     *
+     * Keyed on the exact arguments so a change to the question is a change to
+     * the answer: drop a flag and the key stops matching, the rule goes quiet,
+     * and the scenario that depends on it fails rather than passing for the
+     * wrong reason.
+     */
+    const gitSays = (answers: Record<string, { code: number; stdout: string }>) => (): void => {
+      git = (_cwd, args) => {
+        asked.push(args.join(' '))
+        return answers[args.join(' ')]
+      }
+    }
+    const tracks = (...paths: string[]) => ({
+      code: 0,
+      stdout: paths.map((path) => `${path}\0`).join(''),
+    })
+    const LS = 'ls-files -z -- .xaedalon'
+    const CHECK = 'check-ignore --stdin -z -v'
+    const ignoredBy = (source: string, line: string, pattern: string) => ({
+      code: 0,
+      stdout: `${source}\0${line}\0${pattern}\0.xaedalon/.factory/workflows/a-new-one.workflow.yaml\0`,
+    })
+
+    RuleScenario('A project whose Factory directory is entirely ignored says nothing', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks nothing of its Factory directory', gitSays({ [LS]: tracks() }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A project whose definitions are committed and visible says nothing', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its definitions', () => undefined)
+      And('nothing ignores them', gitSays({
+        [LS]: tracks('.xaedalon/.factory/workflows/theirs.workflow.yaml'),
+        [CHECK]: { code: 1, stdout: '' },
+      }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A committed database is reported', ({ Given, And, When, Then }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its database', gitSays({
+        [LS]: tracks('.xaedalon/.factory/state/factory.db'),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then("doctor says a run's output is committed", () =>
+        expect(gitProblems().map((problem) => problem.rule)).toEqual([
+          'doctor.productOutputTracked',
+        ]),
+      )
+      And('it names the file', () => expect(says('state/factory.db')).toBe(true))
+      And('it says how to untrack it', () => expect(says('git rm -r --cached')).toBe(true))
+    })
+
+    RuleScenario('Committed task artifacts are reported', ({ Given, And, When, Then }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks two of its task artifacts', gitSays({
+        [LS]: tracks(
+          '.xaedalon/.factory/tasks/add-due-dates/artifacts/report/report.md',
+          '.xaedalon/.factory/tasks/add-due-dates/artifacts/report/versions/report-1.md',
+        ),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then("doctor says a run's output is committed", () =>
+        expect(gitProblems().map((problem) => problem.rule)).toEqual([
+          'doctor.productOutputTracked',
+        ]),
+      )
+    })
+
+    RuleScenario('Definitions committed into a directory that is now ignored is an error', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its definitions', () => undefined)
+      And('something ignores them', gitSays({
+        [LS]: tracks('.xaedalon/.factory/workflows/theirs.workflow.yaml'),
+        [CHECK]: ignoredBy('.gitignore', '4', '.xaedalon/'),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says a new workflow would never be seen', () => {
+        const found = gitProblems()
+        expect(found.map((problem) => problem.rule)).toEqual(['doctor.definitionsIgnored'])
+        expect(found[0]?.severity).toBe('error')
+      })
+      And('it names the file and line that hid them', () =>
+        expect(says('.gitignore:4:.xaedalon/')).toBe(true),
+      )
+    })
+
+    RuleScenario('A partial opt-in that re-includes the definitions is not reported', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its definitions', () => undefined)
+      And('something ignores them and then takes it back', gitSays({
+        [LS]: tracks('.xaedalon/.factory/workflows/theirs.workflow.yaml'),
+        [CHECK]: ignoredBy('.xaedalon/.gitignore', '2', '!.factory/workflows/'),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A machine with no git says nothing', ({ Given, And, When, Then }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git cannot be asked', () => {
+        git = undefined
+      })
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => {
+        expect(gitProblems()).toHaveLength(0)
+        // And says nothing *because it did not run*, rather than because it
+        // threw: a rule that throws is turned into a `doctor.ruleThrew`
+        // problem, which would satisfy the line above while being a bug.
+        expect(problems.filter((problem) => problem.rule === 'doctor.ruleThrew')).toHaveLength(0)
+      })
+    })
+
+    RuleScenario('A project that is not a repository is never asked about', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is not a repository, and a git that would answer', () => {
+        projectIn(false)()
+        // A git that would answer, so the only reason nothing is asked is the
+        // project not being a repository. Without this the scenario passed
+        // because the rule had returned at its first guard.
+        gitSays({ [LS]: tracks('.xaedalon/.factory/state/factory.db') })()
+      })
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+      // Not merely silent: never asked. A project that is not a repository
+      // has no question to answer, and spawning to find that out is waste.
+      And('git was not asked', () => expect(asked).toHaveLength(0))
     })
   })
 })

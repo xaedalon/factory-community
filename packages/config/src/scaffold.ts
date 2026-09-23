@@ -15,7 +15,8 @@ import type { ScopeChain } from './scopes.js'
  * worktrees, and the built-in `environment-create` cannot know what an
  * environment even is here. Both say so — `override: required` — and this is
  * the other half of that conversation: turning the setting on puts an editable
- * copy in the project, committed with the repository, instead of leaving
+ * copy in the project — ignored by git like the rest of that directory until
+ * somebody shares it — instead of leaving
  * someone to find out from a doctor warning what they were supposed to create.
  *
  * Anything already present is left alone. Re-running is therefore safe, which

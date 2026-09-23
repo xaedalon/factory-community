@@ -141,7 +141,8 @@ export function registerProjectRoutes(
         // into.
         //
         // Never over an existing one: the moment `config.yaml` is there the
-        // directory is theirs.
+        // directory is theirs — which is also why Factory never writes an
+        // ignore file over a scope somebody may already be sharing.
         const scope = createScope({ root: join(project.path, SCOPE_DIR), kind: 'project' })
 
         // Whatever it was registered with, it gets the files for.

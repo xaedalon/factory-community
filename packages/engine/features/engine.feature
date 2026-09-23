@@ -638,3 +638,40 @@ Feature: Turning a task into runs
       # is asked again.
       Then the gate was reached a second time
       And there are 2 runs
+
+  Rule: what a run produced is kept out of git, and nothing else is
+
+    A repository that grows a diff every time an agent thinks is a repository
+    nobody wants, so the first run to write an artifact leaves an ignore file
+    beside the directory it wrote into.
+
+    The narrow one. This fires for a family directory Factory did not create —
+    one from before it wrote an ignore file at all, or one somebody has already
+    shared — so it names what a run produced and nothing else. Hiding the whole
+    directory here would hide a team's next workflow from `git status` while
+    leaving the ones already committed in plain sight.
+
+    Scenario: A run writes an ignore file for the output it produced
+      Given a workflow whose step writes an artifact under a Factory directory
+      And it is the task's only workflow
+      And the task is queued
+      When the engine runs the task
+      Then the family directory has an ignore file
+      And it ignores the task directories, the database and the bundle backups
+      And it leaves the definitions alone
+
+    Scenario: An ignore file already there is left exactly as it is
+      Given a workflow whose step writes an artifact under a Factory directory
+      And an ignore file somebody wrote by hand
+      And it is the task's only workflow
+      And the task is queued
+      When the engine runs the task
+      Then the ignore file still says what they wrote
+
+    Scenario: An artifact outside a Factory directory writes no ignore file
+      Given a workflow whose step writes an artifact somewhere of its own
+      And it is the task's only workflow
+      And the task is queued
+      When the engine runs the task
+      # Nothing to ignore on somebody's behalf: this is a directory they chose.
+      Then no ignore file was written

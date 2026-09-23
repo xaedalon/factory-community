@@ -69,6 +69,24 @@ Feature: The factory command
     When I run "doctor"
     Then the output reports the number of rules run
 
+  Scenario: doctor says what it could not check without a daemon
+    When I run "doctor"
+    # Half the rules need a database this process does not own — the ones about
+    # tasks, worktrees, and what git can see of a project. They were registered
+    # nowhere this command could reach, so nothing printed them at all.
+    Then the output says the running checks were not run
+
+  Scenario: doctor adds what the daemon found
+    Given a daemon reporting a problem of its own
+    When I run "doctor"
+    Then the output carries the daemon's problem
+    And it does not say the running checks were missed
+
+  Scenario: a problem both halves found is reported once
+    Given a daemon reporting a problem this installation also has
+    When I run "doctor"
+    Then the problem appears once
+
   Scenario: doctor reports a definition that does not validate
     Given the project scope defines a broken workflow "oops"
     When I run "doctor"

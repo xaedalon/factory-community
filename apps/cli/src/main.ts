@@ -392,7 +392,7 @@ async function dispatch(
       return setupCommand(daemon ?? createDaemonClient(context.env), context, style)
 
     case 'doctor':
-      return inspect.doctor(context, style)
+      return inspect.doctor(daemon ?? createDaemonClient(context.env), context, style)
 
     case 'capabilities':
       return inspect.capabilities(context, style)

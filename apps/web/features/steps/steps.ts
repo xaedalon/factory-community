@@ -1615,6 +1615,10 @@ When('I add a project at a repository with no Factory directory', async ({ world
   await page.getByTestId('save-project').click()
 })
 
+Then('the page says git ignores all of it', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded-hidden')).toContainText('git status')
+})
+
 Then('the page lists the worktree definitions it copied in', async ({ page }) => {
   await expect(page.getByTestId('scaffolded')).toContainText('worktree-create')
 })

@@ -214,18 +214,52 @@ Factory is one of a family of Xaedalon products, so its files live under
 `.factory` path is **still read** — `factory doctor` names it and the move that
 fixes it, and nothing is relocated for you.
 
-Commit `.xaedalon/.factory`; what runs produce lives under `tasks/` beside it and
-is ignored by the `.gitignore` `factory init` writes.
+**Always at the project, never in a worktree.** A task's artifacts, the dated
+copies of them and this ignore file are all written under the project's own
+directory, whatever workspace the steps ran in — a worktree is deleted when the
+work in it ends, and an artifact that disappears with the work it describes is
+no better than no artifact. Worktrees themselves live *outside* the repository,
+beside it, for the same reason a scope discovery must not climb out of one.
+What does end up in a worktree is whatever the steps write there, which is a
+project's own business: an environment built relative to the working directory
+lives and dies with it, deliberately. The exception is `factory run`, which has
+no project and so writes its artifacts beside the workspace you give it —
+point it at a worktree and its output goes with that worktree.
+
+`.xaedalon/` is ignored from the moment Factory creates it. `factory init` — and registering a
+project on the board, which does the same thing — writes `.xaedalon/.gitignore` containing `*`, so
+the directory and that file with it are invisible to git and adding a project changes nothing in
+`git status`. Most repositories that exist are not using Factory, and trying it on your own machine
+should not turn into a commit.
+
+**Sharing is one edit**, and that file says how: replace the `*` with the three lines that ignore
+only what a run produced — `.factory/tasks/`, `.factory/state/`, `.factory/.trash/` — and commit
+`.xaedalon`. Deleting the file does the same thing; Factory writes the smaller version back the
+next time one of its runs produces an artifact. A repository that already shares its definitions is
+left exactly as it is: Factory never writes an ignore file over a directory it did not create.
+
+Two consequences of ignoring them are worth knowing. `git clean -xdf` deletes ignored files, which
+now means your definitions and the database if it lives in this repository — plain `git clean -fd`
+leaves them alone. And your editor probably hides ignored paths in its file tree, so the notice the
+board shows after registering a project may be the only place you see the files named.
 
 The same name in two scopes is not an error: the higher one wins, and the fact that it hides another
-is reported by `factory why <name>` and by `doctor`. Commit `.xaedalon/.factory` and the workflow travels
-with the repository.
+is reported by `factory why <name>` and by `doctor`. Share `.xaedalon/.factory` and the workflow
+travels with the repository.
 
 **Travels, and arrives by itself.** A chain is resolved per *project*, from the path that project
 points at — not from the directory the daemon was started in. So adding a repository as a project is
 the whole step: its committed workflows, phases and agents are available to its tasks immediately,
 with nothing to import, and `factory workflow list` prints `project` beside each. A repository that
 gains a scope later is picked up on the next request rather than needing a restart.
+
+The corollary of the default: a clone has whatever was committed and nothing else. A project whose
+`.xaedalon/` is still ignored exists on one machine. The same goes for a **git worktree**, which
+materialises tracked files only — so a worktree of a project that has not shared its definitions
+contains no `.xaedalon/` at all. That breaks no run, because a project's chain is resolved from the
+path the *project* points at rather than from the worktree, but `factory run` invoked inside such a
+worktree finds no project scope.
+
 [`xaedalon/sample-todolist`](https://github.com/xaedalon/sample-todolist) is a repository that does
 this — clone it, add it, and its five-workflow pipeline is there.
 

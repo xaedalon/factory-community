@@ -260,6 +260,58 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the output reports the number of rules run', () => expect(output).toContain('rule(s)'))
   })
 
+  Scenario('doctor says what it could not check without a daemon', ({ When, Then }) => {
+    When('I run "doctor"', () => invoke('doctor'))
+    Then('the output says the running checks were not run', () =>
+      expect(output).toContain('need a running daemon'),
+    )
+  })
+
+  Scenario('doctor adds what the daemon found', ({ Given, When, Then, And }) => {
+    Given('a daemon reporting a problem of its own', () => {
+      daemon = fakeDaemon(() => ({
+        problems: [
+          {
+            severity: 'warning',
+            message: 'Project "work" has Factory\'s own output committed to git.',
+            rule: 'doctor.productOutputTracked',
+          },
+        ],
+      }))
+    })
+    When('I run "doctor"', () => invoke('doctor'))
+    Then("the output carries the daemon's problem", () =>
+      expect(output).toContain('committed to git'),
+    )
+    And('it does not say the running checks were missed', () =>
+      expect(output).not.toContain('need a running daemon'),
+    )
+  })
+
+  Scenario('a problem both halves found is reported once', ({ Given, When, Then }) => {
+    Given('a daemon reporting a problem this installation also has', () => {
+      workflow(projectScope, 'dangling', 'name: dangling\nphases: [nowhere]\n')
+      // Word for word what the local rule produces, because that is what the
+      // daemon running the same rule over its own chain would send back. An
+      // approximation here would dedupe nothing and the scenario would pass
+      // without the thing it is about ever happening.
+      daemon = fakeDaemon(() => ({
+        problems: [
+          {
+            severity: 'error',
+            message:
+              'Workflow "dangling" names a phase "nowhere" that does not exist in any scope.',
+            rule: 'doctor.missingPhase',
+          },
+        ],
+      }))
+    })
+    When('I run "doctor"', () => invoke('doctor'))
+    Then('the problem appears once', () =>
+      expect(output.split('does not exist in any scope').length - 1).toBe(1),
+    )
+  })
+
   Scenario('doctor reports a definition that does not validate', ({ Given, When, Then, And }) => {
     Given('the project scope defines a broken workflow "oops"', () =>
       workflow(projectScope, 'oops', 'name: oops\nmode: banana\nphases: []\n'),

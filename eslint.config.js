@@ -101,6 +101,14 @@ export default tseslint.config(
     rules: { 'no-restricted-syntax': 'off' },
   },
   {
+    // Maintenance scripts, which are entry points: they are the process, and
+    // `console` is how they report. Run by hand and by `pnpm mutate`, never
+    // imported by anything.
+    files: ['scripts/**/*.mjs', 'scripts/**/*.js'],
+    languageOptions: { globals: { console: 'readonly', process: 'readonly' } },
+    rules: { 'no-restricted-syntax': 'off' },
+  },
+  {
     // Build and test tooling, which runs before any of this exists: a vite
     // config has no runtime to receive an environment from.
     files: ['**/*.config.ts', '**/*.config.js'],

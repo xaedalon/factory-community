@@ -31,6 +31,21 @@ Feature: The task board
     And I go back to the board
     Then "Just an idea" does not offer "Queue"
 
+  Scenario: A finished task says which workflow ran
+    Given the task "Add due dates" exists on "hello"
+    And it has been run
+    When I open the tasks page
+    # Every `done` row drew an em dash, because the *current* workflow is the
+    # next one and a finished task has none — so the column read as missing
+    # data on exactly the rows where the answer is most obvious.
+    Then the workflow column for "Add due dates" says "hello"
+
+  Scenario: With no repository the board says what to add first
+    Given no repositories are registered
+    When I open the tasks page
+    Then the board asks for a repository
+    And it offers to add one
+
   Scenario: The summary counts what is there
     Given the task "Add due dates" exists on "hello"
     When I open the tasks page

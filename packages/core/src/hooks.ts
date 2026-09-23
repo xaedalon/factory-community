@@ -61,8 +61,19 @@ export interface DefinitionWrite {
 }
 
 /**
- * Every hook, keyed by name. Later steps add entries here -- `beforeStepRun`
- * arrives with the runner in step 15, once there is a Step type to pass.
+ * Every hook, keyed by name.
+ *
+ * These two, and deliberately not a third. This said `beforeStepRun` arrives
+ * with the runner "once there is a Step type to pass"; there has been one for
+ * several increments, and the entry never arrived — a promise in a comment is
+ * the same defect as a field that validates and lies, only cheaper to make.
+ *
+ * It is not here because nothing would call it. What a step may reach is
+ * decided by its execution profile, which the plan carries and the runner
+ * enforces before a process exists — a seam that already runs, rather than one
+ * waiting for its first consumer. A hook that could veto a command about to be
+ * spawned is the natural home for a future sandbox capability, and the right
+ * time to add it is when that capability exists to use it.
  */
 export interface HookSignatures {
   validateDefinition: CollectHook<DefinitionUnderValidation, Problem>

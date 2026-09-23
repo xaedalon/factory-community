@@ -247,6 +247,7 @@ export default {
 
   async startDaemon(): Promise<void> {
     if (this.disabled || this.#daemon !== undefined) return
+    await refuseIfTaken()
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -347,6 +348,34 @@ export default {
     rmSync(this.root, { recursive: true, force: true })
     await waitForPortFree()
   }
+}
+
+/**
+ * Refuse to run against a daemon this suite did not start.
+ *
+ * `FACTORY_PORT` lets a run avoid a real Factory on 7317; it did not stop one
+ * *attaching* to whatever answers. A scenario that ran against a developer's
+ * own installation is how that was found: it passed and failed against their
+ * data, and the only clue was 404s for tasks the suite had never created.
+ *
+ * Avoiding a collision is not the same as refusing one, and the difference
+ * matters most on the default ports, which is where somebody who has not read
+ * this file will be.
+ */
+async function refuseIfTaken(): Promise<void> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/health`, {
+      signal: AbortSignal.timeout(1_000),
+    })
+    if (!response.ok) return
+  } catch {
+    // Nothing is listening, which is what this wants.
+    return
+  }
+  throw new Error(
+    `Something is already serving 127.0.0.1:${PORT}, and this suite did not start it. ` +
+      `Stop it, or run on ports of your own: FACTORY_PORT=7417 FACTORY_WEB_PORT=5417 pnpm test:e2e`,
+  )
 }
 
 async function waitForHealth(): Promise<void> {

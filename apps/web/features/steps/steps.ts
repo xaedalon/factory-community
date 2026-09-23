@@ -655,7 +655,37 @@ Given(
 
 Given('the task {string} exists on {string}', async ({ world }, name: string, workflow: string) => {
   await world.startDaemon()
-  await world.createTask(name, [workflow])
+  lastTaskId = await world.createTask(name, [workflow])
+})
+
+/** Kept so a following step can queue the task this one made. */
+let lastTaskId = ''
+
+/**
+ * Queued and finished, not merely settled.
+ *
+ * `runTask` returns on `done` *or* `blocked`, and a blocked task still has
+ * every workflow ticked — so a scenario about what a finished task shows would
+ * pass against one that failed to start at all.
+ */
+Given('it has been run', async ({ world }) => {
+  await world.runTask(lastTaskId)
+  const response = await fetch(world.api(`/api/tasks/${lastTaskId}`))
+  const body = (await response.json()) as { task: { state: string } }
+  expect(body.task.state).toBe('done')
+})
+
+Then('the workflow column for {string} says {string}', async ({ page }, name: string, workflow: string) => {
+  await expect(page.getByTestId(`workflow-${name}`)).toHaveText(workflow)
+})
+
+Then('the board asks for a repository', async ({ page }) => {
+  await expect(page.getByTestId('tasks-need-project')).toContainText('No repositories yet')
+})
+
+Then('it offers to add one', async ({ page }) => {
+  await page.getByTestId('tasks-add-project').click()
+  await expect(page).toHaveURL(/\/projects\/new$/)
 })
 
 When('I open the tasks page', async ({ world, page }) => {

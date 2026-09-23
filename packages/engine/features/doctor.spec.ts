@@ -619,4 +619,75 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('nothing is out of order', () => expect(outOfOrder()).toEqual([]))
     })
   })
+  Rule('a task waiting for something that can never finish is reported', ({ RuleScenario }) => {
+    const graphProblems = () => problems.filter((problem) => problem.rule === 'doctor.dependencyDead')
+    const ids = new Map<string, string>()
+    const waitingPair = (): void => {
+      const build = tasks.create({ name: 'Build', workflows: ['hello'], projectId: home() })
+      const ship = tasks.create({ name: 'Ship it', workflows: ['hello'], projectId: home() })
+      tasks.dependOn(ship.id, build.id)
+      ids.set('Build', build.id)
+      ids.set('Ship it', ship.id)
+    }
+    const cancelled = (): void => {
+      tasks.act(ids.get('Build') as string, 'cancel', { reason: 'Not now.' })
+    }
+
+    RuleScenario('A draft waiting on a cancelled task is reported', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      And('"Build" was cancelled', cancelled)
+      When('doctor runs', () => doctor(true))
+      Then('doctor says "Ship it" is waiting for something that cannot finish', () =>
+        expect(graphProblems()).toHaveLength(1),
+      )
+      And('it names "Build" and why', () => {
+        expect(says('Build')).toBe(true)
+        expect(says('was cancelled')).toBe(true)
+      })
+    })
+
+    RuleScenario('Waiting for something still to run is not reported', ({ Given, When, Then }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      When('doctor runs', () => doctor(true))
+      Then('nothing is reported about the graph', () => expect(graphProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('Waiting for something already done is not reported', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      And('"Build" is done', () => {
+        tasks.act(ids.get('Build') as string, 'mark_done')
+      })
+      When('doctor runs', () => doctor(true))
+      Then('nothing is reported about the graph', () => expect(graphProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A task already blocked is left to the rule that covers it', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      And('"Build" was cancelled', cancelled)
+      And('"Ship it" is blocked', () => {
+        // Queued first, because `block` is reachable from `queued` and from
+        // `running` — which is exactly how the scheduler blocks a dependent
+        // whose blocker turned out to be dead.
+        tasks.act(ids.get('Ship it') as string, 'queue')
+        tasks.act(ids.get('Ship it') as string, 'block', { reason: 'Waiting on Build.' })
+      })
+      When('doctor runs', () => doctor(true))
+      Then('nothing is reported about the graph', () => expect(graphProblems()).toHaveLength(0))
+    })
+  })
 })

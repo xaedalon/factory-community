@@ -1,5 +1,6 @@
 import type { Problem } from '@factory/core'
 import {
+  dependencyStatus,
   isSettled,
   needsOutOfOrder,
   nextEntry,
@@ -344,8 +345,58 @@ export function runningDoctorRules(
     },
   }
 
+  /**
+   * A task waiting for something that can never finish.
+   *
+   * The scheduler already blocks a *queued* dependent whose blocker is dead,
+   * with the reason, which `doctor.taskBlocked` repeats. A task that has not
+   * been queued yet says nothing at all — so a plan assembled in advance can
+   * sit there with an edge to a task somebody cancelled last week, and the
+   * first anybody hears of it is the batch refusing to start it.
+   *
+   * Only edges that can never be satisfied. Waiting for something that has not
+   * run yet is what waiting is for, and reporting that would make doctor's
+   * output a list of everything in progress.
+   *
+   * A task already `blocked` is left alone: `doctor.taskBlocked` says so, with
+   * the reason it was blocked for, and two rules about one task is noise.
+   */
+  const dependencies: DoctorRuleCapability = {
+    id: 'tasks-waiting-on-a-dead-blocker',
+    summary: 'Tasks whose blockers can never finish.',
+    check() {
+      const problems: Problem[] = []
+      const edges = tasks.dependencies()
+      if (edges.length === 0) return problems
+
+      const facts = new Map<string, ReturnType<TaskRepository['blocker']>>()
+      const factsOf = (id: string) => {
+        if (!facts.has(id)) facts.set(id, tasks.blocker(id))
+        return facts.get(id)
+      }
+
+      for (const task of tasks.list()) {
+        if (isSettled(task.state) || task.state === 'blocked') continue
+        const status = dependencyStatus(task.id, edges, factsOf)
+        if (status.state !== 'dead') continue
+        const because = status.dead
+          .map((entry) => `"${factsOf(entry.id)?.name ?? entry.id}" ${entry.because}`)
+          .join(' and ')
+        problems.push({
+          severity: 'warning',
+          message:
+            `Task "${task.name}" is waiting for something that cannot finish: ${because}. ` +
+            `It will be blocked rather than started when the queue reaches it.`,
+          rule: 'doctor.dependencyDead',
+        })
+      }
+      return problems
+    },
+  }
+
   return [
     recovered,
+    dependencies,
     stuck,
     outOfOrder,
     missing,

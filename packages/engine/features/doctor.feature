@@ -198,3 +198,42 @@ Feature: Doctor, for an installation that is running
       And a task assigned only "verify" that is already done
       When doctor runs
       Then nothing is out of order
+
+  Rule: a task waiting for something that can never finish is reported
+
+    The scheduler already blocks a *queued* task whose blocker is dead, with
+    the reason — that is what `doctor.taskBlocked` repeats. A task that has not
+    been queued yet says nothing at all, so a plan assembled in advance can sit
+    there with an edge to a task somebody cancelled last week, and the first
+    anybody hears of it is when the batch refuses to start it.
+
+    Only the edges that can never be satisfied. Waiting for something that has
+    not run yet is what waiting is for, and reporting it would make doctor's
+    output a list of everything in progress.
+
+    Scenario: A draft waiting on a cancelled task is reported
+      Given a task "Ship it" waiting for "Build" in the same project
+      And "Build" was cancelled
+      When doctor runs
+      Then doctor says "Ship it" is waiting for something that cannot finish
+      And it names "Build" and why
+
+    Scenario: Waiting for something still to run is not reported
+      Given a task "Ship it" waiting for "Build" in the same project
+      When doctor runs
+      Then nothing is reported about the graph
+
+    Scenario: Waiting for something already done is not reported
+      Given a task "Ship it" waiting for "Build" in the same project
+      And "Build" is done
+      When doctor runs
+      Then nothing is reported about the graph
+
+    Scenario: A task already blocked is left to the rule that covers it
+      Given a task "Ship it" waiting for "Build" in the same project
+      And "Build" was cancelled
+      And "Ship it" is blocked
+      When doctor runs
+      # `doctor.taskBlocked` says so already, with the reason it was blocked
+      # for, and two rules saying the same thing about one task is noise.
+      Then nothing is reported about the graph

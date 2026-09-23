@@ -19,7 +19,7 @@ This document is the source of truth, written as the project is built.
 point a task at a repository, queue it, and the daemon gives it a worktree, runs the agents, keeps
 what they printed and what they produced, stops at the gate you asked for, and continues when you
 approve. From a terminal, from the board, or from Pro's desktop app — the same API either way.
-**6,975 Gherkin steps green below the browser** across 51 feature files, 185 of them in a real
+**6,981 Gherkin steps green below the browser** across 51 feature files, 185 of them in a real
 browser, and smoke runs against the real agent CLIs. Every one of those runs in CI, on macOS and
 Linux, alongside a job that installs from a clean clone and asks the daemon for a page.
 
@@ -1032,6 +1032,7 @@ condition it was about, and one could not tell "the rule said nothing" from
 | 99 | **Run ancestry** — migration 19, and the four names stamped into an agent's environment | ✅ done |
 | 100 | **Bounded orchestration** — depth, fan-out, self-orchestration, approval separation | ✅ done |
 | 101 | **`REQUESTABLE_ACTIONS`** — core publishes which of its moves a client may ask for | ✅ done |
+| 102 | **`factory-mcp-install` and `factory-mcp-uninstall`** — runbooks that ask where before writing | ✅ done |
 
 The request was a 48-section implementation standard for adding a Model Context
 Protocol server. Most of it survives; three things in it do not fit this
@@ -1150,7 +1151,41 @@ about the real thing rather than because a rule was:
   code list entirely — a run that had asked for eleven tasks was told `FACTORY_ERROR`. The list is
   spread from core's now.
 
-**Forty-three mutations broken and watched to fail** across the eight commits.
+**Two runbooks, because a config file is not a procedure.** `docs/mcp.md` gives a person the two
+lines to paste; `factory-mcp-install` and `factory-mcp-uninstall` give a coding agent the steps,
+including the question this whole pair exists to ask — everywhere on this machine, or one
+repository — asked before anything is written, defaulting to everywhere. They configure whichever
+agents Factory says can consume an MCP server, read from `factory provider list --json` rather than
+a list kept in the prose, so a provider added later is covered without an edit.
+
+The vocabulary needed guarding. Factory's scopes are `project → user → builtin` and decide which
+workflows a project gets; a coding agent's scopes decide where *it* keeps a list of servers. An
+uninstall runbook that reasoned from "installed at user level" could go looking in
+`~/.xaedalon/.factory`, which is the one directory `factory-uninstall` exists to protect. So neither
+runbook says "user level": they name the file, and each says the distinction once at the top. The
+glossary's three meanings of "tool" is the same device.
+
+**Following them found four things the writing had got wrong**, which is the argument for following
+a runbook rather than reviewing it:
+
+- The Copilot CLI does **not** read a workspace `.mcp.json`. Its own help lists one as a
+  configuration source, and `copilot mcp list` reports neither it nor `.github/mcp.json`, in either
+  that file's shape or Copilot's own. "One file, both clients" was written, measured, and deleted.
+- `claude mcp remove factory` with no scope **refuses** when two scopes hold it, naming both and
+  changing nothing. The runbook had said it takes it out of whichever one has it, which is true only
+  when one does.
+- Claude Code edits a shared `.mcp.json` itself and leaves every other server in it alone — so the
+  instruction to inspect and hand-edit was replaced by one that says to use the CLI and check the
+  result. Removing the last server leaves `{"mcpServers": {}}` behind rather than deleting the file.
+- The two clients disagree about a second removal: Claude says so and carries on, Copilot answers
+  `Error: Server "factory" not found.` An agent that treated that as a fault would go looking for
+  one.
+
+Verified end to end against both real clients in an isolated `HOME`, against a throwaway daemon on
+its own port: `claude mcp list` reported `✔ Connected` for the `node <checkout>/…/bin.js mcp` form
+carrying `FACTORY_PORT`, and `copilot mcp list` named it under *User servers*.
+
+**Forty-four mutations broken and watched to fail** across the ten commits.
 Three found scenarios that passed for the wrong reason, and all three are the
 same shape — an assertion that counted rather than identified. A frame split
 across two chunks was asserted by counting frames, and a server that threw the

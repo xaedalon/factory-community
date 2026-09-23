@@ -37,6 +37,13 @@ If `factory` is not on your `PATH`, give the full path to `apps/cli/dist/bin.js`
 opening one database is how a run in flight gets marked failed while its agent keeps working. If
 nothing answers, every tool says so and tells the agent to ask you to run `factory-daemon`.
 
+Or have your agent do all of it: **`/factory-mcp-install`** in Claude Code, "add Factory to my MCP
+servers" in Copilot. The runbook is
+[`../skills/factory-mcp-install/SKILL.md`](../skills/factory-mcp-install/SKILL.md) — it asks whether
+you want Factory everywhere or in one repository, checks the daemon and the port first, and says
+what it wrote where. [`../skills/factory-mcp-uninstall/SKILL.md`](../skills/factory-mcp-uninstall/SKILL.md)
+takes it back out.
+
 ## What the agent can do
 
 | | |
@@ -126,8 +133,10 @@ Every refusal carries a code and a sentence. The ones worth knowing:
 | `RECURSION_LIMIT` · `FAN_OUT_LIMIT` | Work started work too deep, or too wide. |
 | `SELF_ORCHESTRATION_BLOCKED` | An agent tried to act on the task it is running inside. |
 
-`factory doctor` is the other end: it says whether a daemon is answering and what this directory
-resolves to.
+**`factory setup` is the command to reach for**, not `factory doctor`. It always ends by saying
+whether it could reach a daemon. `doctor` mentions one only when it has other problems to report:
+with nothing else wrong it prints `No problems found.` and returns, so it cannot be relied on for
+this. `factory config path` says where Factory's own files are.
 
 **If the client reports a protocol error on startup**, check that nothing else is writing to stdout
 — `factory mcp` writes protocol frames there and nothing else, and a shell profile that prints a

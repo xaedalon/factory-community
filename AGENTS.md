@@ -27,6 +27,14 @@ Two things it will not let you do, before you try: it will not accept the securi
 that is a person's, and the refusal says so — and it will not approve anything, because an
 approval an agent can give itself is not a gate.
 
+Setting that up is a runbook of its own:
+[`skills/factory-mcp-install/SKILL.md`](skills/factory-mcp-install/SKILL.md). It asks one question
+before it writes anything — everywhere on this machine, or only in one repository — and defaults to
+everywhere. A repository install writes a `.mcp.json` that will appear in somebody's `git status`,
+which it says before writing rather than after.
+[`skills/factory-mcp-uninstall/SKILL.md`](skills/factory-mcp-uninstall/SKILL.md) is the other
+direction, and removes no Factory data at all.
+
 ## Removing Factory
 
 Read [`skills/factory-uninstall/SKILL.md`](skills/factory-uninstall/SKILL.md) and follow it exactly.

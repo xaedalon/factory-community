@@ -23,6 +23,11 @@ resolves to, the workspace boundary, and a task's own list of what it will accep
 [`docs/mcp.md`](docs/mcp.md) is the feature; [`docs/proposals/mcp.md`](docs/proposals/mcp.md) is
 what it is built against, including what is deliberately left out.
 
+*Or let your agent set it up:* **`/factory-mcp-install`** in Claude Code, "add Factory to my MCP
+servers" in Copilot. It asks whether you want Factory everywhere on this machine or only in one
+repository — everywhere by default — checks the daemon and its port first, and says what it wrote
+where. `/factory-mcp-uninstall` takes it back out, and removes no Factory data at all.
+
 *What it cannot do:* choose a profile — there is no parameter for one — accept the disclaimer for
 you, or approve anything. `approve` and `reject` are not offered at all, because Factory cannot
 tell your own session from an agent acting unasked inside it, and an approval an agent can give

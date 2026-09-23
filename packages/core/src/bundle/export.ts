@@ -131,7 +131,12 @@ export function buildBundle(options: ExportOptions): ExportResult {
       }
     }
 
+    // The two edges a workflow has to another workflow. `on_fail` was followed
+    // from the start; `needs` was not, so exporting a pipeline of five was five
+    // exports and a merge by hand — and the merge is where a mistake lands
+    // unnoticed. The visited set above makes a cycle in either free.
     if (workflow.onFail !== undefined) queue.push(workflow.onFail)
+    for (const needed of workflow.needs) queue.push(needed)
   }
 
   if (problems.some((problem) => problem.severity === 'error')) return { problems }

@@ -21,9 +21,13 @@ approvals or accountability model.
 >   what it may not. An MCP-created run is subject to all of it
 > - [`../../PROJECT.md`](../../PROJECT.md) — the increment record, including what this cost
 >
-> Sections 1–14, 16–18 and 21–33 are implemented. **Not implemented:** an MCP capability policy
-> (§15), MCP Resources (§19), MCP Prompts (§20), `factory_delegate` (§35) and Streamable HTTP
-> (§36).
+> **Implemented:** sections 1–14, 16–18 and 21–33 — the transport, the packaging, project
+> resolution, the tool catalogue, bounded orchestration, the separation of authority, the profile
+> and workspace guarantees, the errors, the tests and the documentation.
+>
+> **Not implemented, each with a section saying what it is waiting on:** client-declared workspace
+> roots (§5), an MCP capability policy (§15), MCP Resources (§19), MCP Prompts (§20),
+> `factory_delegate` (§35) and Streamable HTTP (§36).
 
 ---
 
@@ -159,10 +163,15 @@ claude
 Priority:
 
 1. an explicit `project` — id, name or path — in the tool call;
-2. the client's declared workspace roots, from `initialize`;
-3. the working directory `factory mcp` was started in;
-4. longest-prefix ancestor match;
-5. an ambiguity error naming the candidates.
+2. the working directory `factory mcp` was started in;
+3. longest-prefix ancestor match;
+4. an ambiguity error naming the candidates.
+
+**Client-declared workspace roots are not consulted, and that is deferred rather than refused.**
+Reading them means the server making a `roots/list` request *of the client*, which is the only
+thing in this surface that needs server-to-client correlation — and a stdio server is started in
+the directory the person is working in, so it buys nothing today. It is worth doing the first time
+a client turns up whose roots differ from its working directory.
 
 So:
 
@@ -344,13 +353,21 @@ This flow must fail:
 Agent asks Factory for work  →  the run parks at an approval gate  →  the same agent approves it
 ```
 
-The rules:
+The rules, in the daemon, for every client that carries an initiator:
 
 - an initiator may not approve the task it is running inside;
 - an initiator may not approve a task it created;
 - nor any task whose creator is in its own ancestry chain;
-- an approval a person must give stays with the person;
 - MCP never creates an approval bypass.
+
+**And over MCP, `approve` and `reject` are not offered at all.** That is stronger than the rules
+above, and it is the only form that does not depend on knowing who is typing: Factory can tell an
+agent it launched from a person's own session — the first carries the run it is inside, the second
+carries nothing — but it cannot tell a person's session from an agent acting unasked *in* that
+session, because they are the same process with the same environment.
+
+`factory_approval_list` reports what is waiting. A person answers it, at the board or from a
+terminal.
 
 This is why the initiator is recorded on the **task**, not only on the run.
 
@@ -537,10 +554,14 @@ factory mcp          # serve, over stdio
 factory doctor       # includes the MCP checks
 ```
 
-`factory doctor` gains what it can honestly check: whether a daemon answers, whether the working
-directory resolves to a project, and what the orchestration limits are. A separate
-`factory mcp doctor` was considered and refused — one command that tells you what state your
-installation is in is better than two.
+`factory doctor` already carries the only MCP-relevant thing that is a *problem*: whether a daemon
+is answering, which it says when it cannot merge the running checks. Nothing else here has a
+failure state — a directory that resolves to no project is the ordinary case in a home directory,
+and an orchestration limit is a setting rather than a fault.
+
+So no MCP doctor rule ships, and a separate `factory mcp doctor` was considered and refused: one
+command that tells you what state your installation is in is better than two, and a check that
+fires on normal use is a check people learn to ignore.
 
 ---
 

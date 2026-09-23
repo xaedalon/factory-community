@@ -17,6 +17,16 @@ Two of its rules before you begin: **explain the whole plan to the person before
 and **never accept Factory's security disclaimer for them**. Nothing runs until a human has read
 what an agent run can reach, and that gate exists for every client, including you.
 
+## Driving Factory
+
+Factory serves the Model Context Protocol, so you can operate it rather than only install it:
+resolve the project you are standing in, see what it can run, create a task, queue it, follow the
+run. Point your client at `factory mcp` and read [`docs/mcp.md`](docs/mcp.md).
+
+Two things it will not let you do, before you try: it will not accept the security disclaimer —
+that is a person's, and the refusal says so — and it will not approve anything, because an
+approval an agent can give itself is not a gate.
+
 ## Removing Factory
 
 Read [`skills/factory-uninstall/SKILL.md`](skills/factory-uninstall/SKILL.md) and follow it exactly.

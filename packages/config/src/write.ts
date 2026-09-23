@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Agent, CapabilityLookup, Phase, Problem, Workflow } from '@factory/core'
+import type { Agent, CapabilityLookup, HookRegistry, Phase, Problem, Workflow } from '@factory/core'
 import {
   parseAgentFile,
   parsePhaseFile,
@@ -33,6 +33,16 @@ export function etagOf(raw: string): string {
 export interface WriteRequest {
   readonly chain: ScopeChain
   readonly host: CapabilityLookup
+  /**
+   * The hooks a plugin may have registered, if this caller has any.
+   *
+   * Optional, and absence means no hooks run — the same degrade-by-absence as
+   * everything else here, and what lets a bundle be written without a host
+   * that loaded plugins. `CapabilityLookup` deliberately does not carry them:
+   * a capability is a thing to call, a hook is a thing that gets called, and
+   * only a caller that owns the host has the second.
+   */
+  readonly hooks?: HookRegistry
   readonly kind: DefinitionKind
   readonly definition: Workflow | Phase | Agent
   readonly scope?: ScopeKind
@@ -60,11 +70,44 @@ interface DefinitionHandler {
   read(text: string): { problems: readonly Problem[] }
 }
 
-export function writeDefinition(request: WriteRequest): WriteOutcome {
-  const { chain, kind, definition } = request
+export async function writeDefinition(request: WriteRequest): Promise<WriteOutcome> {
+  const { chain, kind } = request
   const target = writeTarget(chain, request.scope)
-  const file = definitionPath(target, kind, definition.name)
+  const file = definitionPath(target, kind, request.definition.name)
   const exists = existsSync(file)
+
+  // The two hooks the plugin SDK has always declared, run where every write
+  // passes through — the API, the CLI, a bundle import and scaffolding a
+  // project all get the same answer. They were declared, documented, counted
+  // in conformance reports and never called once.
+  //
+  // Validation first, because a definition somebody's plugin considers invalid
+  // should be refused before anything is asked to adjust it. Then the write
+  // hook, which may replace the definition or refuse outright. What it returns
+  // is still read back below: a hook that adjusts a definition into something
+  // Factory cannot load is refused by the same check that catches a bad client.
+  let definition = request.definition
+  if (request.hooks !== undefined) {
+    const problems = (
+      await request.hooks.collect('validateDefinition', {
+        kind,
+        name: definition.name,
+        definition,
+        file,
+      })
+    ).filter((problem) => problem.severity === 'error')
+    if (problems.length > 0) return { status: 'refused', problems }
+
+    const outcome = await request.hooks.transform('beforeDefinitionWrite', {
+      kind,
+      name: definition.name,
+      definition,
+      scope: target.kind,
+      file,
+    })
+    if (outcome.action === 'reject') return { status: 'refused', problems: outcome.problems }
+    definition = outcome.value.definition as typeof definition
+  }
 
   /**
    * How each kind is written and read back.

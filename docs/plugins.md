@@ -25,8 +25,19 @@ export default {
   `provider`, `doctor-rule`, `setup-step`, `terminal` and `task-tool` are the ones Factory looks
   for, and nothing stops a plugin defining its own kind for another plugin to consume. A capability
   id must match `/^[a-z][a-z0-9-]*$/`: they appear in YAML and in URLs.
-- **`hook(name, fn)`** — take part in a decision. There are exactly two: `validateDefinition` and
-  `beforeDefinitionWrite`.
+- **`hook(name, fn)`** — take part in a decision. There are exactly two, and both run on the one
+  path every definition takes to disk — the API, the CLI, a bundle import and the copies a project
+  is given when it turns worktrees on:
+  - **`validateDefinition`** is asked first, and collects problems. Any of severity `error` refuses
+    the write. Every handler runs even if an earlier one threw, so a broken plugin cannot hide the
+    real reasons; a handler that throws contributes a problem naming itself.
+  - **`beforeDefinitionWrite`** is the last chance to adjust or refuse. Return
+    `{ action: 'continue', value }` — with `value.definition` replaced, if you are adjusting — or
+    `{ action: 'reject', problems }`. The first rejection wins, and a handler that throws is read as
+    a rejection: carrying on would write a value somebody was in the middle of refusing.
+
+  What a hook returns is still read back from disk before the write is kept, so a definition a
+  plugin adjusted into something Factory cannot load is refused like any other.
 - **`events`** — the event bus. Events report what already happened; a subscriber cannot veto one.
 - **`host`** — ask what else is installed. `host.has('terminal')` is how a feature degrades by
   absence rather than by checking which edition it is running in.
@@ -186,7 +197,7 @@ context.provide('task-tool', {
   run: 'detached',
   offer: ({ task, workspace, env }) =>
     workspace === undefined
-      ? { unavailable: 'This task belongs to no project.' }
+      ? { unavailable: 'Factory cannot find the project this task belongs to.' }
       : { command: { command: 'open', args: [`https://runbook.acme.test/${task.id}`] } },
 })
 ```

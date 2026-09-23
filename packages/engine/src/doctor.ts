@@ -1,5 +1,9 @@
 import type { Problem } from '@factory/core'
 import {
+  PRODUCT_DIR,
+  PRODUCT_FAMILY_DIR,
+  PRODUCT_OUTPUT_DIRS,
+  dependencyStatus,
   isSettled,
   needsOutOfOrder,
   nextEntry,
@@ -8,7 +12,7 @@ import {
   type Project,
   type Task,
 } from '@factory/core'
-import type { FactoryPlugin } from '@factory/core'
+import type { FactoryPlugin, GitQuery } from '@factory/core'
 import { DOCTOR_RULE_KIND, type DoctorRuleCapability } from '@factory/config'
 import { SETUP_STEP_KIND, type SetupStepCapability } from '@factory/core'
 import { existsSync } from 'node:fs'
@@ -43,16 +47,38 @@ export interface RunningDoctorOptions {
   readonly reconciliation: ReconcileReport
   /** The same workflow lookup the scheduler uses, so the two cannot disagree. */
   readonly workflow: (name: string, projectId?: string) => WorkflowFacts | undefined
+  /**
+   * How to ask git a read-only question about a project's directory.
+   *
+   * Absent means the rule that needs it says nothing — which is also what a
+   * machine with no git gets. Injected rather than imported for the reason
+   * every spawner here is: a rule that spawns on its own is a rule no scenario
+   * can pin down.
+   */
+  readonly git?: GitQuery
 }
+
+/**
+ * Names that do not exist, asked about on purpose.
+ *
+ * The question is "would a workflow written tomorrow be seen", not "is the one
+ * already committed ignored" — and git's own answer to the second is "no,
+ * because it is tracked", which is true and useless here. One per kind,
+ * because somebody may have re-included only one of the three.
+ */
+const DEFINITION_PROBES = [
+  'workflows/a-new-one.workflow.yaml',
+  'phases/a-new-one.phase.yaml',
+  'agents/a-new-one.agent.yaml',
+]
 
 export function runningDoctorRules(
   options: RunningDoctorOptions,
 ): readonly DoctorRuleCapability[] {
   const { tasks, runs, projects, reconciliation } = options
 
-  /** The project this task shares a working copy with, when it has one. */
+  /** The project this task shares a working copy with, when it is shared. */
   const sharedCheckout = (task: Task): Project | undefined => {
-    if (task.projectId === undefined) return undefined
     const project = projects.get(task.projectId)
     return project === undefined || project.usesWorktrees ? undefined : project
   }
@@ -160,16 +186,11 @@ export function runningDoctorRules(
         if (isSettled(task.state)) continue
         for (const { workflow } of task.workflows) {
           if (known.has(workflow)) continue
-          // `workflows` is what the installation can see. A task in a project
-          // resolves through that project's own scope as well, so ask there
-          // before calling a name missing — otherwise every workflow committed
-          // to a repository is reported as broken.
-          if (
-            task.projectId !== undefined &&
-            options.workflow(workflow, task.projectId) !== undefined
-          ) {
-            continue
-          }
+          // `workflows` is what the installation can see. A task resolves
+          // through its project's own scope as well, so ask there before
+          // calling a name missing — otherwise every workflow committed to a
+          // repository is reported as broken.
+          if (options.workflow(workflow, task.projectId) !== undefined) continue
           problems.push({
             severity: 'error',
             message:
@@ -275,17 +296,16 @@ export function runningDoctorRules(
         // is resolved rather than rebuilt, so the sentence below cannot name a
         // directory other than the one the engine would really use.
         if (!task.flags.includes('hasWorktree')) continue
-        if (task.projectId === undefined) continue
-        const workspace = workspaceFor(
-          task,
-          projects.get(task.projectId),
-          existsSync,
-          join,
-        )
+        // A row that is not there is a database edited by hand, not a
+        // diagnosis this rule can make: the run itself refuses and says which
+        // project is missing, which is the honest place for it.
+        const project = projects.get(task.projectId)
+        if (project === undefined) continue
+        const workspace = workspaceFor(task, project, existsSync, join)
         // No worktree was even considered — the project works in place, or the
         // task has no directory of its own. Both are the configured behaviour
         // rather than a fault.
-        if (workspace?.worktree === undefined || workspace.inWorktree) continue
+        if (workspace.worktree === undefined || workspace.inWorktree) continue
         // The flag says a workflow created one; the disk says otherwise. Steps
         // gated on it will run in the repository instead, which is exactly the
         // shared-checkout problem worktrees exist to avoid.
@@ -323,7 +343,6 @@ export function runningDoctorRules(
 
       for (const task of tasks.list()) {
         if (isSettled(task.state)) continue
-        if (task.projectId === undefined) continue
 
         for (const { workflow: name } of task.workflows) {
           const facts = options.workflow(name, task.projectId)
@@ -352,8 +371,151 @@ export function runningDoctorRules(
     },
   }
 
+  /**
+   * A task waiting for something that can never finish.
+   *
+   * The scheduler already blocks a *queued* dependent whose blocker is dead,
+   * with the reason, which `doctor.taskBlocked` repeats. A task that has not
+   * been queued yet says nothing at all — so a plan assembled in advance can
+   * sit there with an edge to a task somebody cancelled last week, and the
+   * first anybody hears of it is the batch refusing to start it.
+   *
+   * Only edges that can never be satisfied. Waiting for something that has not
+   * run yet is what waiting is for, and reporting that would make doctor's
+   * output a list of everything in progress.
+   *
+   * A task already `blocked` is left alone: `doctor.taskBlocked` says so, with
+   * the reason it was blocked for, and two rules about one task is noise.
+   */
+  const dependencies: DoctorRuleCapability = {
+    id: 'tasks-waiting-on-a-dead-blocker',
+    summary: 'Tasks whose blockers can never finish.',
+    check() {
+      const problems: Problem[] = []
+      const edges = tasks.dependencies()
+      if (edges.length === 0) return problems
+
+      const facts = new Map<string, ReturnType<TaskRepository['blocker']>>()
+      const factsOf = (id: string) => {
+        if (!facts.has(id)) facts.set(id, tasks.blocker(id))
+        return facts.get(id)
+      }
+
+      for (const task of tasks.list()) {
+        if (isSettled(task.state) || task.state === 'blocked') continue
+        const status = dependencyStatus(task.id, edges, factsOf)
+        if (status.state !== 'dead') continue
+        const because = status.dead
+          .map((entry) => `"${factsOf(entry.id)?.name ?? entry.id}" ${entry.because}`)
+          .join(' and ')
+        problems.push({
+          severity: 'warning',
+          message:
+            `Task "${task.name}" is waiting for something that cannot finish: ${because}. ` +
+            `It will be blocked rather than started when the queue reaches it.`,
+          rule: 'doctor.dependencyDead',
+        })
+      }
+      return problems
+    },
+  }
+
+  /**
+   * What git can see of each project's Factory directory.
+   *
+   * Two states are coherent and say nothing: everything ignored, which is
+   * somebody trying Factory out on their own machine and is the default, and
+   * everything committed, which is a team sharing its workflows. The middle is
+   * what this is for.
+   *
+   * Only git can answer it. Reading `.gitignore` files and matching them here
+   * would be a second implementation of a specification we do not own, and the
+   * answer has to include the user's own `core.excludesFile` as well as every
+   * file between here and the repository root.
+   */
+  const inGit: DoctorRuleCapability = {
+    id: 'factory-files-in-git',
+    summary: "What git can see of each project's Factory directory.",
+    check() {
+      const ask = options.git
+      if (ask === undefined) return []
+
+      const problems: Problem[] = []
+      for (const project of projects.list()) {
+        // Not a repository, or gone: `doctor.projectPathMissing` already says
+        // so, and spawning into a directory that is not there would look like
+        // git being absent.
+        if (!project.isRepository || !existsSync(project.path)) continue
+
+        const tracked = ask(project.path, ['ls-files', '-z', '--', PRODUCT_FAMILY_DIR])
+        if (tracked === undefined) continue
+        const paths = tracked.stdout.split('\0').filter((line) => line !== '')
+        const output = paths.filter((path) =>
+          PRODUCT_OUTPUT_DIRS.some((directory) =>
+            path.startsWith(`${PRODUCT_FAMILY_DIR}/${PRODUCT_DIR}/${directory}/`),
+          ),
+        )
+        if (output.length > 0) {
+          const named = output.slice(0, 3).join(', ')
+          const rest = output.length > 3 ? ` and ${output.length - 3} more` : ''
+          problems.push({
+            severity: 'warning',
+            message:
+              `Project "${project.name}" has Factory's own output committed to git: ` +
+              `${named}${rest}. A task's artifacts, Factory's database or what a bundle ` +
+              `import replaced — written by a run rather than by a person, and it will grow ` +
+              `and conflict on every one. Untrack it with "git rm -r --cached ` +
+              `${PRODUCT_FAMILY_DIR}/${PRODUCT_DIR}/<directory>".`,
+            rule: 'doctor.productOutputTracked',
+          })
+        }
+
+        // Everything tracked is output, which includes tracking nothing at all
+        // — the coherent everything-ignored state, and the common one. Either
+        // way there are no definitions to ask a second question about, so the
+        // common case costs one spawn rather than two.
+        if (paths.length === output.length) continue
+
+        // Would a workflow written tomorrow be seen? Asked about names that do
+        // not exist on purpose: `check-ignore` hides tracked paths unless it is
+        // told otherwise, so asking about a definition that is already
+        // committed answers a different question — and this is the question.
+        const probe = DEFINITION_PROBES.map(
+          (relative) => `${PRODUCT_FAMILY_DIR}/${PRODUCT_DIR}/${relative}\0`,
+        ).join('')
+        const ignored = ask(project.path, ['check-ignore', '--stdin', '-z', '-v'], probe)
+        if (ignored === undefined || ignored.code !== 0) continue
+
+        // `<source>\0<line>\0<pattern>\0<path>\0`, in fours. A pattern
+        // beginning with `!` is a re-inclusion: somebody ignored the directory
+        // and then took it back for the definitions, which is exactly right and
+        // must not be reported.
+        const fields = ignored.stdout.split('\0')
+        const excluded: string[] = []
+        for (let at = 0; at + 3 < fields.length; at += 4) {
+          const [source, line, pattern] = [fields[at], fields[at + 1], fields[at + 2]]
+          if (pattern?.startsWith('!') === false) excluded.push(`${source}:${line}:${pattern}`)
+        }
+        if (excluded.length === 0) continue
+
+        problems.push({
+          severity: 'error',
+          message:
+            `Project "${project.name}" has its Factory definitions committed, but git is now ` +
+            `ignoring the directory they are in — ${excluded[0]}. The ones already committed ` +
+            `still resolve, so nothing looks wrong; a new workflow would never appear in ` +
+            `"git status", and nobody would find out it was missing.`,
+          rule: 'doctor.definitionsIgnored',
+        })
+      }
+      return problems
+    },
+  }
+
   return [
     recovered,
+    inGit,
+    dependencies,
     stuck,
     outOfOrder,
     missing,
@@ -379,8 +541,8 @@ const current = (task: Task): string | undefined => nextEntry(task)?.workflow
  *
  * The one setup step that needs the database: a project is a row, not a file,
  * so no amount of reading the scope chain can answer it. Essential, because a
- * task with no project runs wherever the daemon happens to have been started —
- * which is fine for a demonstration and wrong for work.
+ * task cannot be created without one — a project is what says where the work
+ * happens, and until there is one there is nothing for Factory to do.
  */
 function projectStep(options: RunningDoctorOptions): SetupStepCapability {
   return {
@@ -402,7 +564,7 @@ function projectStep(options: RunningDoctorOptions): SetupStepCapability {
       return {
         done: false,
         essential: true,
-        detail: 'No repositories have been added, so work would run wherever Factory was started.',
+        detail: 'No repositories have been added, so there is nowhere for a task to happen.',
         actions: [
           { label: 'Add one on the Projects page', url: '/projects' },
           {

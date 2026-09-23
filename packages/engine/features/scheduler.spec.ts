@@ -64,6 +64,7 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
       requirements = new Map()
       lanes = new Map()
       projectIds = new Map()
+      homeId = ''
       hidden = new Set()
       root = mkdtempSync(join(tmpdir(), 'factory-scheduler-'))
       byName = new Map()
@@ -124,8 +125,25 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
     })
   }
 
+  /**
+   * The project the scenarios that are not about projects put their tasks in.
+   *
+   * It gives each task a worktree, so it serialises nothing — these scenarios
+   * are about lanes and capacity, and a shared checkout would hold tasks back
+   * for a reason they are not testing.
+   */
+  let homeId = ''
+  const home = (): string => {
+    if (homeId === '') {
+      const path = join(root, 'home')
+      mkdirSync(join(path, '.git'), { recursive: true })
+      homeId = projects.add({ name: 'home', path, usesWorktrees: true }).id
+    }
+    return homeId
+  }
+
   const queued = (name: string, lane: Scheduling): void => {
-    const task = tasks.create({ name, workflows: [`${lane}-work`] })
+    const task = tasks.create({ name, workflows: [`${lane}-work`], projectId: home() })
     byName.set(name, task.id)
     tasks.act(task.id, 'queue')
   }
@@ -329,7 +347,7 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
   })
 
   const waiting = (): void => {
-    const created = tasks.create({ name: 'Watch', workflows: ['parallel-work'] })
+    const created = tasks.create({ name: 'Watch', workflows: ['parallel-work'], projectId: home() })
     byName.set('Watch', created.id)
     tasks.act(created.id, 'queue', { until: new Date(clock.getTime() + 60_000).toISOString() })
   }
@@ -439,12 +457,11 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
     mkdirSync(usesWorktrees ? join(path, '.git') : path, { recursive: true })
     projectIds.set(name, projects.add({ name, path, usesWorktrees }).id)
   }
-  const queuedIn = (name: string, project: string | undefined): void => {
-    const projectId = project === undefined ? undefined : projectIds.get(project)
+  const queuedIn = (name: string, project: string): void => {
     const created = tasks.create({
       name,
       workflows: ['parallel-work'],
-      ...(projectId === undefined ? {} : { projectId }),
+      projectId: projectIds.get(project) as string,
     })
     byName.set(name, created.id)
     tasks.act(created.id, 'queue')
@@ -531,32 +548,16 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
       )
     })
 
-      RuleScenario('A task belonging to no project is never held back by one', ({
-      Given,
-      And,
-      When,
-      Then,
-    }) => {
-      Given('a project "api" that works in its own checkout', () => givenProject('api', false))
-      And('a queued task "First" in "api"', () => queuedIn('First', 'api'))
-      And('a queued task "Loose" with no project', () => queuedIn('Loose', undefined))
-      When('the scheduler ticks', () => {
-        report = scheduler.tick()
-      })
-      Then('2 tasks are started', () => expect(report.started).toHaveLength(2))
-    })
-
-      RuleScenario('A project the scheduler cannot look up holds nothing', ({ Given, And, When, Then }) => {
-      // Removed between listing the tasks and asking about the project.
-      // Defaulting to "exclusive" would stall them for no reason.
-      Given('a queued task "First" in a project that has since been removed', () => {
+      RuleScenario('A project no lookup can answer for holds nothing', ({ Given, And, When, Then }) => {
+      // `hidden` is the lookup refusing to answer, which is what a scheduler
+      // built without a project store does for every project — and what a
+      // hand-edited database does for one.
+      Given('a queued task "First" in a project the lookup cannot see', () => {
         givenProject('gone', false)
         queuedIn('First', 'gone')
         hidden.add(projectIds.get('gone') as string)
       })
-      And('a queued task "Second" in a project that has since been removed', () =>
-        queuedIn('Second', 'gone'),
-      )
+      And('a queued task "Second" in the same project', () => queuedIn('Second', 'gone'))
       When('the scheduler ticks', () => {
         report = scheduler.tick()
       })
@@ -617,14 +618,36 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
 
       RuleScenario('A busy project does not hold up the queue behind it', ({ Given, And, When, Then }) => {
       Given('a project "api" that works in its own checkout', () => givenProject('api', false))
+      And('a project "web" that gives each task a worktree', () => givenProject('web', true))
       And('a queued task "First" in "api"', () => queuedIn('First', 'api'))
       And('a queued task "Second" in "api"', () => queuedIn('Second', 'api'))
-      And('a queued task "Loose" with no project', () => queuedIn('Loose', undefined))
+      And('a queued task "Loose" in "web"', () => queuedIn('Loose', 'web'))
       When('the scheduler ticks', () => {
         report = scheduler.tick()
       })
       Then('the started tasks are "First, Loose" in that order', () =>
         expect(startedNames()).toEqual(['First', 'Loose']),
+      )
+    })
+
+      RuleScenario('The reason says when the project is held by a person, not by work', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project "api" that works in its own checkout', () => givenProject('api', false))
+      And('a task "Waiting" in "api" is awaiting approval', () => {
+        queuedIn('Waiting', 'api')
+        tasks.act(idOf('Waiting'), 'start')
+        tasks.act(idOf('Waiting'), 'await_approval')
+      })
+      And('a queued task "Next" in "api"', () => queuedIn('Next', 'api'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('the reason given to "Next" says it is waiting for approval', () =>
+        expect(reasonFor('Next')).toContain('waiting for approval'),
       )
     })
 
@@ -1020,6 +1043,189 @@ describeFeature(feature, ({ Background, Scenario, Rule, AfterEachScenario }) => 
           '"Scaffold" was cancelled, so this cannot start.',
         ),
       )
+    })
+  })
+  Rule('the gates are about the workflow that is about to run', ({ RuleScenario }) => {
+    /**
+     * A task that has finished its first workflow and is queued for its next.
+     *
+     * `finished` is what the engine calls when a workflow completes: it unticks
+     * the entry, so `nextEntry` moves on while `workflows[0]` and the newest
+     * run both still name the one that is over.
+     */
+    const partlyDone = (next: string): void => {
+      const created = tasks.create({
+        name: 'Ship',
+        workflows: ['parallel-work', next],
+        projectId: home(),
+      })
+      byName.set('Ship', created.id)
+      // Through the real transitions, so the task reaches "queued with one
+      // workflow behind it" the way a task actually does.
+      tasks.act(created.id, 'queue')
+      tasks.act(created.id, 'start')
+      runs.start({ workflow: 'parallel-work', taskId: created.id })
+      tasks.finished(created.id, created.workflows[0]?.id as string)
+      tasks.act(created.id, 'complete')
+      tasks.act(created.id, 'queue')
+    }
+
+    RuleScenario('The lane comes from the workflow about to run, not the one that has run', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'a queued task "Ship" whose parallel workflow has run and whose next is sequential',
+        () => partlyDone('sequential-work'),
+      )
+      And('a sequential workflow is already running', () => {
+        queued('Holder', 'sequential')
+        tasks.act(idOf('Holder'), 'start')
+        runs.start({ workflow: 'sequential-work', taskId: idOf('Holder') })
+      })
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Ship" was skipped because "a sequential workflow is already running"', () =>
+        expect(skippedFor('Ship')).toBe('a sequential workflow is already running'),
+      )
+    })
+
+    RuleScenario('The flag gate asks about the workflow about to run', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'a queued task "Ship" whose parallel workflow has run and whose next needs "hasWorktree"',
+        () => {
+          requirements.set('deploy', ['hasWorktree'])
+          partlyDone('deploy')
+        },
+      )
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Ship" was skipped because "a required flag is not set"', () =>
+        expect(skippedFor('Ship')).toBe('a required flag is not set'),
+      )
+      And('the report names "hasWorktree"', () =>
+        expect(report.skipped.find((entry) => entry.task.name === 'Ship')?.detail).toBe(
+          'hasWorktree',
+        ),
+      )
+    })
+
+    // The one case where the newest run is the right answer, and why the fix
+    // is not "always ask the list": an `on_fail` workflow is not in it.
+    RuleScenario('A running task holds the lane of the workflow it is actually running', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'a task "Repairing" running a sequential recovery workflow that is not in its list',
+        () => {
+          queued('Repairing', 'parallel')
+          tasks.act(idOf('Repairing'), 'start')
+          runs.start({ workflow: 'sequential-repair', taskId: idOf('Repairing') })
+        },
+      )
+      And('a queued task "Next" on a sequential workflow', () => queued('Next', 'sequential'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Next" was skipped because "a sequential workflow is already running"', () =>
+        expect(skippedFor('Next')).toBe('a sequential workflow is already running'),
+      )
+    })
+  })
+  Rule('the lane holds across an approval gate too', ({ RuleScenario }) => {
+    /** Approved, holding a paused run, waiting for the resume loop to pick it up. */
+    const approvedOn = (name: string, lane: Scheduling) => (): void => {
+      queued(name, lane)
+      const id = idOf(name)
+      tasks.act(id, 'start')
+      const run = runs.start({ workflow: `${lane}-work`, taskId: id })
+      runs.pause(run.id, 1)
+      tasks.act(id, 'await_approval')
+      tasks.act(id, 'approve')
+    }
+    const handedOver = (name: string) => handovers.includes(idOf(name))
+
+    RuleScenario('Two approved tasks do not resume their sequential workflows together', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "First" approved and holding a paused sequential run', approvedOn('First', 'sequential'))
+      And('a task "Second" approved and holding a paused sequential run', approvedOn('Second', 'sequential'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('1 task was handed over', () => expect(handovers).toHaveLength(1))
+      And('"Second" was skipped because "a sequential workflow is already running"', () =>
+        expect(skippedFor('Second')).toBe('a sequential workflow is already running'),
+      )
+    })
+
+    RuleScenario('The one left behind resumes on the next tick', ({ Given, And, When, Then }) => {
+      Given('a task "First" approved and holding a paused sequential run', approvedOn('First', 'sequential'))
+      And('a task "Second" approved and holding a paused sequential run', approvedOn('Second', 'sequential'))
+      And('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      When('"First" finishes', () => {
+        const paused = runs.pausedFor(idOf('First'))
+        if (paused !== undefined) runs.resume(paused.id)
+        tasks.act(idOf('First'), 'complete')
+      })
+      And('the scheduler ticks again', () => {
+        report = scheduler.tick()
+      })
+      Then('"Second" was handed over', () => expect(handedOver('Second')).toBe(true))
+    })
+
+    RuleScenario('An approved parallel workflow resumes beside a sequential one', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "First" approved and holding a paused sequential run', approvedOn('First', 'sequential'))
+      And('a task "Second" approved and holding a paused parallel run', approvedOn('Second', 'parallel'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('2 tasks were handed over', () => expect(handovers).toHaveLength(2))
+    })
+
+    // The other half: a run stopped at a gate is not executing anything, so it
+    // cannot be what makes the lane busy.
+    RuleScenario('A task waiting to be approved does not hold the lane', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Waiting" at an approval gate nobody has answered', () => {
+        queued('Waiting', 'sequential')
+        const id = idOf('Waiting')
+        tasks.act(id, 'start')
+        const run = runs.start({ workflow: 'sequential-work', taskId: id })
+        runs.pause(run.id, 1)
+        tasks.act(id, 'await_approval')
+      })
+      And('a queued task "Next" on a sequential workflow', () => queued('Next', 'sequential'))
+      When('the scheduler ticks', () => {
+        report = scheduler.tick()
+      })
+      Then('"Next" is started', () => expect(startedNames()).toEqual(['Next']))
     })
   })
 })

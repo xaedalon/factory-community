@@ -93,6 +93,19 @@ export interface RunStep {
   readonly describe: string
   /** The registered step kind that ran it. */
   readonly uses: string
+  /**
+   * What it actually ran, as a line somebody could paste.
+   *
+   * Recorded rather than derived: "what did this agent run?" has to be
+   * answerable after the phase file has been edited, which is the same trap
+   * `runs.profile` and `session_provider` were recorded to avoid. The
+   * environment is deliberately not here — it is where the secrets are, and
+   * the profile already records how much of it the step could see.
+   *
+   * Absent for a step that ran no process, and for every step recorded before
+   * this existed.
+   */
+  readonly command?: string
   readonly state: StepState
   /** Times it ran. More than one means it was retried. */
   readonly attempts: number

@@ -6,6 +6,96 @@ What changed, per release. The reasoning behind each decision lives in
 Versions follow [semantic versioning](https://semver.org). Until 1.0.0 the public surface — the
 plugin SDK, the scope layout, the HTTP API — may still move, and a minor bump is where it will move.
 
+## Unreleased
+
+**A task belongs to a project.** `project_id` is required, and removing a project that still has
+tasks in it is refused with the count rather than orphaning them. A task with no project ran
+wherever the daemon happened to be started, wrote its artifacts beside it, could not be queued as a
+batch or given a worktree, and disappeared from the board the moment any project was selected.
+
+*Upgrading:* the migration **deletes tasks that belong to no project**, and everything recorded
+about them — runs, logs, artifacts, history. It says how many at boot. Tasks that have a project
+keep everything. If you have project-less tasks worth keeping, give them a project before
+upgrading. `factory run` is unaffected; it never created a task.
+
+*Also:* adding a project now creates its `.xaedalon/.factory` directory if the repository has none,
+because everything a new project does needs it — the reply says whether one was created, and the
+board lists it with whatever was copied in. `POST /api/tasks` requires `projectId` and answers 400
+without one. `DELETE /api/projects/:id` answers 409 with the count while anything is left in the
+project. `factory task new` falls into the only project there is, and otherwise asks which.
+
+**Factory no longer puts anything in your `git status`.** The `.xaedalon/.gitignore` written when
+Factory creates that directory now contains `*`, so the directory — and that file with it — is
+invisible to git. Registering a project, or running `factory init`, leaves a repository exactly as
+it was. Most repositories that exist are not using Factory, and trying it on your own machine
+should not turn into a commit.
+
+*Sharing is the opt-in, and one edit:* replace the `*` with the three lines the file names —
+`.factory/tasks/`, `.factory/state/`, `.factory/.trash/` — and commit `.xaedalon`. Deleting the
+file does the same thing. A repository that already committed its definitions is untouched:
+Factory never writes an ignore file over a directory it did not create, and the narrow file it
+writes beside an existing one now covers the database and bundle backups as well as task output,
+neither of which was ignored before.
+
+*Two consequences worth knowing:* `git clean -xdf` deletes ignored files, so it now takes your
+definitions and the database if it lives in that repository — plain `git clean -fd` leaves them
+alone. And your editor probably hides ignored paths, so the notice the board shows after
+registering a project may be the only place you see the files named.
+
+**`factory doctor` shows what the daemon found.** Half the rules need the database the daemon owns
+— the ones about tasks, worktrees and what git can see of a project — and until now nothing printed
+them: the command built its own host without a database, and the board declares the endpoint and
+calls it from nowhere. It asks a running daemon and merges, deduplicating what both halves found,
+and says plainly when there is no daemon to ask.
+
+**Doctor reports what git can see of a project.** Silent for both coherent states — everything
+ignored, everything committed — and a finding for the two that are not: a task's artifacts or the
+database committed by accident, and definitions committed into a directory that has since been
+ignored, where the workflows already there keep working while every new one is invisible.
+
+**The event stream stopped naming its frames.** `GET /api/events` sent each event as an SSE frame
+named after the event, which only reaches a client that already knows to listen for that name — so
+every consumer kept its own copy of the event vocabulary, and the board's copy had 14 of the 23
+names in it. A name missing from such a list is not an error anywhere: the board simply stops
+updating for that event. Frames are ordinary `message` frames now, and the name is in the payload
+where it cannot go out of date. A client that filtered on the SSE event name should read
+`payload.name` instead.
+
+**Plugins can refuse or adjust a definition.** `validateDefinition` and `beforeDefinitionWrite`
+have been documented since the plugin host was built and were never called. They now run on the one
+path every definition takes to disk — the API, the CLI, a bundle import, and the copies a project
+is given when it turns worktrees on.
+
+**A task can be moved to another project.** `PATCH /api/tasks/:id` takes `projectId`, and `factory
+task move <id> <project>` takes the project by name. Refused while the task is in flight, and while
+anything depends on it — an edge may only join two tasks in the same project.
+
+**A step records the command it ran.** `run_steps.command` holds the rendered argv, shown on the
+task page above that step's output. "What did this agent run, and with what authority?" could only
+be answered by reading the phase file back, which is a different question once somebody has edited
+it. Not the environment: the profile already records how much of it the step could see.
+
+**Adding a project creates its scope.** A repository with no `.xaedalon/.factory` used to leave
+every write that asked for the project scope failing with a 500 — including the copies made as the
+project is registered. The reply says whether a scope was created, and the board lists it with the
+definitions that went inside.
+
+**Exporting a workflow follows `needs`,** not only `on_fail`, so a pipeline is one export rather
+than five and a merge by hand.
+
+**Doctor reports a task waiting for something that cannot finish** before it is queued.
+
+**Fixed.** The scheduler's lane and flag gates asked about the newest run's workflow rather than the
+one about to run, so a task whose first workflow had finished was admitted on the requirements of
+work that was over — agents ran in a project's own checkout, and two `merge` workflows could
+overlap; a sequential workflow anywhere but first in a task's list was never serialised at all, and
+an approval gate let two of them resume together. Removing a worktree ran inside the worktree it
+was removing, which left git with no current directory, so the prune never happened and
+`hasWorktree` was never cleared. Rejecting an approval left its run paused for ever, and a retry
+afterwards resumed past the gate that had just been refused. `stdin:` on a step was printed and
+never opened. A migration that rebuilds a table no longer takes every run, log and history row of
+every other task with it.
+
 ## 0.1.0 — 2026-09-21
 
 The first release. Factory runs other people's coding agents against your repositories, in an order

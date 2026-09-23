@@ -1,7 +1,7 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
-import { mkdirSync, mkdtempSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventBus } from '@factory/events'
@@ -26,15 +26,35 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   let failure: unknown
   let tick = 0
   let minted = 0
+  let home = ''
+  let roots: string[] = []
 
-  AfterEachScenario(() => store?.close())
+  AfterEachScenario(() => {
+    store?.close()
+    for (const root of roots) rmSync(root, { recursive: true, force: true })
+  })
+
+  // A directory that looks like a git repository, for a project to point at.
+  const somewhere = (): string => {
+    const root = mkdtempSync(join(tmpdir(), 'factory-tasks-'))
+    mkdirSync(join(root, '.git'), { recursive: true })
+    roots.push(root)
+    return root
+  }
+  const projectsIn = (): ProjectRepository =>
+    new ProjectRepository({
+      db: store.db,
+      now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)).toISOString(),
+      newId: () => `project-${(minted += 1)}`,
+    })
 
   // Built in Background, not BeforeEachScenario: the runner executes Background
   // steps first, so anything created there would not exist yet.
-  Background(({ Given }) => {
+  Background(({ Given, And }) => {
     Given('an empty store', () => {
       tick = 0
       minted = 0
+      roots = []
       byName = new Map()
       failure = undefined
       task = undefined
@@ -56,12 +76,18 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         newId: () => `run-${(minted += 1)}`,
       })
     })
+    // Every task needs one now, so it is stated in the Background rather than
+    // conjured by the harness: a task with no project would run wherever the
+    // daemon was started.
+    And('a project to put tasks in', () => {
+      home = projectsIn().add({ name: 'sample', path: somewhere() }).id
+    })
   })
 
   // Returns nothing on purpose: the step callbacks are typed `void`, and a
   // concise arrow that returns the task silently breaks the typecheck.
   const create = (name: string, workflows: string[] = []): void => {
-    const created = tasks.create({ name, workflows })
+    const created = tasks.create({ name, workflows, projectId: home })
     byName.set(name, created.id)
     task = created
   }
@@ -531,7 +557,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
   Rule('A task remembers the agent session its steps share', ({ RuleScenario }) => {
     const given = () => {
-      task = tasks.create({ name: 'Add due dates' })
+      task = tasks.create({ name: 'Add due dates', projectId: home })
     }
     const record = (id: string) => () => {
       task = tasks.rememberSession((task as Task).id, { id, provider: 'claude' })
@@ -573,7 +599,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
   Rule('A task\'s directory is a single path segment, whoever chose it', ({ RuleScenario }) => {
     const created = (name: string, directory?: string) => (): void => {
-      task = tasks.create({ name, ...(directory === undefined ? {} : { directory }) })
+      task = tasks.create({
+        name,
+        projectId: home,
+        ...(directory === undefined ? {} : { directory }),
+      })
     }
     const directoryIs = (expected: string) => (): void => {
       expect(task?.directory).toBe(expected)
@@ -647,20 +677,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   Rule('A task can be made to wait for another in the same project', ({ RuleScenario }) => {
     let edges: readonly TaskEdge[] = []
 
-    // Built here rather than in Background: only these scenarios need a
-    // project, and a project needs a directory on disk that looks like a git
-    // repository.
-    const projectsIn = (): ProjectRepository =>
-      new ProjectRepository({
-        db: store.db,
-        now: () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)).toISOString(),
-        newId: () => `project-${(minted += 1)}`,
-      })
+    // These scenarios need projects of their own, beside the one every task
+    // gets from the Background, because the rule is about two of them.
     const projects = new Map<string, string>()
     const addProject = (name: string) => (): void => {
-      const root = mkdtempSync(join(tmpdir(), 'factory-task-deps-'))
-      mkdirSync(join(root, '.git'), { recursive: true })
-      projects.set(name, projectsIn().add({ name, path: root }).id)
+      projects.set(name, projectsIn().add({ name, path: somewhere() }).id)
     }
     const createIn = (name: string, project: string) => (): void => {
       const created = tasks.create({ name, projectId: projects.get(project) as string })
@@ -982,6 +1003,80 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         // better with it, and acting again would be refused.
       })
       Then('"block" is not offered', () => expect(offered()).not.toContain('block'))
+    })
+  })
+  Rule('a task can be moved to another project', ({ RuleScenario }) => {
+    let elsewhere = ''
+    const givenOther = (): void => {
+      elsewhere = projectsIn().add({ name: 'other', path: somewhere() }).id
+    }
+    const move = (name: string, to: string) => (): void => {
+      try {
+        task = tasks.move(idOf(name), to)
+      } catch (error) {
+        failure = error
+      }
+    }
+
+    RuleScenario('A draft task is moved', ({ Given, And, When, Then }) => {
+      Given('the project "other" also exists', givenOther)
+      And('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to "other"', () => move('Add due dates', elsewhere)())
+      Then('the task belongs to "other"', () => expect(task?.projectId).toBe(elsewhere))
+    })
+
+    RuleScenario('Moving a running task is refused', ({ Given, And, When, Then }) => {
+      Given('the project "other" also exists', givenOther)
+      And('the task "Add due dates" exists', () => create('Add due dates', ['development']))
+      And('"Add due dates" is running', () => {
+        tasks.act(idOf('Add due dates'), 'queue')
+        tasks.act(idOf('Add due dates'), 'start')
+      })
+      When('I move it to "other"', () => move('Add due dates', elsewhere)())
+      Then('it is refused', () => expect(failure).toBeDefined())
+      And('the error says the task is running', () =>
+        expect((failure as Error).message).toContain('running'),
+      )
+    })
+
+    RuleScenario('Moving a task that something waits for is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "other" also exists', givenOther)
+      And('the task "Add due dates" exists', () => create('Add due dates'))
+      And('the task "Ship it" exists', () => create('Ship it'))
+      And('"Ship it" waits for "Add due dates"', () => {
+        tasks.dependOn(idOf('Ship it'), idOf('Add due dates'))
+      })
+      When('I move "Add due dates" to "other"', () => move('Add due dates', elsewhere)())
+      Then('it is refused', () => expect(failure).toBeDefined())
+      And('the error mentions what it is waiting on', () =>
+        expect((failure as Error).message).toContain('waits'),
+      )
+    })
+
+    RuleScenario('Moving to a project that is not there is refused', ({ Given, When, Then }) => {
+      Given('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to a project that does not exist', () =>
+        move('Add due dates', 'project-nowhere')(),
+      )
+      Then('it is refused', () => expect(failure).toBeDefined())
+    })
+
+    RuleScenario('Moving it where it already is changes nothing', ({ Given, When, Then }) => {
+      let before = ''
+      Given('the task "Add due dates" exists', () => {
+        create('Add due dates')
+        before = tasks.get(idOf('Add due dates'))?.updatedAt as string
+      })
+      When('I move it to the project it is already in', () => move('Add due dates', home)())
+      Then('the task is unchanged', () => {
+        expect(task?.projectId).toBe(home)
+        expect(task?.updatedAt).toBe(before)
+      })
     })
   })
 })

@@ -56,6 +56,7 @@ const TASK: Task = {
   id: 't-1',
   name: 'Add due dates',
   description: '',
+  projectId: 'project-1',
   state: 'done',
   workflows: [],
   flags: [],
@@ -152,13 +153,13 @@ describeFeature(feature, ({ Background, Rule, Scenario, ScenarioOutline, BeforeE
       And('it is available', () => expect(offer?.unavailable).toBeUndefined())
     })
 
-    RuleScenario('A task with no project has nowhere to open', ({
+    RuleScenario('A task whose project is missing has nowhere to open', ({
       Given,
       When,
       Then,
       And,
     }) => {
-      Given('the task belongs to no project', () => {
+      Given("the task's project is not in the database", () => {
         workspace = undefined
       })
       When('"open-terminal" is asked what it offers', ask('open-terminal'))
@@ -271,14 +272,14 @@ describeFeature(feature, ({ Background, Rule, Scenario, ScenarioOutline, BeforeE
       And('the reason says Diffity needs one', reasonSays('needs one'))
     })
 
-    RuleScenario('A task with no project has nothing to diff', ({
+    RuleScenario('A task whose project is missing has nothing to diff', ({
       Given,
       And,
       When,
       Then,
     }) => {
       Given('"diffity" is installed', givenInstalled)
-      And('the task belongs to no project', () => {
+      And("the task's project is not in the database", () => {
         workspace = undefined
       })
       When('"diffity" is asked what it offers', ask('diffity'))

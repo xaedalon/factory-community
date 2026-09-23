@@ -655,7 +655,37 @@ Given(
 
 Given('the task {string} exists on {string}', async ({ world }, name: string, workflow: string) => {
   await world.startDaemon()
-  await world.createTask(name, [workflow])
+  lastTaskId = await world.createTask(name, [workflow])
+})
+
+/** Kept so a following step can queue the task this one made. */
+let lastTaskId = ''
+
+/**
+ * Queued and finished, not merely settled.
+ *
+ * `runTask` returns on `done` *or* `blocked`, and a blocked task still has
+ * every workflow ticked — so a scenario about what a finished task shows would
+ * pass against one that failed to start at all.
+ */
+Given('it has been run', async ({ world }) => {
+  await world.runTask(lastTaskId)
+  const response = await fetch(world.api(`/api/tasks/${lastTaskId}`))
+  const body = (await response.json()) as { task: { state: string } }
+  expect(body.task.state).toBe('done')
+})
+
+Then('the workflow column for {string} says {string}', async ({ page }, name: string, workflow: string) => {
+  await expect(page.getByTestId(`workflow-${name}`)).toHaveText(workflow)
+})
+
+Then('the board asks for a repository', async ({ page }) => {
+  await expect(page.getByTestId('tasks-need-project')).toContainText('No repositories yet')
+})
+
+Then('it offers to add one', async ({ page }) => {
+  await page.getByTestId('tasks-add-project').click()
+  await expect(page).toHaveURL(/\/projects\/new$/)
 })
 
 When('I open the tasks page', async ({ world, page }) => {
@@ -928,8 +958,8 @@ When('I confirm the removal', async ({ page }) => {
   await page.getByTestId('remove-project-confirm').click()
 })
 
-Then('no projects are listed', async ({ page }) => {
-  await expect(page.getByTestId('projects-empty')).toBeVisible()
+Then('{string} is no longer listed', async ({ page }, name: string) => {
+  await expect(page.getByTestId(`project-${name}`)).toHaveCount(0)
 })
 
 // Against the path box, not in a banner at the top of the form. A refusal that
@@ -1046,6 +1076,66 @@ Then('the task finishes', async ({ page }) => {
 })
 
 /* ------------------------------------------------------------------ setup */
+
+// The daemon registers one at startup, because a task cannot be created
+// without it. These scenarios are about the installation before any of that.
+Given('no repositories are registered', async ({ world }) => {
+  await world.startDaemon()
+  await world.removeEveryProject()
+})
+
+When('I open the new task page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/tasks/new')
+})
+
+Then('the page says a task needs a project', async ({ page }) => {
+  await expect(page.getByTestId('new-task-needs-project')).toContainText('happens in a project')
+})
+
+Then('it offers to add a repository', async ({ page }) => {
+  await page.getByTestId('new-task-add-project').click()
+  await expect(page).toHaveURL(/\/projects\/new$/)
+})
+
+Then('the page says {int} task is still in it', async ({ page }, count: number) => {
+  await expect(page.getByTestId('error')).toContainText(`${count} task still in it`)
+})
+
+Then('{string} is still listed', async ({ page }, name: string) => {
+  await page.getByTestId('nav-projects').click()
+  await expect(page.getByTestId(`project-${name}`)).toBeVisible()
+})
+
+/* --------------------------------------------------------------- settings */
+
+Then('it names the file it writes', async ({ page }) => {
+  await expect(page.getByTestId('settings-file')).toContainText('settings.json')
+})
+
+Then('the file is in the user scope', async ({ page }) => {
+  await expect(page.getByTestId('settings-file')).toContainText('.xaedalon/.factory')
+})
+
+When('I choose Full Access', async ({ page }) => {
+  await page.getByTestId('profile-full-access').click()
+})
+
+When('I choose the default profile', async ({ page }) => {
+  await page.getByTestId('profile-default').click()
+})
+
+Then('Full Access is marked as chosen', async ({ page }) => {
+  await expect(page.getByTestId('profile-full-access')).toHaveAttribute('aria-pressed', 'true')
+})
+
+Then('the page warns what Full Access costs', async ({ page }) => {
+  await expect(page.getByTestId('full-access-warning')).toContainText('removes the workspace')
+})
+
+Then('the page does not warn about Full Access', async ({ page }) => {
+  await expect(page.getByTestId('full-access-warning')).toHaveCount(0)
+})
 
 When('I open the setup page', async ({ world, page }) => {
   await world.startDaemon()
@@ -1514,6 +1604,27 @@ Then('the environments page is empty', async ({ page }) => {
 
 Then('{string} says it gives each task an environment', async ({ page }, name: string) => {
   await expect(page.getByTestId(`environments-${name}`)).toBeVisible()
+})
+
+When('I add a project at a repository with no Factory directory', async ({ world, page }) => {
+  await world.startDaemon()
+  const repository = world.makeRepository('fresh')
+  await page.goto('/projects/new')
+  await page.getByTestId('project-name').fill('fresh')
+  await page.getByTestId('project-path').fill(repository)
+  await page.getByTestId('save-project').click()
+})
+
+Then('the page says git ignores all of it', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded-hidden')).toContainText('git status')
+})
+
+Then('the page lists the worktree definitions it copied in', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded')).toContainText('worktree-create')
+})
+
+Then('the page lists the scope it created', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded')).toContainText('.xaedalon/.factory')
 })
 
 Then('the page lists what it copied in', async ({ page }) => {

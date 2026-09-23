@@ -198,3 +198,122 @@ Feature: Doctor, for an installation that is running
       And a task assigned only "verify" that is already done
       When doctor runs
       Then nothing is out of order
+
+  Rule: a task waiting for something that can never finish is reported
+
+    The scheduler already blocks a *queued* task whose blocker is dead, with
+    the reason — that is what `doctor.taskBlocked` repeats. A task that has not
+    been queued yet says nothing at all, so a plan assembled in advance can sit
+    there with an edge to a task somebody cancelled last week, and the first
+    anybody hears of it is when the batch refuses to start it.
+
+    Only the edges that can never be satisfied. Waiting for something that has
+    not run yet is what waiting is for, and reporting it would make doctor's
+    output a list of everything in progress.
+
+    Scenario: A draft waiting on a cancelled task is reported
+      Given a task "Ship it" waiting for "Build" in the same project
+      And "Build" was cancelled
+      When doctor runs
+      Then doctor says "Ship it" is waiting for something that cannot finish
+      And it names "Build" and why
+
+    Scenario: Waiting for something still to run is not reported
+      Given a task "Ship it" waiting for "Build" in the same project
+      When doctor runs
+      Then nothing is reported about the graph
+
+    Scenario: Waiting for something already done is not reported
+      Given a task "Ship it" waiting for "Build" in the same project
+      And "Build" is done
+      When doctor runs
+      Then nothing is reported about the graph
+
+    Scenario: A task already blocked is left to the rule that covers it
+      Given a task "Ship it" waiting for "Build" in the same project
+      And "Build" was cancelled
+      And "Ship it" is blocked
+      When doctor runs
+      # `doctor.taskBlocked` says so already, with the reason it was blocked
+      # for, and two rules saying the same thing about one task is noise.
+      Then nothing is reported about the graph
+
+  Rule: a Factory directory git has half an opinion about is reported
+
+    Two states are coherent and say nothing. Everything ignored is somebody
+    trying Factory out on their own machine, which is the default. Everything
+    committed is a team sharing its workflows, which is the decision they made.
+
+    What is worth a sentence is the middle. A task's artifacts or Factory's own
+    database in somebody's history will grow and conflict on every run. And
+    definitions committed into a directory that has *since* been ignored are
+    the expensive one: the workflows already there keep working, so nothing
+    looks wrong, while every workflow anybody writes afterwards never appears
+    in `git status` — nobody finds out it is missing.
+
+    Only git can answer this, so the rule asks it. A machine with no git, a
+    project that is not a repository and a directory that has gone all answer
+    the same way: nothing, because a diagnosis nobody can act on is worse than
+    silence.
+
+    The user scope is not examined. `~/.xaedalon` inside somebody's dotfiles
+    repository is a legitimate choice, and this rule walks registered projects.
+
+    Scenario: A project whose Factory directory is entirely ignored says nothing
+      Given a project in a repository
+      And git tracks nothing of its Factory directory
+      When doctor runs
+      Then doctor says nothing about git
+
+    Scenario: A project whose definitions are committed and visible says nothing
+      Given a project in a repository
+      And git tracks its definitions
+      And nothing ignores them
+      When doctor runs
+      Then doctor says nothing about git
+
+    Scenario: A committed database is reported
+      Given a project in a repository
+      And git tracks its database
+      When doctor runs
+      Then doctor says a run's output is committed
+      And it names the file
+      And it says how to untrack it
+
+    Scenario: Committed task artifacts are reported
+      Given a project in a repository
+      And git tracks two of its task artifacts
+      When doctor runs
+      Then doctor says a run's output is committed
+
+    Scenario: Definitions committed into a directory that is now ignored is an error
+      Given a project in a repository
+      And git tracks its definitions
+      And something ignores them
+      When doctor runs
+      Then doctor says a new workflow would never be seen
+      And it names the file and line that hid them
+
+    Scenario: A partial opt-in that re-includes the definitions is not reported
+      Given a project in a repository
+      And git tracks its definitions
+      And something ignores them and then takes it back
+      When doctor runs
+      # A negated pattern is a re-inclusion. Reading it as an exclusion would
+      # report the person who did exactly the right thing.
+      Then doctor says nothing about git
+
+    Scenario: A machine with no git says nothing
+      Given a project in a repository
+      And git cannot be asked
+      When doctor runs
+      # And says nothing because it did not run, not because it threw — a rule
+      # that throws becomes a problem of its own, which would look like silence
+      # to anybody only counting this rule's findings.
+      Then doctor says nothing about git
+
+    Scenario: A project that is not a repository is never asked about
+      Given a project that is not a repository, and a git that would answer
+      When doctor runs
+      Then doctor says nothing about git
+      And git was not asked

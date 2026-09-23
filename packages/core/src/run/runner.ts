@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import { closeSync, openSync } from 'node:fs'
 import type { EventBus } from '@factory/events'
 import type { Problem } from '../problems.js'
 import type { ResolvedPhase, ResolvedPlan, ResolvedStep } from '../plan/resolve.js'
@@ -398,12 +399,32 @@ function runStep(
       options.onOutput?.(`${withheldMessage(filtered.withheld)}\n`, 'stderr', step, phase)
     }
 
+    // `stdin:` on a planned step is a file to redirect in, which several agent
+    // CLIs need to run headless. It was carried this far and then dropped:
+    // `--dry-run` printed `< prompt.txt` and the process got nothing. Opened
+    // here rather than in the plan, because a plan is pure and a file
+    // descriptor is not.
+    let input: number | undefined
+    if (step.planned.stdin !== undefined) {
+      try {
+        input = openSync(step.planned.stdin, 'r')
+      } catch (error) {
+        // The step's failure, not the runner's. Reported the way a command
+        // that will not start is reported, because that is what it is.
+        const because = error instanceof Error ? error.message : String(error)
+        options.onOutput?.(`cannot open ${step.planned.stdin}: ${because}\n`, 'stderr', step, phase)
+        resolve({ ...base, exitCode: null, timedOut: false, error: because })
+        return
+      }
+    }
+
     const child = spawn(step.planned.command, [...args], {
       cwd: phase.cwd,
       env: { ...filtered.env, ...step.planned.env },
-      // A step that expects input has nobody to provide it. Closing stdin makes
-      // it fail fast instead of blocking until the deadline.
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // A step that expects input and asked for none has nobody to provide it.
+      // Closing stdin makes it fail fast instead of blocking until the
+      // deadline.
+      stdio: [input ?? 'ignore', 'pipe', 'pipe'],
       // Its own process group, which is what makes stopping it possible at all.
       // A step is almost always `bash -c '…'`, and the work is a grandchild:
       // signalling the one pid killed the shell and left `npm test` running.
@@ -412,6 +433,10 @@ function runStep(
       // exactly what the run is waiting for.
       detached: true,
     })
+
+    // The child has its own duplicate of the descriptor by now, so this one is
+    // ours to close — and leaving it open would leak one per step.
+    if (input !== undefined) closeSync(input)
 
     // Registered before anything can be awaited, so there is no window in which
     // a running process is unknown to the thing that stops processes.

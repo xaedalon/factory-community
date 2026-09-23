@@ -4,9 +4,19 @@ Feature: Projects — the repositories Factory works in
   work happens: a name, a path, the branch work starts from, and where its
   worktrees go.
 
-  A task belongs to a project, or to none — `factory run` in a directory needs
-  no project, and refusing to record work without one would mean the only tasks
-  Factory can keep are the ones created through the board.
+  A task always belongs to a project. This used to say otherwise, on the grounds
+  that `factory run` in a directory needs no project — which is true and beside
+  the point: `factory run` creates no task at all. It plans against the scope
+  chain of wherever it was invoked and runs in the foreground, touching neither
+  repository. So nothing was ever kept on a task's behalf by allowing one to
+  belong nowhere; what it bought instead was a task that runs in whatever
+  directory the daemon happened to be started in, which the doctor's own setup
+  rule calls "fine for a demonstration and wrong for work".
+
+  A project is therefore removable only while nothing is left in it. Orphaning
+  the record of work was the old answer and it produced tasks that could not be
+  queued as a batch, could not be given a worktree, and wrote their artifacts
+  beside the daemon.
 
   The path is checked when it is written rather than when something tries to run
   there. A project pointing at a directory that does not exist fails at the
@@ -55,16 +65,33 @@ Feature: Projects — the repositories Factory works in
     When I create a task "Add due dates" in "factory"
     Then the task belongs to "factory"
 
-  Scenario: A task need not belong to one
+  Scenario: A task cannot be created without one
     When I create a task "Add due dates" with no project
-    Then the task belongs to no project
+    Then it is refused
+    And the error says a task needs a project
 
-  Scenario: Removing a project leaves its tasks without one
+  Scenario: A project with nothing in it is removed
+    Given the project "factory" exists
+    When I remove the project
+    Then the project is gone
+
+  Scenario: Removing a project that still has tasks is refused
     Given the project "factory" exists
     And a task "Add due dates" in "factory"
     When I remove the project
-    Then the task still exists
-    And the task belongs to no project
+    Then it is refused
+    And the error says 1 task is still in it
+    And the project is still there
+    And the task still exists
+
+  Scenario: An archived task counts, and the refusal says so
+    Given the project "factory" exists
+    And a task "Add due dates" in "factory"
+    And a task "Ship it" in "factory" that has been archived
+    When I remove the project
+    Then it is refused
+    And the error says 2 tasks are still in it
+    And the error says 1 of them is archived
 
   Scenario: Projects are listed by name
     Given the project "zebra" exists
@@ -328,3 +355,25 @@ Feature: Projects — the repositories Factory works in
       Given the project "factory" exists
       And its profile column says "sort-of-safe"
       Then it states no profile
+
+  Rule: the database refuses it too, not only the repository
+
+    `ProjectRepository.remove` counts first so the refusal can name what is in
+    the way, and `TaskRepository.create` refuses so the message says what is
+    missing rather than quoting a constraint. Both are courtesies. The column
+    and the foreign key are what make the rule true for everything that does
+    not come through those two methods — a plugin, a migration written later, a
+    hand-edited database — and a constraint nothing exercises is one that can be
+    dropped in a rebuild without anybody noticing.
+
+    Scenario: A task written straight into the database without a project is refused
+      Given the project "factory" exists
+      When a task with no project is written straight into the database
+      Then the database refuses it
+
+    Scenario: A project deleted straight out of the database is refused
+      Given the project "factory" exists
+      And a task "Add due dates" in "factory"
+      When the project row is deleted straight out of the database
+      Then the database refuses it
+      And the task still exists

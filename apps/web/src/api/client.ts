@@ -36,6 +36,12 @@ export type ScopeKind = 'project' | 'user' | 'builtin'
 export type DefinitionKind = 'workflow' | 'phase' | 'agent'
 
 /** What turning a project setting on copied into the repository. */
+/** Whether adding a project had to create its `.xaedalon/.factory` directory. */
+export interface ScopeReport {
+  created: boolean
+  root: string
+}
+
 export interface ScaffoldReport {
   written: string[]
   kept: string[]
@@ -249,7 +255,8 @@ export interface Task {
   name: string
   /** Always present — '' when nobody has written one. */
   description: string
-  projectId?: string
+  /** The project the work happens in. Every task has one. */
+  projectId: string
   ticketId?: string
   branch?: string
   directory?: string
@@ -326,6 +333,8 @@ export interface RunStep {
   index: number
   describe: string
   uses: string
+  /** What it actually ran. Absent for a step that ran no process. */
+  command?: string
   state: 'running' | 'completed' | 'failed' | 'timed-out' | 'skipped'
   /** More than one means the step was retried. */
   attempts: number
@@ -480,13 +489,16 @@ export interface TaskDetail {
   progress?: { completed: number; total: number }
   blockers: TaskBlocker[]
   artifacts: TaskArtifact[]
-  /** Absent for a task belonging to no project: there is nowhere to show. */
+  /**
+   * Absent only when the task's project is missing from the database, which
+   * takes a hand-edited one: every task has a project.
+   */
   workspace?: TaskWorkspace
   /**
    * The buttons this task offers, in the order the plugins asked for.
    *
-   * Beside `actions`, not inside `workspace`: a task with no project has no
-   * workspace, and a tool that needs no directory would be unreachable there.
+   * Beside `actions`, not inside `workspace`: a tool that needs no directory
+   * — a ticket system, say — would be unreachable nested inside one.
    */
   tools: TaskTool[]
 }
@@ -555,7 +567,8 @@ export interface NewTask {
   description?: string
   ticketId?: string
   branch?: string
-  projectId?: string
+  /** Required: it decides where the work happens. */
+  projectId: string
   workflows?: string[]
 }
 
@@ -802,7 +815,7 @@ export const api = {
     usesWorktrees?: boolean
     usesEnvironments?: boolean
   }) =>
-    request<{ project: Project; scaffolded: ScaffoldReport }>('/api/projects', {
+    request<{ project: Project; scope: ScopeReport; scaffolded: ScaffoldReport }>('/api/projects', {
       method: 'POST',
       body: JSON.stringify(input),
     }),

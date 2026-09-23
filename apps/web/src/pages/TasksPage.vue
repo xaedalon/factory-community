@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import { useTasks } from '../stores/tasks.js'
 import { useProjects } from '../stores/projects.js'
@@ -22,8 +22,10 @@ import type { TaskListItem, TaskState } from '../api/client.js'
  *
  * Rows carry the actions the daemon offered rather than a fixed set of buttons.
  */
+const router = useRouter()
 const store = useTasks()
 const projects = useProjects()
+const { items: projectList } = storeToRefs(projects)
 const { visible, summary, loading, error, filters, view, acting, batching, batch, workflows } =
   storeToRefs(store)
 
@@ -290,6 +292,32 @@ onUnmounted(() => store.disconnect())
       Loading…
     </p>
 
+    <!-- With no repository registered there is nothing a task could be created
+         in, so the board said "nothing here yet" about a situation where the
+         thing to do is not "make a task". `/setup` already knows this — it
+         marks adding a repository essential and carries the link — and the
+         board sending somebody to a filtered empty table instead was a dead
+         end on a fresh installation. -->
+    <div
+      v-else-if="visible.length === 0 && projectList.length === 0"
+      class="rounded-lg border border-dashed border-[var(--color-line)] px-6 py-10 text-center"
+      data-testid="tasks-need-project"
+    >
+      <AppIcon name="project" :size="22" class="mx-auto text-[var(--color-ink-faint)]" />
+      <p class="mt-3 text-sm text-[var(--color-ink-muted)]">
+        No repositories yet. A task happens in a project, so that is the first thing to add.
+      </p>
+      <div class="mt-4 flex justify-center">
+        <AppButton
+          label="Add a repository"
+          icon="add"
+          tone="primary"
+          data-testid="tasks-add-project"
+          @click="router.push('/projects/new')"
+        />
+      </div>
+    </div>
+
     <p
       v-else-if="visible.length === 0"
       class="rounded-lg border border-dashed border-[var(--color-line)] px-6 py-10 text-center text-sm text-[var(--color-ink-muted)]"
@@ -377,8 +405,11 @@ onUnmounted(() => store.disconnect())
             <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
               {{ store.projectName(task) ?? '—' }}
             </td>
-            <td class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]">
-              {{ store.currentWorkflow(task) ?? '—' }}
+            <td
+              class="py-3 pr-4 font-mono text-xs text-[var(--color-ink-muted)]"
+              :data-testid="`workflow-${task.name}`"
+            >
+              {{ store.workflowLabel(task) ?? '—' }}
             </td>
             <td class="py-3 pr-4"><TaskStateBadge :state="task.state" /></td>
             <td class="py-3 pr-4">
@@ -440,7 +471,7 @@ onUnmounted(() => store.disconnect())
         >
           <p class="text-xs">{{ task.name }}</p>
           <p class="mt-1 font-mono text-meta text-[var(--color-ink-faint)]">
-            {{ store.currentWorkflow(task) ?? 'no workflow' }}
+            {{ store.workflowLabel(task) ?? 'no workflow' }}
           </p>
           <!-- The interface reference ends every card with "0/7 phases  0%".
                The bar is the same one the table draws, because without it a

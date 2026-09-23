@@ -54,6 +54,28 @@ export interface ProjectRepositoryOptions {
   readonly newId?: () => string
 }
 
+/**
+ * A project still holding tasks.
+ *
+ * Its own type, like `WorkflowHasRunError`: the route turns this into a 409 and
+ * needs to know it is *this* refusal rather than a database error, and the count
+ * is what the message is for.
+ */
+export class ProjectHasTasksError extends Error {
+  override readonly name = 'ProjectHasTasksError'
+  constructor(
+    project: string,
+    readonly count: number,
+    readonly archived: number,
+  ) {
+    super(
+      `Cannot remove "${project}": ${count} task${count === 1 ? '' : 's'} still in it` +
+        (archived > 0 ? ` (${archived} archived)` : '') +
+        `. Delete ${count === 1 ? 'it' : 'them'} first.`,
+    )
+  }
+}
+
 export class ProjectRepository {
   readonly #db: Database
   readonly #events: EventBus | undefined
@@ -337,13 +359,34 @@ export class ProjectRepository {
   }
 
   /**
-   * Forget a project.
+   * Forget a project, if nothing is left in it.
    *
-   * Its tasks stay. Removing a project from Factory is bookkeeping — the work
-   * that was done in it still happened, and deleting the record of it because
-   * someone tidied a list would be a surprise nobody wants.
+   * This used to orphan the tasks instead, on the reasoning that removing a
+   * project is bookkeeping and the work still happened. The record was worth
+   * keeping and orphaning was the wrong way to keep it: a task with no project
+   * ran wherever the daemon was started, could not be queued as a batch or
+   * given a worktree, and disappeared from the board the moment any project was
+   * selected. Refusing keeps the record by keeping the project, and says what
+   * is in the way.
+   *
+   * Counted rather than listed, and counted with SQL rather than `list()`,
+   * which hides archived tasks — the foreign key refuses over those too, so a
+   * count that skipped them would contradict the database one line later.
    */
   remove(id: string): boolean {
+    const project = this.get(id)
+    if (project === undefined) return false
+
+    const counts = this.#db.get<{ total: number; archived: number }>(
+      `SELECT count(*) AS total,
+              sum(CASE WHEN state = 'archived' THEN 1 ELSE 0 END) AS archived
+         FROM tasks WHERE project_id = ?`,
+      id,
+    )
+    if ((counts?.total ?? 0) > 0) {
+      throw new ProjectHasTasksError(project.name, counts?.total ?? 0, counts?.archived ?? 0)
+    }
+
     const removed = this.#db.run('DELETE FROM projects WHERE id = ?', id).changes > 0
     if (removed) this.#events?.emit('project.removed', { projectId: id })
     return removed

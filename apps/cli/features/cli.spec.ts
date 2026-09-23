@@ -58,6 +58,20 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     ...over,
   })
 
+  /** A daemon that knows about these projects and nothing else. */
+  const daemonWithProjects = (...names: string[]) => (): void => {
+    asked = []
+    daemon = fakeDaemon((path, method) =>
+      method === 'POST'
+        ? { task: task({ state: 'draft' }), actions: [{ action: 'queue', label: 'Queue' }] }
+        : path.startsWith('/api/projects')
+          ? { items: names.map((name, index) => ({ id: `pr-${index + 1}`, name })) }
+          : { items: [] },
+    )
+  }
+  const createdIn = () =>
+    (asked.find((entry) => entry.method === 'POST')?.body as { projectId?: string })?.projectId
+
   const file = (path: string, contents: string) => {
     mkdirSync(dirname(path), { recursive: true })
     writeFileSync(path, contents)
@@ -246,6 +260,58 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the output reports the number of rules run', () => expect(output).toContain('rule(s)'))
   })
 
+  Scenario('doctor says what it could not check without a daemon', ({ When, Then }) => {
+    When('I run "doctor"', () => invoke('doctor'))
+    Then('the output says the running checks were not run', () =>
+      expect(output).toContain('need a running daemon'),
+    )
+  })
+
+  Scenario('doctor adds what the daemon found', ({ Given, When, Then, And }) => {
+    Given('a daemon reporting a problem of its own', () => {
+      daemon = fakeDaemon(() => ({
+        problems: [
+          {
+            severity: 'warning',
+            message: 'Project "work" has Factory\'s own output committed to git.',
+            rule: 'doctor.productOutputTracked',
+          },
+        ],
+      }))
+    })
+    When('I run "doctor"', () => invoke('doctor'))
+    Then("the output carries the daemon's problem", () =>
+      expect(output).toContain('committed to git'),
+    )
+    And('it does not say the running checks were missed', () =>
+      expect(output).not.toContain('need a running daemon'),
+    )
+  })
+
+  Scenario('a problem both halves found is reported once', ({ Given, When, Then }) => {
+    Given('a daemon reporting a problem this installation also has', () => {
+      workflow(projectScope, 'dangling', 'name: dangling\nphases: [nowhere]\n')
+      // Word for word what the local rule produces, because that is what the
+      // daemon running the same rule over its own chain would send back. An
+      // approximation here would dedupe nothing and the scenario would pass
+      // without the thing it is about ever happening.
+      daemon = fakeDaemon(() => ({
+        problems: [
+          {
+            severity: 'error',
+            message:
+              'Workflow "dangling" names a phase "nowhere" that does not exist in any scope.',
+            rule: 'doctor.missingPhase',
+          },
+        ],
+      }))
+    })
+    When('I run "doctor"', () => invoke('doctor'))
+    Then('the problem appears once', () =>
+      expect(output.split('does not exist in any scope').length - 1).toBe(1),
+    )
+  })
+
   Scenario('doctor reports a definition that does not validate', ({ Given, When, Then, And }) => {
     Given('the project scope defines a broken workflow "oops"', () =>
       workflow(projectScope, 'oops', 'name: oops\nmode: banana\nphases: []\n'),
@@ -420,14 +486,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   })
 
   Scenario('a task is created with its workflows in order', ({ Given, When, Then, And }) => {
-    Given('a daemon with no tasks', () => {
-      asked = []
-      daemon = fakeDaemon((path, method) =>
-        method === 'POST'
-          ? { task: task({ state: 'draft' }), actions: [{ action: 'queue', label: 'Queue' }] }
-          : { items: [] },
-      )
-    })
+    // One project, because a task needs one — and with exactly one there is
+    // nothing for the command line to say about it.
+    Given('a daemon with no tasks', daemonWithProjects('work'))
     When('I run "task new Add due dates --workflow worktree-create --workflow development"', () =>
       invoke('task new Add due dates --workflow worktree-create --workflow development'),
     )
@@ -442,6 +503,76 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the output says how to start it', () =>
       expect(output).toContain('factory task queue'),
     )
+  })
+
+  Scenario('a task is moved to another project', ({ Given, When, Then, And }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', () => {
+      asked = []
+      daemon = fakeDaemon((path, method) =>
+        method === 'PATCH'
+          ? { task: task({ state: 'draft' }) }
+          : path.startsWith('/api/projects')
+            ? { items: [{ id: 'pr-1', name: 'work' }, { id: 'pr-2', name: 'elsewhere' }] }
+            : { items: [task()] },
+      )
+    })
+    When('I run "task move task-1 elsewhere"', () => invoke('task move task-1 elsewhere'))
+    Then('the daemon was asked to move it to "elsewhere"', () => {
+      const patch = asked.find((entry) => entry.method === 'PATCH')
+      expect((patch?.body as { projectId: string }).projectId).toBe('pr-2')
+    })
+    And('the output says where it is now', () => expect(output).toContain('elsewhere'))
+  })
+
+  Scenario('moving to a project that is not there says which exist', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', () => {
+      asked = []
+      daemon = fakeDaemon((path) =>
+        path.startsWith('/api/projects')
+          ? { items: [{ id: 'pr-1', name: 'work' }, { id: 'pr-2', name: 'elsewhere' }] }
+          : { items: [task()] },
+      )
+    })
+    When('I run "task move task-1 nowhere"', () => invoke('task move task-1 nowhere'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output names both projects', () => {
+      expect(output).toContain('work')
+      expect(output).toContain('elsewhere')
+    })
+  })
+
+  Scenario('a task lands in the only project there is', ({ Given, When, Then }) => {
+    Given('a daemon with one project "work"', daemonWithProjects('work'))
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('the daemon was asked to create it in "work"', () => expect(createdIn()).toBe('pr-1'))
+  })
+
+  Scenario('with no project there is nowhere to put a task', ({ Given, When, Then, And }) => {
+    Given('a daemon with no projects', daemonWithProjects())
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output contains "needs a project"', () =>
+      expect(output).toContain('needs a project'),
+    )
+    And('the output says how to add one', () =>
+      expect(output).toContain('factory project add'),
+    )
+  })
+
+  Scenario('with more than one project the task says which', ({ Given, When, Then, And }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', daemonWithProjects('work', 'elsewhere'))
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output contains "--project"', () => expect(output).toContain('--project'))
+    And('the output names both projects', () => {
+      expect(output).toContain('work')
+      expect(output).toContain('elsewhere')
+    })
   })
 
   Scenario('showing a task lists what it can do next', ({ Given, When, Then }) => {

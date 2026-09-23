@@ -868,6 +868,17 @@ const stepTone: Record<string, string> = {
                 </button>
 
                 <div v-if="openStep === step.id && log" class="mt-2" :data-testid="`log-${step.describe}`">
+                  <!-- What actually ran, above its output. `describe` is the
+                       phase's own words for the step; this is the line that was
+                       executed, recorded when it ran rather than read back out
+                       of a file somebody may have edited since. -->
+                  <p
+                    v-if="step.command"
+                    class="mb-1 font-mono text-meta break-all text-[var(--color-ink-faint)]"
+                    :data-testid="`command-${step.describe}`"
+                  >
+                    $ {{ step.command }}
+                  </p>
                   <pre
                     class="max-h-72 overflow-auto rounded-md bg-[var(--color-base)] p-3 font-mono text-meta whitespace-pre-wrap text-[var(--color-ink-muted)]"
                   ><template v-for="(line, index) in log.lines" :key="index"><span :class="line.stream === 'stderr' ? 'text-[var(--color-warn)]' : ''">{{ line.text }}</span></template></pre>
@@ -985,10 +996,10 @@ const stepTone: Record<string, string> = {
           <!-- Beside the plan, which is the other "what will happen" control: the
                plan says what this task will do, this says when it may start.
 
-               Not gated on having a project: the store lets two tasks that belong
-               to no project wait for each other — they are equally unowned — and a
-               control the daemon would accept has to be here, or the rule has two
-               different answers depending on where you ask. -->
+               Never gated on anything this page could work out: the store's rule
+               is that both tasks are in the same project, and a control the daemon
+               would accept has to be here, or the rule has two different answers
+               depending on where you ask. -->
           <section data-testid="task-dependencies">
             <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
               Waits for

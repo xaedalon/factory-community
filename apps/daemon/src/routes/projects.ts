@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
-import { scaffoldProjectDefinitions } from '@factory/config'
+import { SCOPE_DIR, createScope, scaffoldProjectDefinitions } from '@factory/config'
+import { join } from 'node:path'
 import {
   DISCLAIMER,
   EXECUTION_PROFILES,
@@ -10,6 +11,7 @@ import {
   queueOrder,
 } from '@factory/core'
 import type { ExecutionProfile, Project, ProjectSetting, Task } from '@factory/core'
+import { ProjectHasTasksError } from '@factory/store'
 import type { Runtime } from '@factory/runtime'
 import type { Service } from '../service.js'
 
@@ -69,11 +71,18 @@ export function registerProjectRoutes(
    * read-only checkout, permissions, a `.factory` that is a file — is worth
    * reporting, not worth undoing their change over.
    */
-  const scaffold = (project: Project, setting: ProjectSetting) => {
+  const scaffold = async (project: Project, setting: ProjectSetting) => {
     const chain = chains.for(project.id)
     if (chain === undefined) return undefined
     try {
-      return scaffoldProjectDefinitions({ chain, host: runtime.host, setting })
+      return await scaffoldProjectDefinitions({
+        chain,
+        host: runtime.host,
+        // A plugin sees the copies a project is given, the same as any other
+        // write.
+        hooks: runtime.host.hooks,
+        setting,
+      })
     } catch (error) {
       return {
         written: [],
@@ -120,12 +129,28 @@ export function registerProjectRoutes(
             ? {}
             : { usesEnvironments: body.usesEnvironments }),
         })
+        // A scope of its own, before anything tries to write into it.
+        //
+        // A repository with no `.xaedalon/.factory` resolves to a chain with no
+        // project scope, and then every write that asks for one fails — which
+        // is the first thing a new project does, because the worktree workflows
+        // are copied in as it is registered. It answered 500 with "No project
+        // scope in this chain", and the reply that had already tried said only
+        // `written: []`. Creating it is the one `mkdir` the person would have
+        // had to do, and it is the same directory the copies are about to go
+        // into.
+        //
+        // Never over an existing one: the moment `config.yaml` is there the
+        // directory is theirs — which is also why Factory never writes an
+        // ignore file over a scope somebody may already be sharing.
+        const scope = createScope({ root: join(project.path, SCOPE_DIR), kind: 'project' })
+
         // Whatever it was registered with, it gets the files for.
         const scaffolded = [
-          ...(project.usesWorktrees ? [scaffold(project, 'worktrees')] : []),
-          ...(project.usesEnvironments ? [scaffold(project, 'environments')] : []),
+          ...(project.usesWorktrees ? [await scaffold(project, 'worktrees')] : []),
+          ...(project.usesEnvironments ? [await scaffold(project, 'environments')] : []),
         ]
-        return reply.code(201).send({ project, scaffolded: merge(scaffolded) })
+        return reply.code(201).send({ project, scope, scaffolded: merge(scaffolded) })
       } catch (error) {
         // A path that does not exist or a name already taken is a mistake in
         // the request, not a failure of the server.
@@ -252,11 +277,11 @@ export function registerProjectRoutes(
         // Only on the way on. Turning a setting off leaves the files where they
         // are: they are the project's now, and deleting someone's committed
         // workflow because they flipped a checkbox would be unforgivable.
-        if (usesWorktrees) scaffolded.push(scaffold(project, 'worktrees'))
+        if (usesWorktrees) scaffolded.push(await scaffold(project, 'worktrees'))
       }
       if (usesEnvironments !== undefined) {
         project = projects.setEnvironments(request.params.id, usesEnvironments)
-        if (usesEnvironments) scaffolded.push(scaffold(project, 'environments'))
+        if (usesEnvironments) scaffolded.push(await scaffold(project, 'environments'))
       }
       if (settingProfile) {
         // Nothing is scaffolded for a profile: it changes what the next run is
@@ -383,9 +408,26 @@ export function registerProjectRoutes(
     return { cancelled, signalled, killed }
   })
 
+  /**
+   * Forget a project, if nothing is left in it.
+   *
+   * 409 rather than a cascade: removing a project used to orphan its tasks,
+   * and an orphan ran wherever the daemon was started. The count is in the
+   * body as well as the message, so a client can say "3 tasks" without reading
+   * a sentence.
+   */
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (request, reply) => {
-    if (!projects.remove(request.params.id)) {
-      return reply.code(404).send({ error: `No project ${request.params.id}.` })
+    try {
+      if (!projects.remove(request.params.id)) {
+        return reply.code(404).send({ error: `No project ${request.params.id}.` })
+      }
+    } catch (error) {
+      if (error instanceof ProjectHasTasksError) {
+        return reply
+          .code(409)
+          .send({ error: error.message, tasks: error.count, archived: error.archived })
+      }
+      throw error
     }
     return reply.code(204).send()
   })

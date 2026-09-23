@@ -22,6 +22,14 @@ const webRoot = findWebRoot({
 })
 const app = buildServer(runtime, service, webRoot === undefined ? {} : { webRoot })
 
+// What the upgrade did, before what the boot repaired. A migration that
+// deletes rows says so through its note, and an upgrade that threw one away
+// silently is not something to find out about later — this is the only moment
+// anybody is looking.
+for (const applied of service.store.migration.applied) {
+  if (applied.note !== undefined) console.log(`migration ${applied.version}: ${applied.note}`)
+}
+
 if (service.reconciliation.closedRuns.length > 0) {
   console.log(
     `recovered ${service.reconciliation.closedRuns.length} run(s) left running by a previous stop`,

@@ -1,6 +1,7 @@
 import {
   PROJECT_SETTING_DEFINITIONS,
   type CapabilityLookup,
+  type HookRegistry,
   type ProjectSetting,
 } from '@factory/core'
 import { resolvePhase, resolveWorkflow } from './store.js'
@@ -14,7 +15,8 @@ import type { ScopeChain } from './scopes.js'
  * worktrees, and the built-in `environment-create` cannot know what an
  * environment even is here. Both say so — `override: required` — and this is
  * the other half of that conversation: turning the setting on puts an editable
- * copy in the project, committed with the repository, instead of leaving
+ * copy in the project — ignored by git like the rest of that directory until
+ * somebody shares it — instead of leaving
  * someone to find out from a doctor warning what they were supposed to create.
  *
  * Anything already present is left alone. Re-running is therefore safe, which
@@ -24,6 +26,8 @@ import type { ScopeChain } from './scopes.js'
 export interface ScaffoldOptions {
   readonly chain: ScopeChain
   readonly host: CapabilityLookup
+  /** Passed through, so a plugin sees the copies a project is given too. */
+  readonly hooks?: HookRegistry
   readonly setting: ProjectSetting
 }
 
@@ -36,7 +40,9 @@ export interface ScaffoldResult {
   readonly missing: readonly string[]
 }
 
-export function scaffoldProjectDefinitions(options: ScaffoldOptions): ScaffoldResult {
+export async function scaffoldProjectDefinitions(
+  options: ScaffoldOptions,
+): Promise<ScaffoldResult> {
   const { chain, host } = options
   const written: string[] = []
   const kept: string[] = []
@@ -45,7 +51,7 @@ export function scaffoldProjectDefinitions(options: ScaffoldOptions): ScaffoldRe
   // Phases come with their workflows: a project copy of `worktree-create` that
   // still points at the built-in `worktree-add` is only half overridden, and
   // the half left behind is the half that knows where the directory goes.
-  const copyPhase = (name: string): void => {
+  const copyPhase = async (name: string): Promise<void> => {
     const resolved = resolvePhase(chain, host, name)
     if (resolved?.value === undefined) {
       missing.push(name)
@@ -55,9 +61,10 @@ export function scaffoldProjectDefinitions(options: ScaffoldOptions): ScaffoldRe
       kept.push(name)
       return
     }
-    const outcome = writeDefinition({
+    const outcome = await writeDefinition({
       chain,
       host,
+      ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
       kind: 'phase',
       definition: resolved.value,
       scope: 'project',
@@ -77,9 +84,10 @@ export function scaffoldProjectDefinitions(options: ScaffoldOptions): ScaffoldRe
     if (resolved.ref.scope === 'project') {
       kept.push(name)
     } else {
-      const outcome = writeDefinition({
+      const outcome = await writeDefinition({
         chain,
         host,
+        ...(options.hooks === undefined ? {} : { hooks: options.hooks }),
         kind: 'workflow',
         definition: resolved.value,
         scope: 'project',
@@ -87,10 +95,10 @@ export function scaffoldProjectDefinitions(options: ScaffoldOptions): ScaffoldRe
       if (outcome.status === 'created') written.push(outcome.file)
     }
 
-    for (const phase of resolved.value.phases) copyPhase(phase)
+    for (const phase of resolved.value.phases) await copyPhase(phase)
     if (resolved.value.onFail !== undefined) {
       const fallback = resolveWorkflow(chain, resolved.value.onFail)
-      for (const phase of fallback?.value?.phases ?? []) copyPhase(phase)
+      for (const phase of fallback?.value?.phases ?? []) await copyPhase(phase)
     }
   }
 

@@ -1,5 +1,13 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect } from 'vitest'
@@ -14,9 +22,23 @@ import type {
   ResolvedPlan,
   StopReport,
   Run,
+  Scheduling,
   Task,
 } from '@factory/core'
-import { MIGRATIONS, RunRepository, TaskRepository, openStore, type Store } from '@factory/store'
+import {
+  PRODUCT_FAMILY_DIR,
+  artifactFile,
+  artifactsRoot,
+  joinPath,
+} from '@factory/core'
+import {
+  MIGRATIONS,
+  ProjectRepository,
+  RunRepository,
+  TaskRepository,
+  openStore,
+  type Store,
+} from '@factory/store'
 import { Engine, reconcile, type ReconcileReport } from '@factory/engine'
 
 const feature = await loadFeature(fileURLToPath(new URL('./engine.feature', import.meta.url)))
@@ -77,7 +99,14 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       engine = buildEngine()
     })
     And('a task "Add due dates"', () => {
-      task = tasks.create({ name: 'Add due dates' })
+      // `work` is already a directory on disk; a project needs one, and a task
+      // needs a project.
+      const project = new ProjectRepository({
+        db: store.db,
+        now,
+        newId: () => `project-${++ids}`,
+      }).add({ name: 'sample', path: work })
+      task = tasks.create({ name: 'Add due dates', projectId: project.id })
     })
   })
 
@@ -148,8 +177,12 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     clears: [],
     phases,
   })
-  const givePlan = (workflow: string, phases: ResolvedPhase[]): void => {
-    plans.set(workflow, { plan: planOf(workflow, phases), problems: [] })
+  const givePlan = (
+    workflow: string,
+    phases: ResolvedPhase[],
+    scheduling: Scheduling = 'sequential',
+  ): void => {
+    plans.set(workflow, { plan: { ...planOf(workflow, phases), scheduling }, problems: [] })
   }
 
   const assign = (...workflows: string[]): void => {
@@ -1435,6 +1468,263 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the task is queued', queue)
       When('the engine works on it', runEngine)
       Then('the task is blocked', () => expect(task.state).toBe('blocked'))
+    })
+  })
+  Rule('a sequential workflow runs alone, wherever it is in the task\'s list', ({
+    RuleScenario,
+  }) => {
+    let ledger = ''
+    let second: Task
+
+    /**
+     * A step that writes when it started and when it stopped.
+     *
+     * Two of these overlap if and only if a `start` follows a `start`, which is
+     * a question the file answers without anybody measuring a clock. The sleep
+     * is what gives them time to overlap; without it, "did not overlap" would
+     * pass for a scheduler that does nothing at all — which is why the parallel
+     * scenario below reads the same file and expects the opposite.
+     */
+    const recording = (who: string): ResolvedPhase =>
+      shellPhase('work', `echo "${who} start" >> ${ledger}; sleep 0.2; echo "${who} end" >> ${ledger}`)
+
+    const lines = (): string[] =>
+      readFileSync(ledger, 'utf8').trim().split('\n').filter((line) => line !== '')
+    const who = (index: number): string => lines()[index]?.split(' ')[0] ?? ''
+
+    /** A second task, in the same project as the first. */
+    const another = (name: string): Task =>
+      tasks.create({ name, projectId: tasks.get(task.id)?.projectId as string })
+
+    const givenTwo = (lane: Scheduling, workflows: (name: string) => string[]) => (): void => {
+      ledger = join(work, 'ledger.txt')
+      second = another('Ship it')
+      givePlan('first', [shellPhase('quick', 'true')], 'parallel')
+      plans.set('one-work', { plan: { ...planOf('one-work', [recording('one')]), scheduling: lane }, problems: [] })
+      plans.set('two-work', { plan: { ...planOf('two-work', [recording('two')]), scheduling: lane }, problems: [] })
+      task = tasks.assign(task.id, workflows('one'))
+      second = tasks.assign(second.id, workflows('two'))
+      task = tasks.act(task.id, 'queue')
+      second = tasks.act(second.id, 'queue')
+    }
+
+    const bothAtOnce = async (): Promise<void> => {
+      const [one, two] = await Promise.all([engine.run(task.id), engine.run(second.id)])
+      task = one.task
+      second = two.task
+    }
+
+    RuleScenario('Two tasks reaching a sequential workflow do not overlap', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'two tasks whose second workflow is sequential and records when it ran',
+        givenTwo('sequential', (name) => ['first', `${name}-work`]),
+      )
+      When('the engine works on both at once', bothAtOnce)
+      Then("the second workflow's two runs did not overlap", () => {
+        expect(lines()).toHaveLength(4)
+        expect(who(0)).toBe(who(1))
+        expect(who(2)).toBe(who(3))
+      })
+      And('both tasks are "done"', () => {
+        expect(task.state).toBe('done')
+        expect(second.state).toBe('done')
+      })
+    })
+
+    RuleScenario('The one that waited says so', ({ Given, When, Then }) => {
+      Given(
+        'two tasks whose second workflow is sequential and records when it ran',
+        givenTwo('sequential', (name) => ['first', `${name}-work`]),
+      )
+      When('the engine works on both at once', bothAtOnce)
+      Then('one of the runs says it waited for the sequential lane', () => {
+        const said = [task.id, second.id].flatMap((id) =>
+          runs.forTask(id).flatMap((run) => runs.logs(run.id).lines.map((line) => line.text)),
+        )
+        expect(said.some((text) => text.includes('waiting: another sequential workflow'))).toBe(
+          true,
+        )
+      })
+    })
+
+    RuleScenario('Parallel workflows are still parallel', ({ Given, When, Then }) => {
+      Given(
+        'two tasks whose only workflow is parallel and records when it ran',
+        givenTwo('parallel', (name) => [`${name}-work`]),
+      )
+      When('the engine works on both at once', bothAtOnce)
+      Then('the two runs overlapped', () => {
+        expect(lines()).toHaveLength(4)
+        expect(who(0)).not.toBe(who(1))
+      })
+    })
+  })
+  Rule('rejecting an approval ends the run it was asked about', ({ RuleScenario }) => {
+    const parked = async (): Promise<void> => {
+      assign('development')
+      givePlan('development', [
+        shellPhase('build', 'echo building'),
+        shellPhase('ship', 'echo shipping', 'before'),
+      ])
+      queue()
+      await runEngine()
+    }
+    /**
+     * Through the watcher, which is what the route does: `reject` is a state
+     * change, and noticing it is the engine's job — subscribed once so the
+     * API, the CLI and a desktop menu cannot differ about what it means.
+     */
+    const reject = async (): Promise<void> => {
+      const unwatch = engine.watch()
+      task = tasks.act(task.id, 'reject', { reason: 'Not like that.' })
+      // The watcher defers to a microtask, because the transition is emitted
+      // from inside the store's transaction.
+      await new Promise((done) => setTimeout(done, 0))
+      unwatch()
+    }
+
+    RuleScenario('The run is finished as declined', ({ Given, When, Then, And }) => {
+      Given('a task parked at an approval gate', parked)
+      When('somebody rejects it', reject)
+      Then('the run is "declined"', () => expect(newest().state).toBe('declined'))
+      And("the run's output is still there", () =>
+        expect(stepsOf(newest()).length).toBeGreaterThan(0),
+      )
+    })
+
+    RuleScenario('A retry after a rejection starts the workflow again', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task parked at an approval gate', parked)
+      And('somebody rejects it', reject)
+      When('the task is retried', async () => {
+        task = tasks.act(task.id, 'retry')
+        await runEngine()
+      })
+      Then('the gate was reached a second time', () =>
+        expect(task.state).toBe('awaiting_approval'),
+      )
+      And('there are 2 runs', () => expect(allRuns()).toHaveLength(2))
+    })
+  })
+  Rule('what a run produced is kept out of git, and nothing else is', ({ RuleScenario }) => {
+    /**
+     * An artifact path of the shape a real project has.
+     *
+     * Built through core's own `artifactsRoot` rather than typed out: every
+     * artifact scenario above puts its files in `<work>/artifacts`, which has
+     * no `.xaedalon` segment — so `#ignoreProductOutput` took its early return
+     * in every one of them and this writer had never executed in a test.
+     */
+    const inFamilyDirectory = (name: string) =>
+      artifactFile(artifactsRoot(work, 'add-due-dates', joinPath), name, joinPath)
+    const familyIgnore = () => join(work, PRODUCT_FAMILY_DIR, '.gitignore')
+
+    const artifactAt = (path: string) => (): void => {
+      plans.set('review', {
+        plan: planOf('review', [
+          {
+            name: 'work',
+            approval: 'none',
+            cwd: process.cwd(),
+            steps: [
+              {
+                index: 0,
+                uses: 'shell',
+                planned: {
+                  describe: 'write it',
+                  command: 'bash',
+                  args: ['-c', `echo "looks good" > ${path}`],
+                },
+                raw: { uses: 'shell', run: 'write it' },
+                artifact: { name: 'report', path },
+              },
+            ],
+          },
+        ]),
+        problems: [],
+      })
+    }
+
+    RuleScenario('A run writes an ignore file for the output it produced', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a workflow whose step writes an artifact under a Factory directory', () =>
+        artifactAt(inFamilyDirectory('report'))(),
+      )
+      And("it is the task's only workflow", () => assign('review'))
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('the family directory has an ignore file', () =>
+        expect(existsSync(familyIgnore())).toBe(true),
+      )
+      // Named literally rather than looped over `PRODUCT_OUTPUT_DIRS`, which
+      // is the thing under test: an assertion that iterates the constant it is
+      // checking passes whatever that constant says, and dropping two of the
+      // three from it went unnoticed exactly that way.
+      And('it ignores the task directories, the database and the bundle backups', () => {
+        const lines = readFileSync(familyIgnore(), 'utf8').split('\n')
+        expect(lines).toContain('.factory/tasks/')
+        expect(lines).toContain('.factory/state/')
+        expect(lines).toContain('.factory/.trash/')
+      })
+      // The whole reason this body is narrower than the one `createScope`
+      // writes: the directory may already be shared.
+      And('it leaves the definitions alone', () => {
+        const text = readFileSync(familyIgnore(), 'utf8')
+        expect(text.split('\n')).not.toContain('*')
+        expect(text).not.toContain('.factory/workflows')
+      })
+    })
+
+    RuleScenario('An ignore file already there is left exactly as it is', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a workflow whose step writes an artifact under a Factory directory', () =>
+        artifactAt(inFamilyDirectory('report'))(),
+      )
+      And('an ignore file somebody wrote by hand', () => {
+        mkdirSync(join(work, PRODUCT_FAMILY_DIR), { recursive: true })
+        writeFileSync(familyIgnore(), '# mine\n')
+      })
+      And("it is the task's only workflow", () => assign('review'))
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('the ignore file still says what they wrote', () =>
+        expect(readFileSync(familyIgnore(), 'utf8')).toBe('# mine\n'),
+      )
+    })
+
+    RuleScenario('An artifact outside a Factory directory writes no ignore file', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a workflow whose step writes an artifact somewhere of its own', () =>
+        artifactAt(join(work, 'elsewhere', 'report.md'))(),
+      )
+      And("it is the task's only workflow", () => assign('review'))
+      And('the task is queued', queue)
+      When('the engine runs the task', runEngine)
+      Then('no ignore file was written', () => {
+        expect(existsSync(familyIgnore())).toBe(false)
+        expect(existsSync(join(work, 'elsewhere', '.gitignore'))).toBe(false)
+      })
     })
   })
 })

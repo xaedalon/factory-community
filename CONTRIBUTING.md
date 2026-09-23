@@ -49,6 +49,22 @@ A test that has never failed is a test nobody has checked. Before a guard is tru
 If the suite stays green, the guard is not covered and the scenario needs to change — or the guard is
 dead code and should go. That has happened more than once here, and both outcomes are useful.
 
+`pnpm mutate` does the three steps for you, and puts the file back whatever happens — including on
+an interrupt, which matters for a script that edits source:
+
+```bash
+pnpm mutate --file packages/store/src/projects.ts \
+  --find "if ((counts?.total ?? 0) > 0) {" --replace "if (false) {" \
+  --suite packages/store
+
+pnpm mutate --from mutations.json    # a whole round: [{ file, find, replace, suite?, describe? }]
+```
+
+It exits non-zero if any mutation survived — or could not be applied, because a mutation nobody ran
+is not a mutation that passed. A survivor is not automatically a missing scenario: it can be an
+equivalent mutant, and `SET NULL` in place of `RESTRICT` against a `NOT NULL` column is one, because
+SQLite refuses both. Say which it was.
+
 Say in the pull request which mutations you ran and what failed. "Three mutations broken and watched
 to fail: …" is the shape.
 

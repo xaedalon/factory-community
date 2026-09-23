@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import {
+  IN_FLIGHT,
   DISCLAIMER,
   NOT_ACCEPTED,
   dependencyStatus,
@@ -350,13 +351,21 @@ export function registerTaskRoutes(
     if (typeof body.name !== 'string' || body.name.trim() === '') {
       return reply.code(400).send({ error: 'A task needs a name.' })
     }
-    if (body.projectId !== undefined && service.projects.get(body.projectId) === undefined) {
+    // A task decides nothing about where it runs; its project does. Refused
+    // here rather than defaulted, because the default this used to have was
+    // the directory the daemon happened to be started in.
+    if (typeof body.projectId !== 'string' || body.projectId.trim() === '') {
+      return reply
+        .code(400)
+        .send({ error: 'A task needs a project: it decides where the work happens.' })
+    }
+    if (service.projects.get(body.projectId) === undefined) {
       return reply.code(400).send({ error: `No project ${body.projectId}.` })
     }
     const task = tasks.create({
       name: body.name.trim(),
+      projectId: body.projectId,
       ...(body.description === undefined ? {} : { description: body.description }),
-      ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
       ...(body.ticketId === undefined ? {} : { ticketId: body.ticketId }),
       ...(body.branch === undefined ? {} : { branch: body.branch }),
       ...(body.directory === undefined ? {} : { directory: body.directory }),
@@ -503,11 +512,11 @@ export function registerTaskRoutes(
    * A task waiting for approval is in flight too: it is holding a paused run
    * partway through.
    */
-  const IN_FLIGHT: readonly TaskState[] = ['running', 'awaiting_approval']
+
 
   app.patch<{
     Params: { id: string }
-    Body: { name?: string; description?: string; workflows?: unknown }
+    Body: { name?: string; description?: string; workflows?: unknown; projectId?: string }
   }>(
     '/api/tasks/:id',
     async (request, reply) => {
@@ -518,10 +527,14 @@ export function registerTaskRoutes(
       const wantsName = body.name !== undefined
       const wantsDescription = body.description !== undefined
       const wantsWorkflows = body.workflows !== undefined
-      if (!wantsName && !wantsDescription && !wantsWorkflows) {
-        return reply
-          .code(400)
-          .send({ error: 'Send { name }, { description } or { workflows: [...] }.' })
+      const wantsProject = body.projectId !== undefined
+      if (!wantsName && !wantsDescription && !wantsWorkflows && !wantsProject) {
+        return reply.code(400).send({
+          error: 'Send { name }, { description }, { workflows: [...] } or { projectId }.',
+        })
+      }
+      if (wantsProject && (typeof body.projectId !== 'string' || body.projectId.trim() === '')) {
+        return reply.code(400).send({ error: 'projectId is the id of a project.' })
       }
       if (wantsWorkflows && !isSelection(body.workflows)) {
         return reply
@@ -541,6 +554,19 @@ export function registerTaskRoutes(
           error: `Cannot change a task that is ${existing.state}.`,
           state: existing.state,
         })
+      }
+
+      // The move first, and on its own terms: the store refuses a task that
+      // something waits for, and a 409 is the honest answer — the request is
+      // well formed and the state is what will not have it, exactly like the
+      // in-flight refusal above.
+      if (wantsProject) {
+        try {
+          tasks.move(request.params.id, (body.projectId as string).trim())
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          return reply.code(message.startsWith('No project') ? 400 : 409).send({ error: message })
+        }
       }
 
       // Name first, so the task that comes back carries both changes.

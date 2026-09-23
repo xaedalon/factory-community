@@ -76,6 +76,7 @@ interface StepRow {
   finished_at: string | null
   detail: string | null
   dropped_bytes: number
+  command: string | null
 }
 
 interface EvidenceRow {
@@ -125,6 +126,13 @@ export interface StartStep {
   readonly index: number
   readonly describe: string
   readonly uses: string
+  /**
+   * What it actually ran, as a line somebody could paste.
+   *
+   * Absent for a step that ran no process — a skipped one — and for every step
+   * recorded before this existed.
+   */
+  readonly command?: string
 }
 
 export interface FinishStep {
@@ -291,14 +299,15 @@ export class RunRepository {
   startStep(runId: string, input: StartStep): RunStep {
     const now = this.#now()
     const inserted = this.#db.run(
-      `INSERT INTO run_steps (run_id, phase, step_index, describe, uses, state, started_at)
-       VALUES (?, ?, ?, ?, ?, 'running', ?)`,
+      `INSERT INTO run_steps (run_id, phase, step_index, describe, uses, state, started_at, command)
+       VALUES (?, ?, ?, ?, ?, 'running', ?, ?)`,
       runId,
       input.phase,
       input.index,
       input.describe,
       input.uses,
       now,
+      input.command ?? null,
     )
     const id = Number(inserted.lastInsertRowid)
     this.#events?.emit('step.started', {
@@ -654,6 +663,7 @@ function hydrateStep(row: StepRow): RunStep {
   if (row.exit_code !== null) step.exitCode = row.exit_code
   if (row.finished_at !== null) step.finishedAt = row.finished_at
   if (row.detail !== null) step.detail = row.detail
+  if (row.command !== null) step.command = row.command
   return step as unknown as RunStep
 }
 

@@ -112,3 +112,28 @@ Feature: Settings Factory owns
       When the interface scale is set to 2
       Then it is refused
       And a problem says there is no user scope
+
+  Rule: a group the writer was never told about is still written
+
+    Settings are merged one level down, so that saving the interface scale does
+    not discard the execution profile. That merge used to name each group by
+    hand — `ui`, `security`, `plugins` — and the cost was hidden: a group not in
+    that list was written nowhere, and silently. The call succeeded, the file
+    was rewritten, and the value was gone. That is the shape the next top-level
+    group would have arrived in, and it is the shape an `x-` extension group
+    arrives in today: a plugin keeping its own settings beside Factory's had
+    them discarded by the next save of anything else.
+
+    It is written over the patch's own keys now, so there is no list to forget.
+
+    Scenario: A group the merge does not name lands anyway
+      Given an installation with the default settings
+      When a patch carries an extension group beside a known one
+      Then the file holds that group
+      And the known setting was saved too
+
+    Scenario: A group says only what it means to change
+      Given the execution profile is "full-access"
+      When the interface scale is set to 2
+      Then the profile is still "full-access"
+      And the scale is 2

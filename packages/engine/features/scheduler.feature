@@ -183,17 +183,14 @@ Feature: Deciding what runs next
       When the scheduler ticks
       Then the started tasks are "First, Third" in that order
 
-    Scenario: A task belonging to no project is never held back by one
-      Given a project "api" that works in its own checkout
-      And a queued task "First" in "api"
-      And a queued task "Loose" with no project
+    Scenario: A project no lookup can answer for holds nothing
+      Given a queued task "First" in a project the lookup cannot see
+      And a queued task "Second" in the same project
       When the scheduler ticks
-      Then 2 tasks are started
-
-    Scenario: A project the scheduler cannot look up holds nothing
-      Given a queued task "First" in a project that has since been removed
-      And a queued task "Second" in a project that has since been removed
-      When the scheduler ticks
+      # Not a project somebody removed: removing one that still has tasks is
+      # refused. This is a scheduler built without a project store at all, or a
+      # row edited away by hand. Defaulting to "exclusive" would stall the work
+      # for no reason.
       Then 2 tasks are started
 
     Scenario: A project that gives each task a worktree runs as many as capacity allows
@@ -221,11 +218,23 @@ Feature: Deciding what runs next
 
     Scenario: A busy project does not hold up the queue behind it
       Given a project "api" that works in its own checkout
+      And a project "web" that gives each task a worktree
       And a queued task "First" in "api"
       And a queued task "Second" in "api"
-      And a queued task "Loose" with no project
+      And a queued task "Loose" in "web"
       When the scheduler ticks
       Then the started tasks are "First, Loose" in that order
+
+    Scenario: The reason says when the project is held by a person, not by work
+      Given a project "api" that works in its own checkout
+      And a task "Waiting" in "api" is awaiting approval
+      And a queued task "Next" in "api"
+      When the scheduler ticks
+      # "One task at a time" reads as a throughput limit. It is also what
+      # happens while somebody has not answered an approval — three tasks
+      # waited behind one that was waiting for a person, and nothing said the
+      # queue was stalled on a human rather than on work.
+      Then the reason given to "Next" says it is waiting for approval
 
     Scenario: An approved task is picked back up even though its project is busy with it
       Given a project "api" that works in its own checkout
@@ -415,3 +424,81 @@ Feature: Deciding what runs next
       # blocker settles the question however many others are merely in flight.
       Then "The model" is "blocked"
       And the reason for "The model" says "Scaffold" was cancelled
+
+  Rule: the gates are about the workflow that is about to run
+
+    A task carries a list of workflows and runs them in order, so "what lane is
+    this task in" and "what flag does it need" have as many answers as the task
+    has workflows. The one that matters is the one the engine would start next.
+
+    This read the *newest run's* workflow instead, falling back to the first in
+    the list — so a task whose first workflow had already run was admitted on
+    the lane and requirements of work that was already over. It cost real work
+    twice: agents ran in a project's own checkout because the flag gate was
+    asked about a workflow that needed no worktree, and two `merge` workflows
+    overlapped because the lane gate was asked about the parallel one before
+    them.
+
+    A running task is the exception, and it is not one: the workflow it is on
+    is the run in flight, which after an `on_fail` is the recovery workflow and
+    not anything in the list.
+
+    Scenario: The lane comes from the workflow about to run, not the one that has run
+      Given a queued task "Ship" whose parallel workflow has run and whose next is sequential
+      And a sequential workflow is already running
+      When the scheduler ticks
+      Then "Ship" was skipped because "a sequential workflow is already running"
+
+    Scenario: The flag gate asks about the workflow about to run
+      Given a queued task "Ship" whose parallel workflow has run and whose next needs "hasWorktree"
+      When the scheduler ticks
+      Then "Ship" was skipped because "a required flag is not set"
+      And the report names "hasWorktree"
+
+    Scenario: A running task holds the lane of the workflow it is actually running
+      Given a task "Repairing" running a sequential recovery workflow that is not in its list
+      And a queued task "Next" on a sequential workflow
+      When the scheduler ticks
+      Then "Next" was skipped because "a sequential workflow is already running"
+
+  Rule: the lane holds across an approval gate too
+
+    A task parked at an approval gate is `running` and holding a paused run.
+    Nothing but the resume loop above will ever pick it up, so that loop was
+    written to hand one over unconditionally — and it did, whatever lane the
+    workflow was in. Approve two tasks in the same second and both resumed
+    their sequential workflows together: measured at 15:03:19.832 and
+    15:03:19.853, two `merge` workflows overlapping, leaving the repository
+    with a staged deletion of a file that had just merged cleanly.
+
+    The other half is that a paused run holds nothing. It is not executing —
+    that is what "paused" means — so counting it as the lane's occupant made
+    each of two approvals see the other as busy while neither was running
+    anything.
+
+    Scenario: Two approved tasks do not resume their sequential workflows together
+      Given a task "First" approved and holding a paused sequential run
+      And a task "Second" approved and holding a paused sequential run
+      When the scheduler ticks
+      Then 1 task was handed over
+      And "Second" was skipped because "a sequential workflow is already running"
+
+    Scenario: The one left behind resumes on the next tick
+      Given a task "First" approved and holding a paused sequential run
+      And a task "Second" approved and holding a paused sequential run
+      And the scheduler ticks
+      When "First" finishes
+      And the scheduler ticks again
+      Then "Second" was handed over
+
+    Scenario: An approved parallel workflow resumes beside a sequential one
+      Given a task "First" approved and holding a paused sequential run
+      And a task "Second" approved and holding a paused parallel run
+      When the scheduler ticks
+      Then 2 tasks were handed over
+
+    Scenario: A task waiting to be approved does not hold the lane
+      Given a task "Waiting" at an approval gate nobody has answered
+      And a queued task "Next" on a sequential workflow
+      When the scheduler ticks
+      Then "Next" is started

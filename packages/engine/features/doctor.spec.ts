@@ -1,7 +1,7 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
-import type { Problem, Scheduling } from '@factory/core'
+import type { GitQuery, Problem, Scheduling } from '@factory/core'
 import { CapabilityHost } from '@factory/core'
 import {
   runDoctor,
@@ -54,12 +54,15 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       // scenario reports its recovered runs against this one's clean store,
       // which looks exactly like a rule misfiring.
       report = undefined
+      git = undefined
+      asked = []
       store = openStore({ file: ':memory:', migrations: MIGRATIONS })
       let ids = 0
       tasks = new TaskRepository({ db: store.db, now, newId: () => `task-${++ids}` })
       runs = new RunRepository({ db: store.db, now, newId: () => `run-${++ids}` })
       projects = new ProjectRepository({ db: store.db, now, newId: () => `project-${++ids}` })
       root = mkdtempSync(join(tmpdir(), 'factory-doctor-'))
+      homeId = ''
     })
     And('the workflow "hello" exists', () => {
       facts.set('hello', { scheduling: 'parallel', requires: [] })
@@ -85,6 +88,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
           projects,
           reconciliation: report ?? { closedRuns: [], blockedTasks: [] },
           workflow: (name) => facts.get(name),
+          // Undefined unless a scenario sets one, so every scenario above this
+          // rule is unaffected and the rule itself stays silent for them.
+          ...(git === undefined ? {} : { git }),
         }),
       )
     }
@@ -102,11 +108,27 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   }
 
   let report: ReturnType<typeof reconcile> | undefined
+  /** Set only by the scenarios about git; absent leaves that rule silent. */
+  let git: GitQuery | undefined
+  let asked: string[] = []
 
   const says = (text: string) => problems.some((problem) => problem.message.includes(text))
 
+  /**
+   * The project the scenarios that are not about projects put their tasks in.
+   *
+   * Made on first use rather than in the Background: the setup-step scenarios
+   * are about an installation that has none at all, and one conjured for every
+   * scenario would quietly finish that step for them.
+   */
+  let homeId = ''
+  const home = (): string => {
+    if (homeId === '') homeId = projects.add({ name: 'sample', path: root }).id
+    return homeId
+  }
+
   const task = (name: string, workflow: string) => {
-    const created = tasks.create({ name, workflows: [workflow] })
+    const created = tasks.create({ name, workflows: [workflow], projectId: home() })
     return created.id
   }
   const workflowRequiring = (name: string, flag: string, lane: Scheduling = 'parallel') => {
@@ -440,7 +462,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     // after it can never set the flag in time. Naming the misordering is the
     // whole value of the message.
     And('a queued task "Ship it" on "deploy" and then "prepare"', () => {
-      const created = tasks.create({ name: 'Ship it', workflows: ['deploy', 'prepare'] })
+      const created = tasks.create({
+        name: 'Ship it',
+        workflows: ['deploy', 'prepare'],
+        projectId: home(),
+      })
       tasks.act(created.id, 'queue')
     })
     When('doctor runs', () => doctor(true))
@@ -540,7 +566,8 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       facts.set('validate', { scheduling: 'parallel', requires: [], needs: [] })
       facts.set('verify', { scheduling: 'parallel', requires: [], needs: ['validate'] })
     }
-    const assigned = (...workflows: string[]) => tasks.create({ name: 'Ship it', workflows }).id
+    const assigned = (...workflows: string[]) =>
+      tasks.create({ name: 'Ship it', workflows, projectId: home() }).id
     const outOfOrder = () => problems.filter((p) => p.rule === 'doctor.needsOutOfOrder')
 
     RuleScenario('A predecessor that comes later in the list is an error', ({
@@ -598,6 +625,250 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
       When('doctor runs', () => doctor(true))
       Then('nothing is out of order', () => expect(outOfOrder()).toEqual([]))
+    })
+  })
+  Rule('a task waiting for something that can never finish is reported', ({ RuleScenario }) => {
+    const graphProblems = () => problems.filter((problem) => problem.rule === 'doctor.dependencyDead')
+    const ids = new Map<string, string>()
+    const waitingPair = (): void => {
+      const build = tasks.create({ name: 'Build', workflows: ['hello'], projectId: home() })
+      const ship = tasks.create({ name: 'Ship it', workflows: ['hello'], projectId: home() })
+      tasks.dependOn(ship.id, build.id)
+      ids.set('Build', build.id)
+      ids.set('Ship it', ship.id)
+    }
+    const cancelled = (): void => {
+      tasks.act(ids.get('Build') as string, 'cancel', { reason: 'Not now.' })
+    }
+
+    RuleScenario('A draft waiting on a cancelled task is reported', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      And('"Build" was cancelled', cancelled)
+      When('doctor runs', () => doctor(true))
+      Then('doctor says "Ship it" is waiting for something that cannot finish', () =>
+        expect(graphProblems()).toHaveLength(1),
+      )
+      And('it names "Build" and why', () => {
+        expect(says('Build')).toBe(true)
+        expect(says('was cancelled')).toBe(true)
+      })
+    })
+
+    RuleScenario('Waiting for something still to run is not reported', ({ Given, When, Then }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      When('doctor runs', () => doctor(true))
+      Then('nothing is reported about the graph', () => expect(graphProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('Waiting for something already done is not reported', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      And('"Build" is done', () => {
+        tasks.act(ids.get('Build') as string, 'mark_done')
+      })
+      When('doctor runs', () => doctor(true))
+      Then('nothing is reported about the graph', () => expect(graphProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A task already blocked is left to the rule that covers it', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task "Ship it" waiting for "Build" in the same project', waitingPair)
+      And('"Build" was cancelled', cancelled)
+      And('"Ship it" is blocked', () => {
+        // Queued first, because `block` is reachable from `queued` and from
+        // `running` — which is exactly how the scheduler blocks a dependent
+        // whose blocker turned out to be dead.
+        tasks.act(ids.get('Ship it') as string, 'queue')
+        tasks.act(ids.get('Ship it') as string, 'block', { reason: 'Waiting on Build.' })
+      })
+      When('doctor runs', () => doctor(true))
+      Then('nothing is reported about the graph', () => expect(graphProblems()).toHaveLength(0))
+    })
+  })
+  Rule('a Factory directory git has half an opinion about is reported', ({ RuleScenario }) => {
+    const gitProblems = () =>
+      problems.filter(
+        (problem) =>
+          problem.rule === 'doctor.productOutputTracked' ||
+          problem.rule === 'doctor.definitionsIgnored',
+      )
+
+    const projectIn = (repository: boolean) => (): void => {
+      const path = join(root, 'work')
+      if (repository) mkdirSync(join(path, '.git'), { recursive: true })
+      else mkdirSync(path, { recursive: true })
+      projects.add({ name: 'work', path, ...(repository ? {} : { usesWorktrees: false }) })
+    }
+
+    /**
+     * Git, as a lookup from argv to an answer.
+     *
+     * Keyed on the exact arguments so a change to the question is a change to
+     * the answer: drop a flag and the key stops matching, the rule goes quiet,
+     * and the scenario that depends on it fails rather than passing for the
+     * wrong reason.
+     */
+    const gitSays = (answers: Record<string, { code: number; stdout: string }>) => (): void => {
+      git = (_cwd, args) => {
+        asked.push(args.join(' '))
+        return answers[args.join(' ')]
+      }
+    }
+    const tracks = (...paths: string[]) => ({
+      code: 0,
+      stdout: paths.map((path) => `${path}\0`).join(''),
+    })
+    const LS = 'ls-files -z -- .xaedalon'
+    const CHECK = 'check-ignore --stdin -z -v'
+    const ignoredBy = (source: string, line: string, pattern: string) => ({
+      code: 0,
+      stdout: `${source}\0${line}\0${pattern}\0.xaedalon/.factory/workflows/a-new-one.workflow.yaml\0`,
+    })
+
+    RuleScenario('A project whose Factory directory is entirely ignored says nothing', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks nothing of its Factory directory', gitSays({ [LS]: tracks() }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A project whose definitions are committed and visible says nothing', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its definitions', () => undefined)
+      And('nothing ignores them', gitSays({
+        [LS]: tracks('.xaedalon/.factory/workflows/theirs.workflow.yaml'),
+        [CHECK]: { code: 1, stdout: '' },
+      }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A committed database is reported', ({ Given, And, When, Then }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its database', gitSays({
+        [LS]: tracks('.xaedalon/.factory/state/factory.db'),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then("doctor says a run's output is committed", () =>
+        expect(gitProblems().map((problem) => problem.rule)).toEqual([
+          'doctor.productOutputTracked',
+        ]),
+      )
+      And('it names the file', () => expect(says('state/factory.db')).toBe(true))
+      And('it says how to untrack it', () => expect(says('git rm -r --cached')).toBe(true))
+    })
+
+    RuleScenario('Committed task artifacts are reported', ({ Given, And, When, Then }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks two of its task artifacts', gitSays({
+        [LS]: tracks(
+          '.xaedalon/.factory/tasks/add-due-dates/artifacts/report/report.md',
+          '.xaedalon/.factory/tasks/add-due-dates/artifacts/report/versions/report-1.md',
+        ),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then("doctor says a run's output is committed", () =>
+        expect(gitProblems().map((problem) => problem.rule)).toEqual([
+          'doctor.productOutputTracked',
+        ]),
+      )
+    })
+
+    RuleScenario('Definitions committed into a directory that is now ignored is an error', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its definitions', () => undefined)
+      And('something ignores them', gitSays({
+        [LS]: tracks('.xaedalon/.factory/workflows/theirs.workflow.yaml'),
+        [CHECK]: ignoredBy('.gitignore', '4', '.xaedalon/'),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says a new workflow would never be seen', () => {
+        const found = gitProblems()
+        expect(found.map((problem) => problem.rule)).toEqual(['doctor.definitionsIgnored'])
+        expect(found[0]?.severity).toBe('error')
+      })
+      And('it names the file and line that hid them', () =>
+        expect(says('.gitignore:4:.xaedalon/')).toBe(true),
+      )
+    })
+
+    RuleScenario('A partial opt-in that re-includes the definitions is not reported', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git tracks its definitions', () => undefined)
+      And('something ignores them and then takes it back', gitSays({
+        [LS]: tracks('.xaedalon/.factory/workflows/theirs.workflow.yaml'),
+        [CHECK]: ignoredBy('.xaedalon/.gitignore', '2', '!.factory/workflows/'),
+      }))
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+    })
+
+    RuleScenario('A machine with no git says nothing', ({ Given, And, When, Then }) => {
+      Given('a project in a repository', projectIn(true))
+      And('git cannot be asked', () => {
+        git = undefined
+      })
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => {
+        expect(gitProblems()).toHaveLength(0)
+        // And says nothing *because it did not run*, rather than because it
+        // threw: a rule that throws is turned into a `doctor.ruleThrew`
+        // problem, which would satisfy the line above while being a bug.
+        expect(problems.filter((problem) => problem.rule === 'doctor.ruleThrew')).toHaveLength(0)
+      })
+    })
+
+    RuleScenario('A project that is not a repository is never asked about', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is not a repository, and a git that would answer', () => {
+        projectIn(false)()
+        // A git that would answer, so the only reason nothing is asked is the
+        // project not being a repository. Without this the scenario passed
+        // because the rule had returned at its first guard.
+        gitSays({ [LS]: tracks('.xaedalon/.factory/state/factory.db') })()
+      })
+      When('doctor runs', () => doctor(true))
+      Then('doctor says nothing about git', () => expect(gitProblems()).toHaveLength(0))
+      // Not merely silent: never asked. A project that is not a repository
+      // has no question to answer, and spawning to find that out is waste.
+      And('git was not asked', () => expect(asked).toHaveLength(0))
     })
   })
 })

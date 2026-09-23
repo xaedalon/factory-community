@@ -573,3 +573,105 @@ Feature: Turning a task into runs
       When the engine works on it
       # Unchanged: parking is for the case a person can actually resolve.
       Then the task is blocked
+
+  Rule: a sequential workflow runs alone, wherever it is in the task's list
+
+    `scheduling: sequential` was enforced only where a task was admitted. After
+    that the task stays `running` from its first workflow to its last, and
+    nothing looked at the field again — so a sequential workflow anywhere but
+    first was never serialised against anything. Measured on a real pipeline:
+    two tasks whose fourth workflow was `merge` ran their merges 20ms apart,
+    twice, and left the repository with a staged deletion of a file that had
+    just merged cleanly. The sample repository's answer was to take a `mkdir`
+    lock inside the workflow, which is the workaround this makes unnecessary.
+
+    Held around one workflow's execution, which is the unit the field is about,
+    and released the moment that execution ends — including when it parks at an
+    approval gate. Holding a lane across a wait for a person is how one
+    forgotten approval freezes every sequential workflow in an installation.
+
+    Scenario: Two tasks reaching a sequential workflow do not overlap
+      Given two tasks whose second workflow is sequential and records when it ran
+      When the engine works on both at once
+      Then the second workflow's two runs did not overlap
+      And both tasks are "done"
+
+    Scenario: The one that waited says so
+      Given two tasks whose second workflow is sequential and records when it ran
+      When the engine works on both at once
+      Then one of the runs says it waited for the sequential lane
+
+    Scenario: Parallel workflows are still parallel
+      Given two tasks whose only workflow is parallel and records when it ran
+      When the engine works on both at once
+      # The other half of the guarantee: serialising everything would be a
+      # correct-looking scheduler that runs one thing at a time.
+      Then the two runs overlapped
+
+  Rule: rejecting an approval ends the run it was asked about
+
+    `reject` moves the task to `blocked` and used to leave its paused run
+    paused for ever. Two consequences, and the second is the serious one. The
+    board showed a run nobody would ever pick up, and doctor said somebody
+    should approve or reject a task that had already been rejected. Worse, a
+    retry afterwards *resumed* that run — `Engine.start` picks a paused run up
+    at the phase after the gate, so the phases the person had declined to
+    authorise ran anyway, with nobody asked a second time.
+
+    `declined` is the state for this — "someone said no at an approval gate" —
+    and until now nothing in the product ever wrote it.
+
+    Everything the run produced is kept. Rejecting is a verdict on what
+    happened, not a reason to throw away the evidence it was reached from.
+
+    Scenario: The run is finished as declined
+      Given a task parked at an approval gate
+      When somebody rejects it
+      Then the run is "declined"
+      And the run's output is still there
+
+    Scenario: A retry after a rejection starts the workflow again
+      Given a task parked at an approval gate
+      And somebody rejects it
+      When the task is retried
+      # Not resumed past the gate: the phases before it run again, and the gate
+      # is asked again.
+      Then the gate was reached a second time
+      And there are 2 runs
+
+  Rule: what a run produced is kept out of git, and nothing else is
+
+    A repository that grows a diff every time an agent thinks is a repository
+    nobody wants, so the first run to write an artifact leaves an ignore file
+    beside the directory it wrote into.
+
+    The narrow one. This fires for a family directory Factory did not create —
+    one from before it wrote an ignore file at all, or one somebody has already
+    shared — so it names what a run produced and nothing else. Hiding the whole
+    directory here would hide a team's next workflow from `git status` while
+    leaving the ones already committed in plain sight.
+
+    Scenario: A run writes an ignore file for the output it produced
+      Given a workflow whose step writes an artifact under a Factory directory
+      And it is the task's only workflow
+      And the task is queued
+      When the engine runs the task
+      Then the family directory has an ignore file
+      And it ignores the task directories, the database and the bundle backups
+      And it leaves the definitions alone
+
+    Scenario: An ignore file already there is left exactly as it is
+      Given a workflow whose step writes an artifact under a Factory directory
+      And an ignore file somebody wrote by hand
+      And it is the task's only workflow
+      And the task is queued
+      When the engine runs the task
+      Then the ignore file still says what they wrote
+
+    Scenario: An artifact outside a Factory directory writes no ignore file
+      Given a workflow whose step writes an artifact somewhere of its own
+      And it is the task's only workflow
+      And the task is queued
+      When the engine runs the task
+      # Nothing to ignore on somebody's behalf: this is a directory they chose.
+      Then no ignore file was written

@@ -25,6 +25,23 @@ Feature: Sharing a workflow as one file
     And the bundle contains the workflows "development, development-failure"
     And the bundle contains the phases "analysis, implement, diagnose"
 
+  Scenario: Export follows what the workflow needs
+    Given "development" needs "analysis-first"
+    When I export "development"
+    # A pipeline of five workflows was five exports and a merge by hand, and
+    # the merge is where a mistake lands unnoticed. `needs` is the other half
+    # of "everything it needs": phases were followed from the start, and the
+    # workflows that must run before it were not.
+    Then the export succeeds
+    And the bundle contains the workflows "development, analysis-first"
+
+  Scenario: A cycle in what workflows need terminates
+    Given "development" needs "analysis-first"
+    And "analysis-first" needs "development"
+    When I export "development"
+    Then the export succeeds
+    And the bundle contains 2 workflows
+
   Scenario: A cycle in the on_fail chain terminates
     Given "development" fails over to "development-failure" with phase "diagnose"
     And "development-failure" fails back to "development"

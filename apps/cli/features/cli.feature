@@ -69,6 +69,24 @@ Feature: The factory command
     When I run "doctor"
     Then the output reports the number of rules run
 
+  Scenario: doctor says what it could not check without a daemon
+    When I run "doctor"
+    # Half the rules need a database this process does not own — the ones about
+    # tasks, worktrees, and what git can see of a project. They were registered
+    # nowhere this command could reach, so nothing printed them at all.
+    Then the output says the running checks were not run
+
+  Scenario: doctor adds what the daemon found
+    Given a daemon reporting a problem of its own
+    When I run "doctor"
+    Then the output carries the daemon's problem
+    And it does not say the running checks were missed
+
+  Scenario: a problem both halves found is reported once
+    Given a daemon reporting a problem this installation also has
+    When I run "doctor"
+    Then the problem appears once
+
   Scenario: doctor reports a definition that does not validate
     Given the project scope defines a broken workflow "oops"
     When I run "doctor"
@@ -181,6 +199,39 @@ Feature: The factory command
     When I run "task new Add due dates --workflow worktree-create --workflow development"
     Then the daemon was asked to create a task with workflows "worktree-create, development"
     And the output says how to start it
+
+  Scenario: a task is moved to another project
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task move task-1 elsewhere"
+    Then the daemon was asked to move it to "elsewhere"
+    And the output says where it is now
+
+  Scenario: moving to a project that is not there says which exist
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task move task-1 nowhere"
+    Then it fails
+    And the output names both projects
+
+  Scenario: a task lands in the only project there is
+    Given a daemon with one project "work"
+    When I run "task new Add due dates"
+    # Not typed, because there is nothing to choose between. A task needs a
+    # project, and asking which of one is busywork.
+    Then the daemon was asked to create it in "work"
+
+  Scenario: with no project there is nowhere to put a task
+    Given a daemon with no projects
+    When I run "task new Add due dates"
+    Then it fails
+    And the output contains "needs a project"
+    And the output says how to add one
+
+  Scenario: with more than one project the task says which
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task new Add due dates"
+    Then it fails
+    And the output contains "--project"
+    And the output names both projects
 
   Scenario: showing a task lists what it can do next
     Given a daemon with a task "Add due dates" that is queued

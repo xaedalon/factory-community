@@ -37,8 +37,8 @@ Feature: The three task tools Factory ships
       And it offers no command of its own
       And it is available
 
-    Scenario: A task with no project has nowhere to open
-      Given the task belongs to no project
+    Scenario: A task whose project is missing has nowhere to open
+      Given the task's project is not in the database
       When "open-terminal" is asked what it offers
       Then it is unavailable
       And the reason says there is nowhere to open
@@ -113,8 +113,8 @@ Feature: The three task tools Factory ships
       Then it is unavailable
       And the reason says Diffity needs one
 
-    Scenario: A task with no project has nothing to diff
+    Scenario: A task whose project is missing has nothing to diff
       Given "diffity" is installed
-      And the task belongs to no project
+      And the task's project is not in the database
       When "diffity" is asked what it offers
       Then it is unavailable

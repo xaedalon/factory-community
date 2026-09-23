@@ -779,6 +779,242 @@ aspirational standard moved to `docs/proposals/`, so its path says what its
 banner always said. No token-shaped string appears in any commit of the
 history; no absolute home path does either.
 
+## After 0.1.0 — a task belongs to a project
+
+| # | What | State |
+|--:|------|-------|
+| 91 | **`tasks.project_id` is `NOT NULL`**, with the migration that gets an existing database there | ✅ done |
+| 92 | **Removing a project is refused** while anything is left in it, with the count | ✅ done |
+| 93 | **The fallbacks deleted** — a dozen of them, across core, engine, daemon, board and CLI | ✅ done |
+| 94 | **The scheduler's gates ask about the workflow about to run** | ✅ done |
+| 95 | **Worktree removal leaves the worktree first** | ✅ done |
+
+The column was nullable, and everything downstream carried a fallback for the
+case. A task with no project ran **wherever the daemon happened to be started**
+— `service.ts` spelled it out twice, for the workspace and again for artifacts
+— which is what the doctor's own setup rule calls "fine for a demonstration and
+wrong for work". Removing a project orphaned its tasks rather than refusing, so
+this was not hypothetical: 21 tasks ended up project-less on one installation
+simply because somebody tidied a list.
+
+The justification, written into `projects.feature`, was that `factory run` in a
+directory needs no project. **It was false.** `factory run` creates no task at
+all — `apps/cli/src/commands/run.ts` touches neither repository; it plans
+against the scope chain of wherever it was invoked and runs in the foreground.
+So nothing was ever kept on a task's behalf by allowing one to belong nowhere.
+
+Decisions, each with a defensible alternative:
+
+- **Refuse the removal rather than cascade.** Deleting a project would delete
+  the record of work that really happened; orphaning kept the record in a form
+  nobody could use. Refusing keeps it by keeping the project, and the message
+  names the count — including archived tasks, because the foreign key counts
+  those too and a count that skipped them would promise a removal the database
+  then refuses.
+- **Delete the rows that are already orphaned.** There is nothing to give them.
+  The migration says how many at boot, which is why `up()` can now return a
+  note: deleting somebody's rows is a one-way door that runs unattended when a
+  daemon starts, and "it is in the schema" is not telling them.
+- **The definition library stays browsable without a project.**
+  `chains.for(projectId?)` keeps its optionality — `factory --serve` has no
+  projects at all, and the builder is useful before the first repository is
+  added.
+- **What remains of "no project" is corruption.** A project row that is not
+  there now means a hand-edited database. Read paths tolerate it so the board
+  can still draw the task and say what is wrong; anything that would *run*
+  refuses and names the project it cannot find.
+
+**The landmine, found by measuring rather than by worrying.** `migrate()` opens
+its transaction before `up()` runs, and `PRAGMA foreign_keys` is a documented
+no-op inside one. `DROP TABLE tasks` with enforcement on deletes the parent
+rows first, firing every `ON DELETE CASCADE` child: every run, step, log,
+artifact, flag, history row and dependency edge of **every task**, including the
+ones being kept. A rebuild without the new `rebuildsForeignKeys` opt-in reports
+`expected +0 to be 1` in its own scenario — the child row destroyed. That opt-in
+toggles the pragma outside the transaction, and the migration ends with `PRAGMA
+foreign_key_check` rather than assuming, in the same spirit as migration 15's
+cycle check. It earned its place immediately: `task_flags` had been left out of
+the orphan cleanup, and the check is what said so.
+
+**Verified against a real database**, not only a seeded one — a copy of an
+installation's own file at version 15, with 11 tasks, 1 orphan and 42 runs. The
+orphan and its four runs went; the ten owned tasks kept all 38 runs, 38 steps,
+63 logs, 37 artifacts, 44 history rows, 50 workflow entries and 9 edges, and
+`foreign_key_check` came back empty.
+
+**Two defects landed in the same branch**, because they live in the files this
+one touched.
+
+The scheduler's `#factsFor` read the *newest run's* workflow, falling back to
+`workflows[0]`. Neither is what a queued task is about to run, so a task whose
+first workflow had finished was admitted on the lane and the requirements of
+work that was already over — agents ran in a project's own checkout because the
+flag gate was asked about a workflow needing no worktree, and two `merge`
+workflows overlapped because the lane gate was asked about the parallel one
+before them. No scenario caught it: every one gave its task a single workflow,
+so all three readings coincided. It now follows the task's state, mirroring
+`Engine.start` — a running task is on its newest run's workflow, which after an
+`on_fail` is a recovery workflow that is not in the list at all; anything else
+is on what `start` would pick.
+
+Worktree removal ran **inside the worktree it was removing**: the workspace is
+resolved when the plan is made, while the worktree is still there. Git was left
+with no current directory to read, so the prune never ran, the step failed, and
+`clears: [hasWorktree]` never took effect — the task kept a flag for a worktree
+that was gone. The step kind is given only a path, so the script now finds the
+repository from the worktree while it still exists and moves there first. Both
+halves are asserted with real git, because the old script exited 0 while
+printing `fatal: Unable to read current working directory`.
+
+**Mutation testing found two gaps and two equivalent mutants.** Dropping `NOT
+NULL` from the rebuilt table and swapping `RESTRICT` back to `SET NULL` both
+survived: every path to the database went through a repository that refused
+first, so the constraints themselves were never exercised — the "declared and
+inert" shape this codebase keeps paying for. Two scenarios now write straight
+to the database and expect it to refuse. Afterwards, dropping `NOT NULL` fails;
+`SET NULL` still survives and is genuinely equivalent, because SQLite refuses a
+`SET NULL` action against a `NOT NULL` column. Reordering the orphan cleanup is
+equivalent too, and for a reason worth writing down: the ids go into a temp
+table first, so no delete reads `tasks` and the order cannot matter.
+
+## After 0.1.0 — the things noticed while building something else
+
+| # | What | State |
+|--:|------|-------|
+| 96 | **The two definition hooks run** — declared, documented and never called | ✅ done |
+| 97 | **`stdin:` is honoured**, and `RunState 'declined'` has a writer | ✅ done |
+| 98 | **One copy of the event vocabulary**, one of the hook names, `process.env` banned | ✅ done |
+| 99 | **A project gets a scope**; a missing one is a 400 rather than a 500 | ✅ done |
+| 100 | **A setting cannot be dropped silently** by a merge that was not told about it | ✅ done |
+| 101 | **A step records the command it ran** | ✅ done |
+| 102 | **A task can be moved to another project** | ✅ done |
+| 103 | **Doctor reports a dead blocker** before the queue reaches it | ✅ done |
+| 104 | **Export follows `needs`** | ✅ done |
+| 105 | **The board says what to add first**, and `pnpm mutate` makes the discipline a command | ✅ done |
+
+Things noticed while building something else are written down as they are
+found — each one a file and a line rather than a feeling — and the list is kept
+outside this repository, because most of its entries are about work in
+progress. This is the session that worked through it: twenty-four entries
+closed, each with the commit that closed it, and two of those closed as
+decisions to leave them alone.
+
+Four findings are worth repeating here, because they are about how this
+codebase fails rather than about any one defect.
+
+**A seam that is declared and never called is the recurring shape.** Both
+definition hooks had been on the plugin SDK since the host was built: counted
+in every conformance report, described in `docs/plugins.md`, and never invoked
+once. `PlannedStep.stdin` was set from a descriptor, carried onto the planned
+step, printed by `--dry-run` as `< file`, and dropped by a runner that
+hard-coded `stdio: ['ignore', …]`. `RunState 'declined'` had no writer — and
+that one was not cosmetic: `reject` left its run paused for ever, so a retry
+*resumed past the gate that had just been refused*. A comment promising
+`beforeStepRun` "once there is a Step type" was the same defect in prose, and
+says why there is no third hook now instead.
+
+**A guarantee enforced at one point is a hint everywhere else.**
+`scheduling: sequential` was checked where the scheduler admits a task, and a
+task stays `running` from its first workflow to its last — so a sequential
+workflow anywhere but first was serialised against nothing. Two `merge`
+workflows ran 20ms apart, twice. The lane is held by the engine now, around the
+execution of each plan that asks for one, which is the unit the field is about.
+
+**A constraint nothing exercises can be dropped without anybody noticing.** Two
+mutations survived their first round — removing `NOT NULL` from the rebuilt
+`tasks` table, and swapping `RESTRICT` back to `SET NULL` — because every path
+to the database went through a repository that refused first. Two scenarios now
+write straight to the database and expect it to refuse. (The second is an
+equivalent mutant: SQLite raises on a `SET NULL` action against a `NOT NULL`
+column, so the two spellings cannot be told apart.)
+
+**A wire format that needs the receiver to know the vocabulary guarantees a
+second copy of it.** `GET /api/events` named each SSE frame after its event,
+which only reaches a client already listening for that name — so the board kept
+its own list, with 14 of the 23 names in it, and an event missing from it was
+one the board silently stopped updating for. Unnamed frames need no list at all.
+
+The discipline itself is a command now. `pnpm mutate` takes a file, a string, a
+replacement and a suite — or a JSON file of them — restores the source whatever
+happens, and exits non-zero if a mutation survived *or could not be applied*,
+because a mutation nobody ran is not a mutation that passed.
+
+## After 0.1.0 — a repository is the user's
+
+| # | What | State |
+|--:|------|-------|
+| 106 | **`.xaedalon/` is ignored the moment Factory creates it** — including the ignore file itself | ✅ done |
+| 107 | **The narrow ignore covers the database and bundle backups**, which were never ignored | ✅ done |
+| 108 | **Doctor asks git** what it can see of a project, and says nothing when both answers are coherent | ✅ done |
+| 109 | **`factory doctor` merges the daemon's report**, which nothing had ever printed | ✅ done |
+
+Two questions, and the first one had no code in it.
+
+**Does `.xaedalon` belong in a worktree?** No, and it never did: a task's
+artifacts, their dated copies and the ignore file are all written under the
+*project*, whatever workspace the steps ran in, and worktrees live outside the
+repository entirely. Evidence is copied into the database as well as left on
+disk for exactly this reason. What does land in a worktree is whatever the
+steps themselves write — a project's own environment build, deliberately — and
+`.xaedalon/.factory` as **tracked files git checked out**, when the definitions
+are committed. The one exception is `factory run`, which has no project and so
+writes beside whatever workspace it is given. All of that is now said in
+`docs/workflows.md` rather than only implied by comments.
+
+**Should Factory write an ignore file?** It already did, and it was the wrong
+one. `.xaedalon/.gitignore` ignored `.factory/tasks/`, which left the
+definitions untracked-and-visible — so registering a project dropped a
+directory of unexplained files into somebody's `git status` and invited a
+commit they had not decided to make.
+
+The default is reversed. The file Factory writes when it **creates** the
+directory contains `*`, which hides everything under it including the file
+itself, so adding a project leaves a repository exactly as it was. Sharing is
+then a decision, and it costs one edit — which is why most of that file is a
+comment explaining how to make it. This is deliberately the opposite of the
+recipe written everywhere else, `*` followed by `!.gitignore`; the point here
+is that git sees nothing at all, and the constant carries a note saying so
+before somebody "fixes" it.
+
+Decisions taken with the owner:
+
+- **The same rule for `factory init` and for the board.** Both go through
+  `createScope`, so there is one behaviour to explain and one file to delete.
+- **A directory Factory did not create keeps the narrow ignore.** It may
+  already be committed and shared, and hiding it wholesale would hide that
+  team's *next* workflow while leaving the ones already committed in plain
+  sight — the half-state the new doctor rule exists to catch. That narrow body
+  also gained `.factory/state/` and `.factory/.trash/`: the database and the
+  backups a bundle import takes were never ignored, so a shared repository had
+  them sitting in `git status` all along.
+- **Doctor may spawn git.** Only git can answer what git ignores, and matching
+  `.gitignore` files here would be a second implementation of a specification
+  we do not own — the shape this codebase keeps paying for. It is the first
+  thing outside the step runner to spawn anything, and every way of failing to
+  get an answer is classified in one place so a caller never reads an exit
+  code.
+
+**The rule would have been invisible, which is its own finding.** Rules that
+need the database are registered only inside the daemon; `factory doctor`
+builds its own host without one, and the board declares `api.doctor()` and
+calls it from nowhere. So `doctor.taskBlocked`, `doctor.worktreeMissing` and
+`doctor.runRecovered` have never been printed by anything a person runs.
+`factory doctor` now asks the daemon and merges, deduplicating on the rule and
+the sentence because both halves run the installation rules over their own
+scope chains.
+
+**What the mutations taught, again.** Six survived the first round. Two were
+equivalent — a guard whose outcome the next guard already produced, and a
+spawn-failure branch the status check subsumed — and both were *deleted*
+rather than explained, because a line no scenario can distinguish is a line
+that can be dropped in a rewrite without anybody noticing. Two were assertions
+that iterated the very constant under test: dropping two of the three output
+directories from `PRODUCT_OUTPUT_DIRS` changed what the file said *and* what
+the test expected, so it passed. They name the three literally now. The last
+two were scenarios that passed for the wrong reason — one never set up the
+condition it was about, and one could not tell "the rule said nothing" from
+"the rule threw and doctor swallowed it".
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -919,6 +1155,8 @@ this repository does not contain.
 | `packages/core/features/located-errors.feature` | Problems carry a file, line and column |
 | `packages/config/features/scope-discovery.feature` | Finding `.factory`; `$HOME` is never a project |
 | `packages/config/features/layered-resolution.feature` | Which definition wins, and what it shadows |
+| `packages/config/features/new-scope.feature` | A scope Factory creates: ignored entirely until somebody shares it, and never written over one that is already there |
+| `packages/core/features/git.feature` | Asking git a read-only question, and every way of not getting an answer looking the same |
 | `packages/config/features/scaffold.feature` | What turning a project setting on copies into the repository, and what it refuses to overwrite |
 | `packages/config/features/scope-plugins.feature` | A project ships its plugins in its own repo |
 | `packages/plugins/provider-claude/features/providers.feature` | Rendering, model roles, capability awareness, conformance |
@@ -931,7 +1169,7 @@ this repository does not contain.
 | `apps/web/features/builder.feature` | Authoring a workflow or phase without writing YAML |
 | `apps/web/features/authoring.feature` | Delete, conflicts, phase references, and the YAML view |
 | `apps/web/features/sharing.feature` | Export a bundle, preview an import, resolve a clash |
-| `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, and the dependency picker |
+| `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, the dependency picker, what an installation with no repository is told, and the settings page — theme, scale, and what agents may reach |
 | `packages/core/features/run.feature` | Running a plan: order, failure, deadlines, approval gates |
 | `packages/core/features/execution-profiles.feature` | Which profile applies: project over installation over `default`, and one name for each |
 | `packages/core/features/workspace-boundary.feature` | What counts as inside the workspace, including `..`, a prefix sibling and a real symlink |
@@ -941,14 +1179,14 @@ this repository does not contain.
 | `packages/core/features/task-dependencies.feature` | One task waiting for another: met, waiting, dead; the queue order; a ring caught |
 | Pro's `desktop-capability.feature` *(not in this repository)* | Pro is a plugin: same host, same suite, no core changes |
 | Pro's `shell.feature` *(not in this repository)* | The desktop shell: attach or start, the menu bar, what is worth a notification |
-| `packages/store/features/store.feature` | Migrations, transactions, and the guards around both |
+| `packages/store/features/store.feature` | Migrations, transactions, and the guards around both — including a rebuild that must not take its children with it, and what an upgrade that deletes rows says about it |
 | `packages/store/features/tasks.feature` | The task lifecycle: one table of moves, what each state offers, what changing the plan does to its place in it, one task waiting for another, and finishing one by hand |
 | `packages/store/features/runs.feature` | Runs, their steps, and output kept inside a budget |
 | `packages/engine/features/engine.feature` | A task becomes runs: recording, gates, failure, and what a crash leaves |
-| `packages/engine/features/scheduler.feature` | What runs next: order, capacity, lanes read from the task's own project, a dependent held until its blockers are done, and why anything was skipped |
-| `packages/engine/features/doctor.feature` | Doctor rules that only exist where a database does |
-| `packages/store/features/projects.feature` | Projects: where work happens, checked when it is written |
-| `packages/core/features/worktree-steps.feature` | `uses: worktree` — isolation a workflow asks for, idempotently |
+| `packages/engine/features/scheduler.feature` | What runs next: order, capacity, lanes read from the task's own project, gates asked about the workflow about to run, a dependent held until its blockers are done, and why anything was skipped |
+| `packages/engine/features/doctor.feature` | Doctor rules that only exist where a database does, including what git can see of a project |
+| `packages/store/features/projects.feature` | Projects: where work happens, checked when it is written, and removable only while nothing is left in them |
+| `packages/core/features/worktree-steps.feature` | `uses: worktree` — isolation a workflow asks for, idempotently, and removed from outside the worktree |
 | `packages/core/features/provider-resolution.feature` | Where the agent is on *this* machine, and what to say when it is nowhere |
 | `packages/config/features/provider-config.feature` | `providers.<id>.command` — the way out when discovery cannot help |
 | `packages/config/features/setup.feature` | What is still missing, contributed by whoever knows |
@@ -999,6 +1237,7 @@ pnpm test          # every .feature below the browser
 pnpm test:e2e      # the browser ones (runs bddgen first — always use this script)
 pnpm typecheck
 pnpm lint
+pnpm mutate        # break a guard on purpose and watch a scenario fail
 
 pnpm dev           # the builder, on http://127.0.0.1:5317
 node apps/daemon/dist/bin.js   # the daemon it talks to, on 127.0.0.1:7317

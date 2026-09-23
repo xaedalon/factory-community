@@ -13,9 +13,10 @@ import {
   type StopReport,
   type Task,
   type TaskWorkflowEntry,
-  IGNORED_BY_PRODUCT,
+  IGNORE_WHAT_RUNS_PRODUCE,
   PRODUCT_FAMILY_DIR,
   fileStamp,
+  toShellString,
 } from '@factory/core'
 import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
@@ -45,6 +46,50 @@ import type { RunRepository, TaskRepository } from '@factory/store'
  * `runPlan` reports that as "declined" because its own caller answered no; here
  * that answer always means "not yet".
  */
+
+/**
+ * The one sequential lane, held while a workflow that asked for it executes.
+ *
+ * `scheduling: sequential` was checked only where the scheduler admits a task.
+ * After that the task stays `running` from its first workflow to its last and
+ * nothing looked at the field again, so a sequential workflow anywhere but
+ * first was never serialised against anything — two tasks whose fourth
+ * workflow was `merge` ran their merges 20ms apart, twice.
+ *
+ * In this process, which is the scope that matters: the daemon holds one
+ * engine and it is what runs a board's work. `factory run` is a foreground
+ * process of its own and is not serialised against the daemon, the same way it
+ * is not scheduled by it.
+ *
+ * A plain FIFO queue rather than a library: waiters are resumed in the order
+ * they arrived, so a task cannot be starved by later ones.
+ */
+class Lane {
+  #held = false
+  readonly #waiting: (() => void)[] = []
+
+  get busy(): boolean {
+    return this.#held
+  }
+
+  async take(): Promise<() => void> {
+    if (this.#held) await new Promise<void>((resume) => this.#waiting.push(resume))
+    this.#held = true
+    let released = false
+    return () => {
+      // Idempotent. There is one caller and it releases in a `finally`, so
+      // nothing reaches this twice today and no scenario can make it — it is
+      // here because the failure it prevents is handing one lane to two
+      // waiters, which would look exactly like the defect this class exists
+      // to fix and would be found by the same expensive route.
+      if (released) return
+      released = true
+      const next = this.#waiting.shift()
+      if (next === undefined) this.#held = false
+      else next()
+    }
+  }
+}
 
 export interface EngineOptions {
   readonly tasks: TaskRepository
@@ -154,6 +199,7 @@ export class Engine {
    * scheduler swallowed it because the task was no longer running.
    */
   readonly #cancelled = new Set<string>()
+  readonly #lane = new Lane()
   readonly #events: EventBus | undefined
   readonly #timeoutSeconds: number | undefined
   readonly #now: () => Date
@@ -310,11 +356,12 @@ export class Engine {
   }
 
   /**
-   * Stop a task's processes whenever anything cancels it.
+   * React to the two transitions that mean something to a run in flight.
    *
-   * Subscribed rather than called by the cancel route, so that every way of
-   * cancelling — the API, the CLI, a future desktop menu — goes through one
-   * implementation. The route only has to change the state; this notices.
+   * Subscribed rather than called by each route, so that every way of
+   * cancelling or rejecting — the API, the CLI, a future desktop menu — goes
+   * through one implementation. A route only has to change the state; this
+   * notices.
    *
    * Deferred to a microtask for the reason the scheduler gives: the transition
    * is emitted from inside the store's transaction, and doing work there would
@@ -323,11 +370,51 @@ export class Engine {
   watch(): () => void {
     if (this.#events === undefined) return () => {}
     return this.#events.on('task.transitioned', (event) => {
-      if (event.payload.to !== 'cancelled') return
-      queueMicrotask(() => {
-        void this.cancel(event.payload.taskId)
-      })
+      const { taskId, action, to } = event.payload
+      if (to === 'cancelled') {
+        queueMicrotask(() => {
+          void this.cancel(taskId)
+        })
+        return
+      }
+      // A rejected approval ends the run it was asked about. It used to leave
+      // it paused for ever: the board drew a run nobody would pick up, doctor
+      // asked somebody to approve or reject a task that had been rejected —
+      // and a retry *resumed* it, continuing at the phase after the gate, so
+      // the work the person declined to authorise ran anyway with nobody asked
+      // a second time.
+      //
+      // `declined` is the state for exactly this, and nothing in the product
+      // wrote it until now. What the run produced is kept: rejecting is a
+      // verdict on what happened, not a reason to discard the evidence.
+      if (action === 'reject') {
+        queueMicrotask(() => {
+          const paused = this.#runs.pausedFor(taskId)
+          if (paused === undefined) return
+          this.#runs.finish(paused.id, 'declined', { detail: 'Approval was refused.' })
+        })
+      }
     })
+  }
+
+  /**
+   * Wait for the sequential lane, if this plan asked for one.
+   *
+   * The wait is written into the run's own log rather than left invisible.
+   * A run that is `running` and has not started a step yet looks stuck, and
+   * "waiting for something else to finish" is the difference between a
+   * scheduler working and a scheduler hung.
+   */
+  async #takeLane(plan: ResolvedPlan, run: Run): Promise<() => void> {
+    if (plan.scheduling !== 'sequential') return () => {}
+    if (this.#lane.busy) {
+      this.#runs.append({
+        runId: run.id,
+        stream: 'stderr',
+        text: 'waiting: another sequential workflow is running\n',
+      })
+    }
+    return this.#lane.take()
   }
 
   async #runOne(input: {
@@ -428,59 +515,83 @@ export class Engine {
 
     this.#inFlight.set(task.id, run.id)
 
-    const result = await this.#execute({
-      plan,
-      env: this.#env,
-      processes: this.#processes,
-      ...(this.#timeoutSeconds === undefined ? {} : { timeoutSeconds: this.#timeoutSeconds }),
-      ...(this.#events === undefined ? {} : { events: this.#events }),
-      runId: run.id,
-      ...(input.resuming?.resumePhase === undefined
-        ? {}
-        : { startPhase: input.resuming.resumePhase, approved: true }),
-      onStep: (step, phase) => {
-        const stored = this.#runs.startStep(run.id, {
-          phase: phase.name,
-          index: step.index,
-          describe: step.planned.describe,
-          uses: step.uses,
-        })
-        stepIds.set(key(phase.name, step.index), stored.id)
-      },
-      onOutput: (chunk, stream, step, phase) => {
-        const stepId = stepIds.get(key(phase.name, step.index))
-        this.#runs.append({
-          runId: run.id,
-          ...(stepId === undefined ? {} : { stepId }),
-          stream,
-          text: chunk,
-        })
-      },
-      onStepDone: (outcome, step, phase) => {
-        // Written down only once the process actually started. `error` is set
-        // exactly when it could not be — no CLI on PATH, a directory that has
-        // gone — and in that case no session was created, so recording the id
-        // would leave every later run asking to resume a conversation that was
-        // never had. Nothing recorded means the next run starts one.
-        if (step.planned.session?.creates === true && outcome.error === undefined) {
-          this.#tasks.rememberSession(task.id, {
-            id: step.planned.session.id,
-            provider: step.planned.session.provider,
+    // The lane, taken around this one workflow's execution — which is the unit
+    // `scheduling:` is about — and released the moment it ends, including when
+    // the run parks at an approval gate. Holding it across a wait for a person
+    // is how one forgotten approval would freeze every sequential workflow in
+    // the installation.
+    const release = await this.#takeLane(plan, run)
+    let result: RunResult
+    try {
+      // Cancelled while queued behind another sequential workflow: nothing has
+      // been spawned, so there is nothing for `cancel` to stop and the run
+      // would otherwise execute after somebody decided it should not.
+      if (this.#cancelled.delete(run.id)) {
+        this.#runs.finish(run.id, 'cancelled', { detail: 'Stopped on request.' })
+        return { run: this.#runs.get(run.id) as Run, stop: 'cancelled', problems: [] }
+      }
+      result = await this.#execute({
+        plan,
+        env: this.#env,
+        processes: this.#processes,
+        ...(this.#timeoutSeconds === undefined ? {} : { timeoutSeconds: this.#timeoutSeconds }),
+        ...(this.#events === undefined ? {} : { events: this.#events }),
+        runId: run.id,
+        ...(input.resuming?.resumePhase === undefined
+          ? {}
+          : { startPhase: input.resuming.resumePhase, approved: true }),
+          onStep: (step, phase) => {
+          const stored = this.#runs.startStep(run.id, {
+            phase: phase.name,
+            index: step.index,
+            describe: step.planned.describe,
+            uses: step.uses,
+            // What actually ran, not what the phase said it would: "what did
+            // this agent run, and with what authority?" is the first question
+            // any audit asks, and reading the phase file back later answers a
+            // different one as soon as somebody has edited it. Rendered the
+            // way `--dry-run` prints it, so the two cannot disagree.
+            command: toShellString(step.planned),
           })
-        }
-        const stepId = stepIds.get(key(phase.name, step.index))
-        if (stepId === undefined) return
-        this.#runs.finishStep(stepId, {
-          state: stepStateOf(outcome.exitCode, outcome.timedOut),
-          attempts: outcome.attempts,
-          ...(outcome.exitCode === null ? {} : { exitCode: outcome.exitCode }),
-          ...(outcome.error === undefined ? {} : { detail: outcome.error }),
-        })
-      },
-      // Always "not yet". The engine has no person to ask, so a gate parks the
-      // run instead of guessing an answer.
-      onApproval: () => Promise.resolve(false),
-    })
+          stepIds.set(key(phase.name, step.index), stored.id)
+        },
+        onOutput: (chunk, stream, step, phase) => {
+          const stepId = stepIds.get(key(phase.name, step.index))
+          this.#runs.append({
+            runId: run.id,
+            ...(stepId === undefined ? {} : { stepId }),
+            stream,
+            text: chunk,
+          })
+        },
+        onStepDone: (outcome, step, phase) => {
+          // Written down only once the process actually started. `error` is set
+          // exactly when it could not be — no CLI on PATH, a directory that has
+          // gone — and in that case no session was created, so recording the id
+          // would leave every later run asking to resume a conversation that was
+          // never had. Nothing recorded means the next run starts one.
+          if (step.planned.session?.creates === true && outcome.error === undefined) {
+            this.#tasks.rememberSession(task.id, {
+              id: step.planned.session.id,
+              provider: step.planned.session.provider,
+            })
+          }
+          const stepId = stepIds.get(key(phase.name, step.index))
+          if (stepId === undefined) return
+          this.#runs.finishStep(stepId, {
+            state: stepStateOf(outcome.exitCode, outcome.timedOut),
+            attempts: outcome.attempts,
+            ...(outcome.exitCode === null ? {} : { exitCode: outcome.exitCode }),
+            ...(outcome.error === undefined ? {} : { detail: outcome.error }),
+          })
+        },
+        // Always "not yet". The engine has no person to ask, so a gate parks the
+        // run instead of guessing an answer.
+          onApproval: () => Promise.resolve(false),
+      })
+    } finally {
+      release()
+    }
 
     // Checked before anything else is recorded. A cancelled run's steps exited
     // because they were killed, and reading that as a failure would block a task
@@ -639,18 +750,24 @@ export class Engine {
   /**
    * Keep a run's output out of `git status`.
    *
-   * Definitions under `.xaedalon/.factory` are meant to be committed; what a run
-   * produced is not, and a repository that grows a diff every time an agent
-   * thinks is a repository nobody wants. Written once, next to the directory it
-   * is about, and never touched again if it is already there — it is the user's
-   * file the moment it exists.
+   * A repository that grows a diff every time an agent thinks is a repository
+   * nobody wants. Written once, next to the directory it is about, and never
+   * touched again if it is already there — it is the user's file the moment it
+   * exists.
+   *
+   * The **narrow** body, not the one `createScope` writes. This fires for a
+   * directory Factory did not create: one from before it wrote an ignore file
+   * at all, or one somebody has already shared. Hiding the whole directory
+   * there would hide a team's next workflow from `git status` while leaving
+   * the ones already committed in plain sight — the half-state
+   * `doctor.definitionsIgnored` exists to catch.
    */
   #ignoreProductOutput(artifactPath: string): void {
     const family = artifactPath.indexOf(`${sep}${PRODUCT_FAMILY_DIR}${sep}`)
     if (family === -1) return
     const file = join(artifactPath.slice(0, family), PRODUCT_FAMILY_DIR, '.gitignore')
     if (existsSync(file)) return
-    writeFileSync(file, `${IGNORED_BY_PRODUCT}\n`)
+    writeFileSync(file, IGNORE_WHAT_RUNS_PRODUCE)
   }
 
   /**

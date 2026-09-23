@@ -28,14 +28,24 @@ const error = ref<string | undefined>(undefined)
 /**
  * What the project page just wrote into a repository, handed over on the way.
  *
- * Turning worktrees or environments on copies workflow files into somebody's
- * working copy. That is a thing Factory did to their repository and the next
- * thing they do is a `git status`, so it is said out loud — on the page they
- * land on, not the one they left.
+ * Registering a project, or turning worktrees or environments on, copies
+ * workflow files into somebody's working copy. This used to be said out loud
+ * because the next thing they do is a `git status` — and now it is said out
+ * loud because their `git status` will *not* mention it: a directory Factory
+ * created is ignored, and their editor's file tree probably hides it too. This
+ * notice is the only place the files are named.
  */
 const scaffolded = ref<string[]>(
   Array.isArray(window.history.state?.scaffolded) ? window.history.state.scaffolded : [],
 )
+
+/**
+ * Whether Factory created the family directory just now.
+ *
+ * Only then is "git ignores all of it" true. A repository that already had a
+ * scope may well be sharing it, and saying so there would be a lie.
+ */
+const hidden = ref<boolean>(window.history.state?.hidden === true)
 
 async function load(): Promise<void> {
   try {
@@ -82,11 +92,16 @@ onMounted(load)
     >
       <p class="flex items-center gap-2">
         <AppIcon name="info" />
-        Copied into the project, ready to edit and commit:
+        Written into the project:
       </p>
       <ul class="mt-1 space-y-0.5">
         <li v-for="file in scaffolded" :key="file" class="font-mono text-xs">{{ file }}</li>
       </ul>
+      <p v-if="hidden" class="mt-2 text-xs" data-testid="scaffolded-hidden">
+        Git ignores all of it, so your <code class="font-mono">git status</code> is unchanged. To
+        share these with your team, follow the note in
+        <code class="font-mono">.xaedalon/.gitignore</code>.
+      </p>
     </div>
 
     <p v-if="loading" class="text-sm text-[var(--color-ink-muted)]">Loading…</p>

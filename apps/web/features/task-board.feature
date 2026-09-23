@@ -31,6 +31,21 @@ Feature: The task board
     And I go back to the board
     Then "Just an idea" does not offer "Queue"
 
+  Scenario: A finished task says which workflow ran
+    Given the task "Add due dates" exists on "hello"
+    And it has been run
+    When I open the tasks page
+    # Every `done` row drew an em dash, because the *current* workflow is the
+    # next one and a finished task has none — so the column read as missing
+    # data on exactly the rows where the answer is most obvious.
+    Then the workflow column for "Add due dates" says "hello"
+
+  Scenario: With no repository the board says what to add first
+    Given no repositories are registered
+    When I open the tasks page
+    Then the board asks for a repository
+    And it offers to add one
+
   Scenario: The summary counts what is there
     Given the task "Add due dates" exists on "hello"
     When I open the tasks page
@@ -123,12 +138,14 @@ Feature: The task board
     Then the task finishes
 
   Scenario: The setup page says what is still missing
+    Given no repositories are registered
     When I open the setup page
     Then "Add a repository" is a setup step
     And it is marked essential
     And the page says Factory cannot run work yet
 
   Scenario: A setup step offers the command that fixes it
+    Given no repositories are registered
     When I open the setup page
     Then a setup step offers a command to copy
 
@@ -260,7 +277,29 @@ Feature: The task board
       And I press remove once
       Then the project is still there
       When I confirm the removal
-      Then no projects are listed
+      Then "work" is no longer listed
+
+    Scenario: Adding a repository says what it put in it
+      When I add a project at a repository with no Factory directory
+      # Not because a `git status` is coming — one is not, which is the point.
+      # Git ignores the directory Factory just created and the editor's file
+      # tree probably hides it, so this notice is the only place the files are
+      # named at all.
+      Then the page lists the scope it created
+      And the page lists the worktree definitions it copied in
+      And the page says git ignores all of it
+
+    Scenario: A project with work still in it is not removed
+      Given the project "work" is registered
+      And the task "Add due dates" exists in "work" on "hello"
+      When I open the projects page
+      And I open the project "work"
+      And I press remove once
+      And I confirm the removal
+      # Said on screen, with the count, rather than the project quietly
+      # vanishing and its task with it.
+      Then the page says 1 task is still in it
+      And "work" is still listed
 
   Rule: The rail says which project the board is about
 
@@ -339,6 +378,14 @@ Feature: The task board
       When I open the tasks page
       And I start a new task
       Then the new task page is open
+
+    Scenario: With no repository there is nowhere to put a task
+      Given no repositories are registered
+      When I open the new task page
+      # A task happens in a project. Rather than a form that refuses on submit,
+      # the one thing worth doing is offered.
+      Then the page says a task needs a project
+      And it offers to add a repository
 
     Scenario: Workflows keep the order they were added in
       Given the project defines the workflow "hello" that prints "hello"
@@ -1191,3 +1238,34 @@ Feature: The task board
       # A dependency between projects has no owner, and the store refuses one.
       # Offering it would be offering a refusal.
       And "Loose" cannot be chosen to wait for
+
+  Rule: the settings page is where an installation is configured
+
+    The theme and the interface scale are driven through this page by the
+    scenarios above, so it is opened — but the setting worth the most care had
+    no coverage at all: what agents may reach. It is the one a person is most
+    likely to change without knowing what it costs, and choosing the option
+    that removes the workspace boundary should never be quiet.
+
+    Background:
+      Given the project defines the workflow "hello" that prints "hello"
+      When I open the tasks page
+
+    Scenario: The page says where the settings file is
+      When I open the settings page
+      Then it names the file it writes
+      And the file is in the user scope
+
+    Scenario: The execution profile is chosen here and stays chosen
+      When I open the settings page
+      And I choose Full Access
+      Then Full Access is marked as chosen
+      And the page warns what Full Access costs
+      When the page is reloaded
+      Then Full Access is marked as chosen
+
+    Scenario: Confining agents again takes the warning away
+      When I open the settings page
+      And I choose Full Access
+      And I choose the default profile
+      Then the page does not warn about Full Access

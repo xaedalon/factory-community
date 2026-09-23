@@ -139,6 +139,14 @@ Definitions are files, because they are authored, reviewed and committed. They r
 chain of scopes — **project** (`./.xaedalon/.factory`) wins over **user** (`~/.xaedalon/.factory`) wins over the
 built-ins shipped in the package — and a definition hiding another is reported, never silent.
 
+A project's directory is ignored by git the moment Factory creates it, so trying Factory on a
+repository leaves that repository alone. Sharing the definitions with a team is one edit to
+`.xaedalon/.gitignore`, which says how.
+
+A project's directory is ignored by git the moment Factory creates it, so trying Factory on a
+repository leaves that repository alone. Sharing the definitions with a team is one edit to
+`.xaedalon/.gitignore`, which says how.
+
 Tasks, runs and logs are not files. They are rows in `state/factory.db` in the writable scope,
 because they are queried by state and written while something else is reading them.
 

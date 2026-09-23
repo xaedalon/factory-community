@@ -202,24 +202,41 @@ export async function create(
 ): Promise<CommandResult> {
   try {
     // Named rather than by id: nobody types a uuid, and the CLI knows how to
-    // ask what the names are.
-    let projectId: string | undefined
+    // ask what the names are. Asked for every task, not only a named one: a
+    // task needs a project, and the daemon's refusal would arrive after the
+    // person had already typed the whole command.
+    const projects = await client.request<{ items: { id: string; name: string }[] }>(
+      '/api/projects',
+    )
+    const names = projects.items.map((project) => project.name).join(', ')
+    let projectId: string
     if (input.project !== undefined) {
-      const projects = await client.request<{ items: { id: string; name: string }[] }>(
-        '/api/projects',
-      )
       const found = projects.items.find((project) => project.name === input.project)
       if (found === undefined) {
         return failed([
           `No project called "${input.project}".`,
           style.dim(
             projects.items.length === 0
-              ? 'Add one on the Projects page, or with the API.'
-              : `Known: ${projects.items.map((project) => project.name).join(', ')}`,
+              ? 'Add one with "factory project add <name> <path>".'
+              : `Known: ${names}`,
           ),
         ])
       }
       projectId = found.id
+    } else if (projects.items.length === 1) {
+      // The common case, and the one worth not making anybody type: with one
+      // repository registered there is no ambiguity to resolve.
+      projectId = projects.items[0]?.id as string
+    } else if (projects.items.length === 0) {
+      return failed([
+        'A task needs a project, and none have been added.',
+        style.dim('Add one with "factory project add <name> <path>".'),
+      ])
+    } else {
+      return failed([
+        'More than one project: say which with --project.',
+        style.dim(`Known: ${names}`),
+      ])
     }
 
     const created = await client.request<{ task: TaskSummary; actions: { action: string }[] }>(
@@ -229,7 +246,7 @@ export async function create(
         body: {
           name: input.name,
           workflows: input.workflows,
-          ...(projectId === undefined ? {} : { projectId }),
+          projectId,
           ...(input.branch === undefined ? {} : { branch: input.branch }),
           ...(input.ticket === undefined ? {} : { ticketId: input.ticket }),
           ...(input.description === undefined ? {} : { description: input.description }),
@@ -390,6 +407,47 @@ export async function depends(
       ],
       result,
     )
+  } catch (error) {
+    if (error instanceof AmbiguousId) return failed([error.message, style.dim('Use more of it.')])
+    return asFailure(error)
+  }
+}
+
+/**
+ * `factory task move <id> <project>` — put it in another project.
+ *
+ * Named rather than by id, like `task new --project`: nobody types a uuid.
+ * Every refusal the store makes — a task that is running, one an edge joins to
+ * another — comes back as the sentence it wrote, because rewording it here
+ * would mean two explanations of one rule.
+ */
+export async function move(
+  client: DaemonClient,
+  id: string,
+  project: string,
+  style: Style,
+): Promise<CommandResult> {
+  try {
+    const resolved = await resolveId(client, id)
+    const projects = await client.request<{ items: { id: string; name: string }[] }>(
+      '/api/projects',
+    )
+    const found = projects.items.find((entry) => entry.name === project)
+    if (found === undefined) {
+      return failed([
+        `No project called "${project}".`,
+        style.dim(
+          projects.items.length === 0
+            ? 'Add one with "factory project add <name> <path>".'
+            : `Known: ${projects.items.map((entry) => entry.name).join(', ')}`,
+        ),
+      ])
+    }
+    const result = await client.request<{ task: TaskSummary }>(
+      `/api/tasks/${encodeURIComponent(resolved)}`,
+      { method: 'PATCH', body: { projectId: found.id } },
+    )
+    return ok([`${result.task.name} is now in ${project}.`], result)
   } catch (error) {
     if (error instanceof AmbiguousId) return failed([error.message, style.dim('Use more of it.')])
     return asFailure(error)

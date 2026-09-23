@@ -1,7 +1,15 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -64,6 +72,23 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     for (const extra of [root, ...roots]) rmSync(extra, { recursive: true, force: true })
     roots = []
   })
+
+  /**
+   * The project tasks are created in.
+   *
+   * Set by the Background and replaced by any scenario that adds one of its
+   * own, so a task lands in whichever project the scenario is about.
+   */
+  let projectId = ''
+
+  const addProject = async (name: string, path: string, usesWorktrees?: boolean) => {
+    await call('POST', '/api/projects', {
+      name,
+      path,
+      ...(usesWorktrees === undefined ? {} : { usesWorktrees }),
+    })
+    projectId = (response.body.project as { id: string } | undefined)?.id ?? ''
+  }
 
   const file = (path: string, contents: string) => {
     mkdirSync(dirname(path), { recursive: true })
@@ -144,11 +169,18 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       file(join(scope, 'workflows', 'hello.workflow.yaml'), 'name: hello\nphases: [greet]\n')
       file(join(scope, 'phases', 'greet.phase.yaml'), 'name: greet\nsteps: [{run: echo hello}]\n')
     })
+    // A task cannot be created without one. Named so the many scenarios that
+    // add their own project called "work" still can — two projects may share a
+    // path, only the name has to be unique.
+    And('a project to create tasks in', async () => {
+      await addProject('sample', join(root, 'work'))
+    })
   })
 
   const create = async (name: string, workflows?: string[]) => {
     await call('POST', '/api/tasks', {
       name,
+      projectId,
       ...(workflows === undefined ? {} : { workflows }),
     })
     taskId = (response.body.task as { id: string }).id
@@ -358,17 +390,6 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('nothing was dropped from the output', () => expect(response.body.dropped).toBe(0))
   })
 
-  let projectId = ''
-
-  const addProject = async (name: string, path: string, usesWorktrees?: boolean) => {
-    await call('POST', '/api/projects', {
-      name,
-      path,
-      ...(usesWorktrees === undefined ? {} : { usesWorktrees }),
-    })
-    projectId = (response.body.project as { id: string } | undefined)?.id ?? ''
-  }
-
   /** A real repository with a commit: `git worktree add` needs a HEAD. */
   const makeRepository = (at: string): string => {
     mkdirSync(at, { recursive: true })
@@ -393,9 +414,46 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
     Then('the response is 201', () => expect(response.statusCode).toBe(201))
     And('the project is listed', async () => {
+      const added = projectId
       await call('GET', '/api/projects')
-      expect(response.body.items).toHaveLength(1)
+      const items = response.body.items as { id: string }[]
+      expect(items.some((item) => item.id === added)).toBe(true)
     })
+  })
+
+  Scenario('A repository with no Factory scope is given one', ({ When, Then, And }) => {
+    let fresh = ''
+    When('I add the project "fresh" at a repository with no scope', async () => {
+      fresh = join(root, 'fresh')
+      mkdirSync(join(fresh, '.git'), { recursive: true })
+      await addProject('fresh', fresh)
+    })
+    Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    Then('the project has a scope of its own', () =>
+      expect(existsSync(join(fresh, '.xaedalon', '.factory', 'config.yaml'))).toBe(true),
+    )
+    And('the response says the scope was created', () =>
+      expect((response.body.scope as { created: boolean }).created).toBe(true),
+    )
+  })
+
+  Scenario('A repository that already has a scope keeps it', ({ Given, When, Then, And }) => {
+    let fresh = ''
+    Given('a repository whose scope says something of its own', () => {
+      fresh = join(root, 'fresh')
+      file(join(fresh, '.xaedalon', '.factory', 'config.yaml'), '# mine\nkind: factory.scope/v1\nscope: project\n')
+      mkdirSync(join(fresh, '.git'), { recursive: true })
+    })
+    When('I add the project "fresh" at that repository', () => addProject('fresh', fresh))
+    Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    And('the scope still says what it said', () =>
+      expect(
+        readFileSync(join(fresh, '.xaedalon', '.factory', 'config.yaml'), 'utf8'),
+      ).toContain('# mine'),
+    )
+    And('the response does not claim to have created one', () =>
+      expect((response.body.scope as { created: boolean }).created).toBe(false),
+    )
   })
 
   Scenario('A project at a path that does not exist is refused', ({ When, Then, And }) => {
@@ -418,6 +476,42 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the task belongs to the project', () =>
       expect((response.body.task as { projectId?: string }).projectId).toBe(projectId),
     )
+  })
+
+  Scenario('A task without a project is refused', ({ When, Then, And }) => {
+    When('I create the task "Add due dates" naming no project', () =>
+      call('POST', '/api/tasks', { name: 'Add due dates' }),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    And('the response says a task needs a project', () =>
+      expect(String(response.body.error)).toContain('needs a project'),
+    )
+  })
+
+  Scenario('A project with nothing in it can be removed', ({ Given, When, Then }) => {
+    Given('the project "work" exists', () => addProject('work', join(root, 'work')))
+    When('I remove that project', () => call('DELETE', `/api/projects/${projectId}`))
+    Then('the response is 204', () => expect(response.statusCode).toBe(204))
+  })
+
+  Scenario('A project that still has tasks cannot be removed', ({ Given, And, When, Then }) => {
+    let removed = ''
+    Given('the project "work" exists', () => addProject('work', join(root, 'work')))
+    And('the task "Add due dates" exists in that project', async () => {
+      removed = projectId
+      await create('Add due dates')
+    })
+    When('I remove that project', () => call('DELETE', `/api/projects/${removed}`))
+    Then('the response is 409', () => expect(response.statusCode).toBe(409))
+    And('the response says 1 task is still in it', () =>
+      expect(String(response.body.error)).toContain('1 task still in it'),
+    )
+    And('the response carries the count', () => expect(response.body.tasks).toBe(1))
+    And('the project is still listed', async () => {
+      await call('GET', '/api/projects')
+      const items = response.body.items as { id: string }[]
+      expect(items.some((item) => item.id === removed)).toBe(true)
+    })
   })
 
   Scenario("A task in a project runs in that project's directory", ({
@@ -491,9 +585,10 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       git('add', '.')
       git('commit', '-m', 'first')
       await addProject('repo', repo)
+      const mine = projectId
       worktrees = ((await app.inject({ method: 'GET', url: '/api/projects' })).json() as {
-        items: { worktreesRoot: string }[]
-      }).items[0]?.worktreesRoot as string
+        items: { id: string; worktreesRoot: string }[]
+      }).items.find((item) => item.id === mine)?.worktreesRoot as string
     })
     And('the task "Add due dates" in it, on "worktree-create" and then "where"', async () => {
       // In the user scope, which every project can see. The daemon's own
@@ -537,12 +632,80 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Scenario('A worktree is removed even though the step runs inside it', ({
+    Given,
+    And,
+    When,
+    Then,
+  }) => {
+    let worktrees = ''
+    let directory = ''
+    Given('a project that is a real git repository', async () => {
+      await addProject('repo', makeRepository(join(root, 'repo')))
+      const mine = projectId
+      worktrees = ((await app.inject({ method: 'GET', url: '/api/projects' })).json() as {
+        items: { id: string; worktreesRoot: string }[]
+      }).items.find((item) => item.id === mine)?.worktreesRoot as string
+    })
+    And(
+      'the task "Add due dates" in it, on "worktree-create" and then "worktree-delete"',
+      async () => {
+        await call('POST', '/api/tasks', {
+          name: 'Add due dates',
+          projectId,
+          branch: 'feature/due-dates',
+          workflows: ['worktree-create', 'worktree-delete'],
+        })
+        taskId = (response.body.task as { id: string }).id
+        directory = (response.body.task as { directory: string }).directory
+      },
+    )
+    When('I queue the task', () => call('POST', `/api/tasks/${taskId}/actions/queue`))
+    And('the work finishes', () =>
+      until(async () => {
+        await reload()
+        return stateOf() === 'done' || stateOf() === 'blocked'
+      }, 'the task to finish'),
+    )
+    Then('no worktree is left for the task', () =>
+      expect(existsSync(join(worktrees, directory))).toBe(false),
+    )
+    And('the task no longer has the flag "hasWorktree"', () =>
+      expect((response.body.task as { flags: string[] }).flags).not.toContain('hasWorktree'),
+    )
+    // The symptom, asserted as well as the outcome: the old script exited 0
+    // with this on stderr and the prune never ran, so a scenario watching only
+    // the exit code would have passed.
+    And('nothing in the run mentions being unable to read the current directory', async () => {
+      const runs = response.body.runs as { id: string; workflow: string }[]
+      const removal = runs.find((run) => run.workflow === 'worktree-delete')
+      await call('GET', `/api/runs/${removal?.id}`)
+      const steps = response.body.steps as { id: number }[]
+      for (const step of steps) {
+        await call('GET', `/api/runs/${removal?.id}/logs?step=${step.id}`)
+        const text = (response.body.lines as { text: string }[])
+          .map((line) => line.text)
+          .join('')
+        expect(text).not.toContain('Unable to read current working directory')
+      }
+    })
+  })
+
   const stepFor = (id: string) =>
     (response.body.items as { id: string; done: boolean; essential?: boolean }[]).find(
       (item) => item.id === id,
     )
 
-  Scenario('Setup says what is still missing', ({ When, Then, And }) => {
+  Scenario('Setup says what is still missing', ({ Given, When, Then, And }) => {
+    // The Background adds one, because a task cannot be created without it.
+    // Removing it is how this scenario gets back to a fresh installation —
+    // and it is only removable because nothing has been put in it yet.
+    Given('no repositories have been added', async () => {
+      await call('GET', '/api/projects')
+      for (const item of response.body.items as { id: string }[]) {
+        await call('DELETE', `/api/projects/${item.id}`)
+      }
+    })
     When('I ask what setup is left', () => call('GET', '/api/setup'))
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
     // Contributed by the engine, because it is the only part that can see the
@@ -759,7 +922,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
-  Scenario('The live stream carries what happens', ({ Given, When, Then }) => {
+  Scenario('The live stream carries what happens', ({ Given, When, Then, And }) => {
     Given('I am listening to the live stream', async () => {
       // A real socket: `inject` has no streaming response to read from, and the
       // thing being tested is that the response streams.
@@ -799,6 +962,16 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         'the event to arrive',
       ),
     )
+    And('the event was not named on the wire', () =>
+      expect((stream?.lines ?? []).join('')).not.toContain('event:'),
+    )
+    And('the event carries its name in the payload', () => {
+      const data = (stream?.lines ?? [])
+        .join('')
+        .split('\n')
+        .find((line) => line.startsWith('data:'))
+      expect(JSON.parse((data as string).slice('data:'.length)).name).toBe('task.created')
+    })
   })
 
   Scenario('Stopping does not wait for a live stream for ever', ({ Given, When, Then }) => {
@@ -954,6 +1127,60 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a task can be moved to another project', ({ RuleScenario }) => {
+    let elsewhere = ''
+    const givenElsewhere = async (): Promise<void> => {
+      const home = projectId
+      await addProject('elsewhere', join(root, 'work'))
+      elsewhere = projectId
+      // Back to the Background's project, so the task lands where the scenario
+      // means it to and the move is what changes that.
+      projectId = home
+    }
+    const moveTo = (to: string) => () => call('PATCH', `/api/tasks/${taskId}`, { projectId: to })
+
+    RuleScenario('A task is moved', ({ Given, And, When, Then }) => {
+      Given('the project "elsewhere" also exists', givenElsewhere)
+      And('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to "elsewhere"', () => moveTo(elsewhere)())
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the task belongs to "elsewhere"', () =>
+        expect((response.body.task as { projectId: string }).projectId).toBe(elsewhere),
+      )
+    })
+
+    RuleScenario('Moving to a project that is not there is a bad request', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to a project that does not exist', () => moveTo('project-nowhere')())
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('Moving a task that is running is refused', ({ Given, And, When, Then }) => {
+      Given('the project "elsewhere" also exists', givenElsewhere)
+      // A workflow that lingers, so "running" is a state the scenario can
+      // still be in when it asks. `hello` finishes in milliseconds and the
+      // refusal would be tested or not according to how fast the machine is.
+      And('the task "Add due dates" exists', () => {
+        file(join(scope, 'workflows', 'waiting.workflow.yaml'), 'name: waiting\nphases: [linger]\n')
+        file(join(scope, 'phases', 'linger.phase.yaml'), 'name: linger\nsteps: [{run: sleep 2}]\n')
+        return create('Add due dates', ['waiting'])
+      })
+      And('"Add due dates" is running', async () => {
+        await call('POST', `/api/tasks/${taskId}/actions/queue`)
+        await until(async () => {
+          await reload()
+          return stateOf() === 'running'
+        }, 'the task to start')
+      })
+      When('I move it to "elsewhere"', () => moveTo(elsewhere)())
+      Then('the response is 409', () => expect(response.statusCode).toBe(409))
+    })
+  })
+
   Rule('A task can be renamed, and agents are definitions like any other', ({ RuleScenario }) => {
     let directoryBefore = ''
 
@@ -1063,6 +1290,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Given('the task "Add due dates" is created with a description', async () => {
         await call('POST', '/api/tasks', {
           name: 'Add due dates',
+          projectId,
           description: 'Every todo gets an optional due date.',
         })
         taskId = (response.body.task as { id: string }).id
@@ -1434,6 +1662,27 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a run says what it actually executed', ({ RuleScenario }) => {
+    RuleScenario('The step carries the command that ran', ({ Given, When, Then }) => {
+      Given('the task "Add due dates" exists with the workflow "hello"', () =>
+        create('Add due dates', ['hello']),
+      )
+      When('I queue the task and it finishes', async () => {
+        await call('POST', `/api/tasks/${taskId}/actions/queue`)
+        await until(async () => {
+          await reload()
+          return stateOf() === 'done' || stateOf() === 'blocked'
+        }, 'the task to finish')
+      })
+      Then('the step says it ran "echo hello"', async () => {
+        const runId = (response.body.runs as { id: string }[])[0]?.id
+        await call('GET', `/api/runs/${runId}`)
+        const steps = response.body.steps as { command?: string }[]
+        expect(steps[0]?.command).toContain('echo hello')
+      })
+    })
+  })
+
   Rule("a task's artifacts are listed, and one can be read", ({ RuleScenario }) => {
     const WRITTEN = '# Review\n\nlooks good\n'
 
@@ -1553,8 +1802,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       // test is that resolution *looks*, and a directory somebody created or
       // deleted outside Factory is exactly the case the rule exists for.
       And('a worktree for it exists on the disk', async () => {
+        const mine = projectId
         await call('GET', '/api/projects')
-        const project = (response.body.items as { worktreesRoot: string }[])[0]
+        const project = (response.body.items as { id: string; worktreesRoot: string }[]).find(
+          (item) => item.id === mine,
+        )
         await reload()
         const directory = (response.body.task as { directory: string }).directory
         worktree = join(project?.worktreesRoot as string, directory)
@@ -1563,18 +1815,6 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       When('I ask for the task', reload)
       Then('its workspace is that worktree', () => expect(workspace()?.path).toBe(worktree))
       And('the workspace is a worktree', () => expect(workspace()?.inWorktree).toBe(true))
-    })
-
-    RuleScenario('A task belonging to no project has no workspace', ({
-      Given,
-      When,
-      Then,
-    }) => {
-      Given('the task "Add due dates" exists with the workflow "hello"', () =>
-        create('Add due dates', ['hello']),
-      )
-      When('I ask for the task', reload)
-      Then('it has no workspace', () => expect(workspace()).toBeUndefined())
     })
 
     RuleScenario('The task list does not carry it', ({ Given, And, When, Then }) => {
@@ -1626,18 +1866,17 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
     RuleScenario('The tools are beside the actions, not inside the workspace', ({
       Given,
+      And,
       When,
       Then,
-      And,
     }) => {
-      Given('the task "Add due dates" exists with the workflow "hello"', () =>
-        create('Add due dates', ['hello']),
-      )
+      Given("the project \"work\" exists at the scope's directory", givenProject)
+      And('the task "Add due dates" exists in it with the workflow "hello"', givenTask)
       When('I ask for the task', reload)
-      Then('it has no workspace', () =>
-        expect((response.body as { workspace?: unknown }).workspace).toBeUndefined(),
-      )
-      And('it still has tools', () => expect(tools().length).toBeGreaterThan(0))
+      Then('its tools are beside its workspace, not inside it', () => {
+        expect(tools().length).toBeGreaterThan(0)
+        expect((response.body.workspace as { tools?: unknown }).tools).toBeUndefined()
+      })
     })
 
     RuleScenario('A terminal tool only changes directory', ({ Given, And, When, Then }) => {
@@ -1926,7 +2165,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
   Rule('a client chooses a task\'s name, never a path', ({ RuleScenario }) => {
     const createWithDirectory = (name: string, directory: string) => async (): Promise<void> => {
-      await call('POST', '/api/tasks', { name, directory })
+      await call('POST', '/api/tasks', { name, projectId, directory })
       taskId = (response.body.task as { id: string }).id
     }
     const directoryIs = (expected: string) => (): void => {
@@ -1997,6 +2236,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       app = buildServer(freshRuntime, freshService, {})
       service = freshService
       roots.push(fresh)
+      // A fresh database, so the Background's project is not in it — and a
+      // task cannot be created without one.
+      await addProject('sample', join(fresh, 'work'))
     }
     const accept = async (): Promise<void> => {
       await call('POST', '/api/settings/accept')
@@ -2344,8 +2586,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
       ids.set(name, (response.body.task as { id: string }).id)
     }
-    const taskNowhere = (name: string) => async (): Promise<void> => {
-      await call('POST', '/api/tasks', { name, workflows: ['hello'] })
+    // In a *different* project, which is what the batch routes have to ignore.
+    // It used to be a task in no project, which no longer exists.
+    const taskElsewhere = (name: string) => async (): Promise<void> => {
+      await addProject('elsewhere', join(root, 'work'))
+      await call('POST', '/api/tasks', { name, projectId, workflows: ['hello'] })
       ids.set(name, (response.body.task as { id: string }).id)
     }
     const idOf = (name: string) => ids.get(name) as string
@@ -2447,7 +2692,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     RuleScenario("Queue all ignores another project's tasks", ({ Given, And, When, Then }) => {
       Given('the project "work" exists here', quietDaemon(true))
       And('the task "One" exists in the project with a workflow', taskIn('One', ['hello']))
-      And('a task "Elsewhere" with a workflow in no project', taskNowhere('Elsewhere'))
+      And('a task "Elsewhere" with a workflow in another project', taskElsewhere('Elsewhere'))
       When('I queue the whole project', queueAll)
       Then('1 task was queued', () => expect(queued()).toHaveLength(1))
     })
@@ -2557,7 +2802,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     RuleScenario("Stop all ignores another project's tasks", ({ Given, And, When, Then }) => {
       Given('the project "work" exists here', quietDaemon(true))
       And('the task "One" exists in the project with a workflow', taskIn('One', ['hello']))
-      And('a task "Elsewhere" with a workflow in no project', taskNowhere('Elsewhere'))
+      And('a task "Elsewhere" with a workflow in another project', taskElsewhere('Elsewhere'))
       And('the whole project is queued', queueAll)
       And('"Elsewhere" is queued', act('Elsewhere', 'queue'))
       When('I stop the whole project', stopAll)
@@ -2578,6 +2823,130 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         call('POST', '/api/projects/nope/stop'),
       )
       Then('the response is 404', status(404))
+    })
+  })
+  Rule('adding a project leaves the repository exactly as it was', ({ RuleScenario }) => {
+    let repository = ''
+    /** Real git, because `git status` is the promise and the file is only how. */
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: repository,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      })
+
+    RuleScenario('Registering a project adds nothing to git status', ({ Given, When, Then, And }) => {
+      Given('a repository with nothing to commit', () => {
+        repository = makeRepository(join(root, 'fresh'))
+        expect(git('status', '--porcelain').trim()).toBe('')
+      })
+      When('I add it as a project', () => addProject('fresh', repository))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('it has a Factory scope of its own', () =>
+        expect(existsSync(join(repository, '.xaedalon', '.factory', 'config.yaml'))).toBe(true),
+      )
+      // `-uall` so an untracked *directory* cannot hide its contents behind one
+      // line, which is the shape this could have passed under by accident.
+      And('git still has nothing to say about it', () =>
+        expect(git('status', '--porcelain', '-uall').trim()).toBe(''),
+      )
+    })
+
+    RuleScenario('A repository that already shares its definitions is left sharing them', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a repository whose Factory definitions are committed', () => {
+        repository = makeRepository(join(root, 'shared'))
+        file(
+          join(repository, '.xaedalon', '.factory', 'config.yaml'),
+          'kind: factory.scope/v1\nscope: project\n',
+        )
+        file(
+          join(repository, '.xaedalon', '.factory', 'workflows', 'theirs.workflow.yaml'),
+          'name: theirs\nphases: []\n',
+        )
+        git('add', '-A')
+        git('commit', '-m', 'share the definitions')
+      })
+      When('I add it as a project', () => addProject('shared', repository))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('no ignore file was written', () =>
+        expect(existsSync(join(repository, '.xaedalon', '.gitignore'))).toBe(false),
+      )
+      // Visible, deliberately. An ignore file here would hide these from the
+      // team that is sharing the rest, and they are the definitions the
+      // project just gained.
+      And('the definitions it copied in are there for the team to commit', () => {
+        const untracked = git('status', '--porcelain', '-uall').trim()
+        expect(untracked).toContain('.xaedalon/.factory/workflows/worktree-create.workflow.yaml')
+      })
+    })
+  })
+  Rule('doctor asks git what it can see of a project', ({ RuleScenario }) => {
+    const findings = () => (response.body.problems as { rule?: string; message: string }[]) ?? []
+    const aboutGit = () =>
+      findings().filter(
+        (problem) =>
+          problem.rule === 'doctor.productOutputTracked' ||
+          problem.rule === 'doctor.definitionsIgnored',
+      )
+    /** A project row for a directory this scenario made, added straight to the store. */
+    const register = async (name: string, path: string): Promise<void> => {
+      await call('POST', '/api/projects', { name, path })
+    }
+
+    RuleScenario('A committed artifact is found in a real repository', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is a real repository with a committed task artifact', async () => {
+        const repository = join(root, 'tracked')
+        mkdirSync(repository, { recursive: true })
+        const git = (...args: string[]) =>
+          execFileSync('git', args, {
+            cwd: repository,
+            env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+          })
+        git('init', '--initial-branch=main')
+        git('config', 'user.email', 'test@example.com')
+        git('config', 'user.name', 'Factory Test')
+        file(
+          join(repository, '.xaedalon', '.factory', 'tasks', 'add-due-dates', 'artifacts', 'r.md'),
+          'what the agent wrote\n',
+        )
+        // Forced, because Factory's own ignore file is doing its job — which is
+        // how somebody gets here: `git add -f` is the wrong opt-in.
+        git('add', '-f', '.xaedalon')
+        git('commit', '-m', 'oops')
+        await register('tracked', repository)
+      })
+      When('I GET "/api/doctor"', () => call('GET', '/api/doctor'))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And("the findings say a run's output is committed", () => {
+        expect(aboutGit().map((problem) => problem.rule)).toEqual(['doctor.productOutputTracked'])
+        expect(aboutGit()[0]?.message).toContain('artifacts')
+      })
+    })
+
+    RuleScenario('A project that is not a repository produces no finding', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is a plain directory', async () => {
+        const plain = join(root, 'plain')
+        mkdirSync(plain, { recursive: true })
+        await register('plain', plain)
+      })
+      When('I GET "/api/doctor"', () => call('GET', '/api/doctor'))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the findings say nothing about git', () => expect(aboutGit()).toHaveLength(0))
     })
   })
 })

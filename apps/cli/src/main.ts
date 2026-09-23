@@ -40,6 +40,7 @@ Usage
   factory task logs <id>                  the newest run, step by step
   factory task <action> <id>              queue, approve, reject, retry, cancel, done
   factory task depends <id> <on>          make one wait for another  (--remove)
+  factory task move <id> <project>        put it in another project
 
   factory project add <name> <path>       a repository to work in   (--in-place)
   factory project queue <name>            queue the lot, in dependency order
@@ -308,13 +309,21 @@ async function dispatch(
         }
         return tasks.depends(client, id, blocker, { remove: has(rest, '--remove') }, style)
       }
+      if (action === 'move') {
+        const [id, project] = args.filter((arg) => !arg.startsWith('--'))
+        if (id === undefined || project === undefined) {
+          return usage('Which task, and where? Try "factory task move <id> <project>".')
+        }
+        return tasks.move(client, id, project, style)
+      }
       if (action !== undefined && (TASK_ACTIONS as readonly string[]).includes(action)) {
         const id = args[0]
         if (id === undefined) return usage(`Which task? Try "factory task ${action} <id>".`)
         return tasks.act(client, ACTION_NAMES[action] ?? action, id, style)
       }
       return usage(
-        'Unknown task command. Try "list", "show", "new", "logs", "depends", or an action like "queue".',
+        'Unknown task command. Try "list", "show", "new", "logs", "depends", "move", ' +
+          'or an action like "queue".',
       )
     }
 
@@ -383,7 +392,7 @@ async function dispatch(
       return setupCommand(daemon ?? createDaemonClient(context.env), context, style)
 
     case 'doctor':
-      return inspect.doctor(context, style)
+      return inspect.doctor(daemon ?? createDaemonClient(context.env), context, style)
 
     case 'capabilities':
       return inspect.capabilities(context, style)

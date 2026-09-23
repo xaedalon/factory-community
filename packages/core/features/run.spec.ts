@@ -1,6 +1,6 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -642,6 +642,75 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
       Then('the run completed', () => expect(result.status).toBe('completed'))
       And('the output says "ANTHROPIC_API_KEY" was present', () =>
         expect(output).toContain('ANTHROPIC_API_KEY present'),
+      )
+    })
+  })
+  Rule('a step that asks for stdin gets it', ({ RuleScenario }) => {
+    let promptPath = ''
+    /** A step that copies whatever it is given on stdin to its output. */
+    const reading = (stdin?: string): ResolvedPhase => ({
+      name: 'ask',
+      approval: 'none',
+      cwd: process.cwd(),
+      steps: [
+        {
+          index: 0,
+          uses: 'shell',
+          planned: {
+            describe: 'read stdin',
+            command: 'bash',
+            args: ['-c', 'cat'],
+            ...(stdin === undefined ? {} : { stdin }),
+          },
+          raw: { uses: 'shell', run: 'cat' },
+        },
+      ],
+    })
+
+    RuleScenario('The file a step asks for arrives on its stdin', ({ Given, And, When, Then }) => {
+      Given('a file "prompt.txt" holding "hello from the file"', () => {
+        sandbox = mkdtempSync(join(tmpdir(), 'factory-stdin-'))
+        promptPath = join(sandbox, 'prompt.txt')
+        writeFileSync(promptPath, 'hello from the file\n')
+      })
+      And('a phase "ask" whose step reads stdin and takes "prompt.txt" as input', () => {
+        phases = [reading(promptPath)]
+      })
+      When('the plan is run', () => execute())
+      Then('the run completed', () => expect(result.status).toBe('completed'))
+      And('the output says "hello from the file"', () =>
+        expect(output).toContain('hello from the file'),
+      )
+    })
+
+    RuleScenario('A step that asks for nothing still gets a closed stdin', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a phase "ask" whose step reads stdin', () => {
+        phases = [reading()]
+      })
+      When('the plan is run', () => execute())
+      Then('the run completed', () => expect(result.status).toBe('completed'))
+      And('the output is empty', () => expect(output.trim()).toBe(''))
+    })
+
+    RuleScenario('A file that is not there is the step\'s failure, not the runner\'s', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a phase "ask" whose step takes a missing file as input', () => {
+        sandbox = mkdtempSync(join(tmpdir(), 'factory-stdin-'))
+        phases = [reading(join(sandbox, 'nowhere.txt'))]
+      })
+      When('the plan is run', () => execute())
+      Then('the run failed', () => expect(result.status).toBe('failed'))
+      And('the step says it could not open its input', () =>
+        expect(output).toContain('nowhere.txt'),
       )
     })
   })

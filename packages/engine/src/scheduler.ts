@@ -1,4 +1,4 @@
-import { dependencyStatus, type Scheduling, type Task } from '@factory/core'
+import { dependencyStatus, nextEntry, type Scheduling, type Task } from '@factory/core'
 import type { Blocker, RunRepository, TaskRepository } from '@factory/store'
 import type { EventBus } from '@factory/events'
 
@@ -228,7 +228,9 @@ export class Scheduler {
   #tick(): TickReport {
     const running = this.#tasks.list({ state: 'running' })
     let capacity = this.#maxParallel - running.length
-    let sequentialBusy = running.some((task) => this.#factsFor(task).scheduling === 'sequential')
+    let sequentialBusy = running.some(
+      (task) => this.#executing(task) && this.#factsFor(task).scheduling === 'sequential',
+    )
 
     // Who is holding a shared working copy: everything running, plus everything
     // parked at a gate with uncommitted changes still in the tree. Keyed by
@@ -263,6 +265,21 @@ export class Scheduler {
     for (const task of running) {
       if (this.#active.has(task.id)) continue
       if (this.#runs.pausedFor(task.id) === undefined) continue
+      // The lane, which this loop used to skip entirely. The queued path below
+      // checks it, and a workflow that is unsafe to run twice at once does not
+      // become safe because a person approved it: two `merge` workflows
+      // approved in the same second overlapped and left a staged deletion of a
+      // file that had just merged cleanly.
+      //
+      // Capacity is deliberately not checked, as before: the task is already
+      // running and occupies its slot either way.
+      if (this.#factsFor(task).scheduling === 'sequential') {
+        if (sequentialBusy) {
+          skipped.push({ task, reason: 'a sequential workflow is already running' })
+          continue
+        }
+        sequentialBusy = true
+      }
       this.#hand(task)
       started.push(task)
     }
@@ -310,10 +327,19 @@ export class Scheduler {
       const shared = this.#sharedCheckoutOf(task)
       const holder = shared === undefined ? undefined : busyProjects.get(shared)
       if (shared !== undefined && holder !== undefined) {
+        // Which task has it, and — when it is a person the project is waiting
+        // on rather than work — that too. "One task at a time" reads as a
+        // throughput limit, and it is also what happens while an approval goes
+        // unanswered: three tasks waited behind one that was waiting for
+        // somebody, and nothing said the queue was stalled on a human.
+        const held =
+          holder.state === 'awaiting_approval'
+            ? `"${holder.name}" has it, waiting for approval`
+            : `"${holder.name}" has it`
         skipped.push({
           task,
           reason: 'the project runs one task at a time',
-          detail: `${this.#project(shared)?.name ?? shared} — "${holder.name}" has it`,
+          detail: `${this.#project(shared)?.name ?? shared} — ${held}`,
         })
         continue
       }
@@ -424,15 +450,33 @@ export class Scheduler {
   }
 
   /**
+   * Whether this task is actually running something right now.
+   *
+   * Not the same as `state === 'running'`. A task whose run paused at an
+   * approval gate and was then approved is `running` and executing nothing,
+   * and counting it as the sequential lane's occupant made each of two
+   * simultaneous approvals see the other as busy while neither was doing any
+   * work — so both resumed together.
+   *
+   * Two sources because neither is enough on its own. `#active` covers the
+   * moment between handing a task over and the engine writing its run row.
+   * The run's own state survives a restart, where nothing was handed over in
+   * this process, and it is what tells a paused run from a going one.
+   */
+  #executing(task: Task): boolean {
+    if (this.#active.has(task.id)) return true
+    return this.#runs.forTask(task.id)[0]?.state === 'running'
+  }
+
+  /**
    * The project whose single working copy this task would occupy, if any.
    *
-   * Undefined for a task with no project, a project nobody can look up — one
-   * removed while the task was queued — and any project that gives each task a
-   * worktree. In all three cases there is nothing to serialise against, and
-   * defaulting to "exclusive" would stall work for no reason.
+   * Undefined for a project that gives each task a worktree — nothing to
+   * serialise against, and defaulting to "exclusive" would stall work for no
+   * reason — and for one nobody can look up, which now means either a
+   * scheduler built without a project store or a row edited away by hand.
    */
   #sharedCheckoutOf(task: Task): string | undefined {
-    if (task.projectId === undefined) return undefined
     const project = this.#project(task.projectId)
     if (project === undefined || project.usesWorktrees) return undefined
     return task.projectId
@@ -447,18 +491,43 @@ export class Scheduler {
    * alongside anything.
    */
   #factsFor(task: Task): WorkflowFacts {
-    // `.workflow`, not the entry: this was `task.workflows[0] as string` when
-    // the list held names, and a cast is exactly the kind of thing that keeps
-    // compiling after the type under it changes shape.
-    //
-    // Still the newest run's workflow first, which is a known divergence from
-    // "the one about to run" — after an `on_fail` the newest run is the
-    // recovery workflow, so a retry is admitted on its lane and requirements.
-    // Left alone deliberately: fixing it changes which tasks the scheduler
-    // admits, and that belongs in its own change with its own scenario.
-    const current =
-      this.#runs.forTask(task.id)[0]?.workflow ?? task.workflows[0]?.workflow
+    const current = this.#workflowOf(task)
     if (current === undefined) return { scheduling: 'sequential' }
     return this.#workflow(current, task.projectId) ?? { scheduling: 'sequential' }
+  }
+
+  /**
+   * The workflow the gates are about.
+   *
+   * This read the newest run's workflow for every task, falling back to
+   * `workflows[0]`, and both are the wrong question for a task that has not
+   * started: a task whose first workflow has finished was admitted on the lane
+   * and the requirements of work that was already over. It cost real work —
+   * agents ran in a project's own checkout because the flag gate was asked
+   * about a workflow needing no worktree, and two `merge` workflows overlapped
+   * because the lane gate was asked about the parallel one before them. No
+   * scenario caught it because every one of them gave its task a single
+   * workflow, so the two answers coincided.
+   *
+   * The distinction is the task's state, and it is the engine's own:
+   *
+   * - **Running** — the workflow in flight, which is the newest run's. After an
+   *   `on_fail` that is the recovery workflow, which is not in the list at all,
+   *   and it is the one holding the lane.
+   * - **Anything else** — what `start` would pick: a paused run resumes at its
+   *   own entry whatever is ticked before it, otherwise the first ticked entry.
+   *   Mirrored from `Engine.start`, which is the only other place that decides.
+   */
+  #workflowOf(task: Task): string | undefined {
+    if (task.state === 'running') return this.#runs.forTask(task.id)[0]?.workflow
+
+    const paused = this.#runs.pausedFor(task.id)
+    if (paused !== undefined) {
+      const resuming = task.workflows.find((entry) => entry.id === paused.entryId)
+      // The run's own workflow when the entry has gone — an `on_fail` recovery
+      // that paused for approval has no entry of its own.
+      return resuming?.workflow ?? paused.workflow
+    }
+    return nextEntry(task)?.workflow
   }
 }

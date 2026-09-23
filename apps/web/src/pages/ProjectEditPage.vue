@@ -131,7 +131,12 @@ async function save(): Promise<void> {
       // Back to the list, the way the definition editors do it. The list is
       // where the change is visible — the badges, the branch, the name — and
       // "I added it, there it is" is the whole confirmation anyone wants.
-      await leaveWith(created.scaffolded?.written ?? [])
+      // The scope directory counts as something written into somebody's
+      // repository, and it is the one the rest of the list goes inside.
+      await leaveWith(
+        created.scaffolded?.written ?? [],
+        created.scope?.created === true ? created.scope.root : undefined,
+      )
       return
     }
     const result = await api.setProjectSetting(id.value as string, {
@@ -168,10 +173,16 @@ async function save(): Promise<void> {
  * `git status` they were not expecting, and they should have been told which
  * files before they get there.
  */
-async function leaveWith(written: readonly string[]): Promise<void> {
+async function leaveWith(written: readonly string[], scopeRoot?: string): Promise<void> {
+  const files = scopeRoot === undefined ? [...written] : [scopeRoot, ...written]
   await router.push({
     path: '/projects',
-    ...(written.length > 0 ? { state: { scaffolded: [...written] } } : {}),
+    // `hidden` only when Factory created the directory: that is the one case
+    // where "git ignores all of it" is true, because Factory never writes an
+    // ignore file over a scope somebody may already be sharing.
+    ...(files.length > 0
+      ? { state: { scaffolded: files, hidden: scopeRoot !== undefined } }
+      : {}),
   })
 }
 
@@ -313,7 +324,7 @@ onMounted(load)
           label="An environment per task"
           icon="environment"
           data-testid="project-environments-field"
-          when-on="Environment workflows are copied into the repository for you to edit and commit."
+          when-on="Environment workflows are copied into the repository for you to edit."
           when-off="Tasks run against whatever is already installed in the workspace."
         />
       </div>
@@ -370,7 +381,7 @@ onMounted(load)
       >
         <p class="flex items-center gap-2">
           <AppIcon name="info" />
-          Copied into the project, ready to edit and commit:
+          Copied into the project:
         </p>
         <ul class="mt-1 space-y-0.5">
           <li v-for="file in scaffolded" :key="file" class="font-mono text-xs">{{ file }}</li>

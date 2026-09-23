@@ -1,6 +1,7 @@
 import { EventBus } from '@factory/events'
 import { CapabilityHost, type FactoryPlugin } from './host.js'
 import { CAPABILITY_ID_PATTERN } from './capabilities.js'
+import { HOOK_NAMES } from './hooks.js'
 
 /**
  * The plugin conformance suite.
@@ -70,9 +71,7 @@ export async function checkPluginConformance(plugin: FactoryPlugin): Promise<Con
     .flatMap((kind) => first.list(kind).map((entry) => `${entry.kind}:${entry.capability.id}`))
     .sort()
 
-  const hookNames = (['validateDefinition', 'beforeDefinitionWrite'] as const).filter(
-    (name) => first.hooks.count(name) > 0,
-  )
+  const hookNames = HOOK_NAMES.filter((name) => first.hooks.count(name) > 0)
 
   record(
     'contributes something',

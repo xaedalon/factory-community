@@ -12,6 +12,7 @@ Feature: Tasks, runs and live updates over HTTP
   Background:
     Given a running daemon with a project scope
     And a workflow "hello" that prints "hello"
+    And a project to create tasks in
 
   Scenario: Creating a task
     When I create the task "Add due dates"
@@ -90,6 +91,23 @@ Feature: Tasks, runs and live updates over HTTP
     Then the response is 201
     And the project is listed
 
+  Scenario: A repository with no Factory scope is given one
+    When I add the project "fresh" at a repository with no scope
+    Then the response is 201
+    # Without it, every write that asks for the project scope fails — and the
+    # first thing a new project does is copy its worktree workflows in, which
+    # asks for exactly that. It answered 500 with "No project scope in this
+    # chain", and the reply that had already tried said only `written: []`.
+    Then the project has a scope of its own
+    And the response says the scope was created
+
+  Scenario: A repository that already has a scope keeps it
+    Given a repository whose scope says something of its own
+    When I add the project "fresh" at that repository
+    Then the response is 201
+    And the scope still says what it said
+    And the response does not claim to have created one
+
   Scenario: A project at a path that does not exist is refused
     When I add the project "ghost" at a path that does not exist
     Then the response is 400
@@ -100,6 +118,28 @@ Feature: Tasks, runs and live updates over HTTP
     When I create the task "Add due dates" in that project
     Then the response is 201
     And the task belongs to the project
+
+  Scenario: A task without a project is refused
+    When I create the task "Add due dates" naming no project
+    # Not defaulted to anything. The default this used to have was the
+    # directory the daemon happened to be started in, which is how an agent
+    # ended up committing to the wrong repository.
+    Then the response is 400
+    And the response says a task needs a project
+
+  Scenario: A project with nothing in it can be removed
+    Given the project "work" exists
+    When I remove that project
+    Then the response is 204
+
+  Scenario: A project that still has tasks cannot be removed
+    Given the project "work" exists
+    And the task "Add due dates" exists in that project
+    When I remove that project
+    Then the response is 409
+    And the response says 1 task is still in it
+    And the response carries the count
+    And the project is still listed
 
   Scenario: A task in a project runs in that project's directory
     Given a project in a directory the daemon was not started in
@@ -118,7 +158,20 @@ Feature: Tasks, runs and live updates over HTTP
     And a worktree exists for the task
     And the second workflow ran inside the worktree
 
+  Scenario: A worktree is removed even though the step runs inside it
+    Given a project that is a real git repository
+    And the task "Add due dates" in it, on "worktree-create" and then "worktree-delete"
+    When I queue the task
+    And the work finishes
+    # The workspace is resolved when the plan is made, so the removal step runs
+    # in the worktree it is about to remove. Git cannot read a current
+    # directory that has gone, and everything after it in the script is skipped.
+    Then no worktree is left for the task
+    And the task no longer has the flag "hasWorktree"
+    And nothing in the run mentions being unable to read the current directory
+
   Scenario: Setup says what is still missing
+    Given no repositories have been added
     When I ask what setup is left
     Then the response is 200
     And adding a repository is one of the steps
@@ -172,6 +225,13 @@ Feature: Tasks, runs and live updates over HTTP
     Given I am listening to the live stream
     When I create the task "Add due dates"
     Then the stream delivers "task.created"
+    # As an ordinary `message` frame, not one named after the event. A named
+    # frame only reaches a client that already knew to listen for that name, so
+    # naming them made every consumer keep its own copy of the vocabulary — and
+    # the board's copy had 14 of the 23 names in it, which is not an error
+    # anywhere: the board simply stopped updating for the others.
+    And the event was not named on the wire
+    And the event carries its name in the payload
 
   # The board holds this stream open for as long as it is on screen, so this is
   # the ordinary case rather than an edge one: quit the app, and the engine has
@@ -249,6 +309,33 @@ Feature: Tasks, runs and live updates over HTTP
       When I take every workflow off the list
       Then the response is 409
       And the refusal names "hello"
+
+  Rule: a task can be moved to another project
+
+    Created in the wrong project was a mistake with no remedy but deleting the
+    task and making it again, which throws away its history and its runs. A
+    task has to be created in some project, so choosing the wrong one is an
+    ordinary mistake.
+
+    Scenario: A task is moved
+      Given the project "elsewhere" also exists
+      And the task "Add due dates" exists
+      When I move it to "elsewhere"
+      Then the response is 200
+      And the task belongs to "elsewhere"
+
+    Scenario: Moving to a project that is not there is a bad request
+      Given the task "Add due dates" exists
+      When I move it to a project that does not exist
+      Then the response is 400
+
+    Scenario: Moving a task that is running is refused
+      Given the project "elsewhere" also exists
+      And the task "Add due dates" exists
+      And "Add due dates" is running
+      When I move it to "elsewhere"
+      # The request is well formed; the state is what will not have it.
+      Then the response is 409
 
   Rule: A task can be renamed, and agents are definitions like any other
 
@@ -427,6 +514,19 @@ Feature: Tasks, runs and live updates over HTTP
       When I ask for the task
       Then it reports 1 of 1 phases
 
+  Rule: a run says what it actually executed
+
+    A step recorded what the phase said it would do and the kind that ran it.
+    What was executed was nowhere, so "what did this agent run, and with what
+    authority?" could only be answered by reading the phase file back — a
+    different question as soon as anybody has edited it. The profile was
+    recorded for this reason; the argv was still missing.
+
+    Scenario: The step carries the command that ran
+      Given the task "Add due dates" exists with the workflow "hello"
+      When I queue the task and it finishes
+      Then the step says it ran "echo hello"
+
   Rule: a task's artifacts are listed, and one can be read
 
     Artifacts are read out of the evidence rows rather than off disk. That is
@@ -480,13 +580,6 @@ Feature: Tasks, runs and live updates over HTTP
       Then its workspace is that worktree
       And the workspace is a worktree
 
-    Scenario: A task belonging to no project has no workspace
-      Given the task "Add due dates" exists with the workflow "hello"
-      When I ask for the task
-      # The daemon's own directory is where such a task would run, but offering
-      # to open it would be offering a directory nobody chose.
-      Then it has no workspace
-
     Scenario: The task list does not carry it
       Given the project "work" exists at the scope's directory
       And the task "Add due dates" exists in it with the workflow "hello"
@@ -509,12 +602,12 @@ Feature: Tasks, runs and live updates over HTTP
       And each tool says which plugin provided it
 
     Scenario: The tools are beside the actions, not inside the workspace
-      Given the task "Add due dates" exists with the workflow "hello"
+      Given the project "work" exists at the scope's directory
+      And the task "Add due dates" exists in it with the workflow "hello"
       When I ask for the task
-      # A task with no project has no workspace at all, and a tool that needs
-      # no directory would be unreachable nested inside one.
-      Then it has no workspace
-      And it still has tools
+      # A tool that needs no directory — a ticket system, say — would be
+      # unreachable nested inside a workspace.
+      Then its tools are beside its workspace, not inside it
 
     Scenario: A terminal tool only changes directory
       Given the project "work" exists at the scope's directory
@@ -916,7 +1009,7 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Queue all ignores another project's tasks
       Given the project "work" exists here
       And the task "One" exists in the project with a workflow
-      And a task "Elsewhere" with a workflow in no project
+      And a task "Elsewhere" with a workflow in another project
       When I queue the whole project
       Then 1 task was queued
 
@@ -981,7 +1074,7 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Stop all ignores another project's tasks
       Given the project "work" exists here
       And the task "One" exists in the project with a workflow
-      And a task "Elsewhere" with a workflow in no project
+      And a task "Elsewhere" with a workflow in another project
       And the whole project is queued
       And "Elsewhere" is queued
       When I stop the whole project
@@ -998,3 +1091,50 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Stopping a project that is not there is not found
       When I stop a project that does not exist
       Then the response is 404
+
+  Rule: adding a project leaves the repository exactly as it was
+
+    Most repositories that exist are not using Factory, and somebody may want
+    to use it on this machine only. So registering one writes nothing git can
+    see: the `.xaedalon/.gitignore` Factory creates contains `*`, which hides
+    the family directory and that file with it.
+
+    Asserted against real git rather than against the file's contents, because
+    the contents are the mechanism and `git status` is the promise.
+
+    Scenario: Registering a project adds nothing to git status
+      Given a repository with nothing to commit
+      When I add it as a project
+      Then the response is 201
+      And it has a Factory scope of its own
+      And git still has nothing to say about it
+
+    Scenario: A repository that already shares its definitions is left sharing them
+      Given a repository whose Factory definitions are committed
+      When I add it as a project
+      Then the response is 201
+      # Never over a directory Factory did not create. The other half of that
+      # decision is this: the worktree definitions copied in as the project is
+      # registered are *visible*, because this repository shares its
+      # definitions and its team should see the new ones and commit them.
+      And no ignore file was written
+      And the definitions it copied in are there for the team to commit
+
+  Rule: doctor asks git what it can see of a project
+
+    The rule itself is specified against a stub in the engine's own suite. What
+    only a real repository can answer is whether the question Factory asks git
+    is the one it means — the flags, the NUL-separated records, and every way
+    of not getting an answer at all.
+
+    Scenario: A committed artifact is found in a real repository
+      Given a project that is a real repository with a committed task artifact
+      When I GET "/api/doctor"
+      Then the response is 200
+      And the findings say a run's output is committed
+
+    Scenario: A project that is not a repository produces no finding
+      Given a project that is a plain directory
+      When I GET "/api/doctor"
+      Then the response is 200
+      And the findings say nothing about git

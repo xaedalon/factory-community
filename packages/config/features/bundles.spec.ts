@@ -86,6 +86,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     box.workflow(projectScope, 'development-failure', 'name: development-failure\nphases: [diagnose]\n')
     box.phase(projectScope, 'diagnose', 'name: diagnose\nsteps: [{run: echo diagnose}]\n')
   }
+  const givenNeeds = () => {
+    box.workflow(
+      projectScope,
+      'development',
+      'name: development\nneeds: [analysis-first]\nphases: [analysis, implement]\n',
+    )
+    box.workflow(projectScope, 'analysis-first', 'name: analysis-first\nphases: [analysis]\n')
+  }
   const givenUserHasDevelopment = () => {
     box.workflow(userScope, 'development', 'name: development\ndescription: mine\nphases: []\n')
   }
@@ -113,6 +121,31 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     )
     And('the bundle contains the phases "analysis, implement, diagnose"', () =>
       expect(names(exported.bundle?.phases ?? [])).toBe('analysis, diagnose, implement'),
+    )
+  })
+
+  Scenario('Export follows what the workflow needs', ({ Given, When, Then, And }) => {
+    Given('"development" needs "analysis-first"', givenNeeds)
+    When('I export "development"', () => doExport())
+    Then('the export succeeds', () => expect(exported.bundle).toBeDefined())
+    And('the bundle contains the workflows "development, analysis-first"', () =>
+      expect(names(exported.bundle?.workflows ?? [])).toBe('analysis-first, development'),
+    )
+  })
+
+  Scenario('A cycle in what workflows need terminates', ({ Given, And, When, Then }) => {
+    Given('"development" needs "analysis-first"', givenNeeds)
+    And('"analysis-first" needs "development"', () => {
+      box.workflow(
+        projectScope,
+        'analysis-first',
+        'name: analysis-first\nneeds: [development]\nphases: [analysis]\n',
+      )
+    })
+    When('I export "development"', () => doExport())
+    Then('the export succeeds', () => expect(exported.bundle).toBeDefined())
+    And('the bundle contains 2 workflows', () =>
+      expect(exported.bundle?.workflows ?? []).toHaveLength(2),
     )
   })
 

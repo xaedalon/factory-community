@@ -113,3 +113,72 @@ Feature: The tools an agent is given
       Given a task "Add due dates" in "factory"
       When the agent asks what is waiting
       Then nothing is waiting
+
+  Rule: creating a task starts nothing
+
+    A task is a piece of work with an ordered list of workflows. Making one is
+    a note; queueing it is the thing that spawns agents against somebody's
+    repository. Keeping those two apart is what lets an agent propose work
+    without doing it.
+
+    Scenario: A task lands in the project the agent is working in
+      Given the agent is working in "factory"
+      When the agent creates the task "Add due dates" with the workflow "development"
+      Then Factory was told to put it in "factory"
+      And Factory was told to run "development"
+      And the agent is told to queue it when the plan is right
+
+  Rule: queueing is what starts work, and cancelling is what stops it
+
+    There is no tool to start a run and none to cancel one, and that is the
+    design rather than an omission: nothing in Factory starts a run directly,
+    and the engine kills a run's process group on any transition to cancelled,
+    whoever asked for it. A second door onto either would be a second set of
+    rules to keep honest.
+
+    Scenario: There is no tool to start a run, and none to cancel one
+      Then no tool is called "factory_run_start"
+      And no tool is called "factory_run_cancel"
+
+    Scenario: Queueing asks for the action by name
+      Given a task "Add due dates" that can be queued
+      When the agent queues it
+      Then Factory was asked to queue that task
+
+    Scenario: Queueing before anybody accepted the disclaimer carries the disclaimer
+      # An agent cannot accept it. Somebody has to read what an agent run can
+      # reach and agree to it, and the text is what they are agreeing to.
+      Given Factory has not been told what an agent run can reach
+      When the agent queues a task
+      Then it is refused as NOT_ACCEPTED
+      And the refusal carries the disclaimer
+      And it says a person has to accept it
+
+    Scenario: An action the task does not offer comes back with the ones it does
+      Given a task that cannot be queued because it is already running
+      When the agent queues it
+      Then it is refused as ACTION_NOT_AVAILABLE
+      And the refusal lists the actions it does offer
+
+  Rule: a workflow is copied rather than assembled
+
+    Assembling one out of phase names is how an agent produces a workflow that
+    parses and does nothing useful. Copying one the project already runs keeps
+    everything nobody thought to ask about — what it needs, what it provides,
+    what happens when it fails, and its variables.
+
+    Scenario: Copying keeps everything the original had
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent copies it as "development-fast"
+      Then Factory was asked to write "development-fast"
+      And what was written still needs "analysis"
+
+    Scenario: A workflow with no phases and nothing to copy is refused
+      When the agent writes a workflow with no phases
+      Then it is refused
+      And nothing was written
+
+    Scenario: It goes into the project unless somebody says otherwise
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent copies it as "development-fast"
+      Then it was written into the project's own scope

@@ -12,6 +12,8 @@ import type { McpStreams } from '../src/serve.js'
 export class FakeFactory implements FactoryApi {
   readonly url = 'http://127.0.0.1:7317'
   readonly asked: string[] = []
+  /** What was sent with each request, so a scenario can check the ask. */
+  readonly bodies = new Map<string, unknown>()
   readonly replies = new Map<string, unknown>()
   /** When set, every request fails this way — how "no daemon" is spelled. */
   failure: { status: number; message: string; body?: unknown } | undefined
@@ -22,7 +24,9 @@ export class FakeFactory implements FactoryApi {
   }
 
   async request<T>(path: string, init: { method?: string; body?: unknown } = {}): Promise<T> {
-    this.asked.push(`${init.method ?? 'GET'} ${path}`)
+    const key = `${init.method ?? 'GET'} ${path}`
+    this.asked.push(key)
+    if (init.body !== undefined) this.bodies.set(key, init.body)
     if (this.failure !== undefined) throw this.failure
     const reply = this.replies.get(path)
     if (reply === undefined) {

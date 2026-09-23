@@ -12,6 +12,7 @@ import { setup as setupCommand } from './commands/setup.js'
 import { createDaemonClient, type DaemonClient } from './daemon.js'
 import { mcp } from './commands/mcp.js'
 import type { McpStreams } from '@factory/mcp'
+import { REQUESTABLE_ACTIONS } from '@factory/core'
 import { isDefinitionKind } from '@factory/config'
 import type { ConflictPolicy, DefinitionKind, ScopeKind } from '@factory/config'
 
@@ -97,19 +98,20 @@ Run
   --description <text>   fills {{ task.description }}
 `
 
-/** Actions a person may ask for. The daemon has the final say; this is the spelling. */
-const TASK_ACTIONS = [
-  'queue',
-  'approve',
-  'reject',
-  'retry',
-  'cancel',
-  'archive',
-  'restore',
-  // Spelled `done` here and `mark_done` on the wire. The wire name says which
-  // of two ways of reaching `done` this is; a person typing it has only one.
-  'done',
-] as const satisfies readonly string[]
+/**
+ * Actions a person may ask for, spelled the way they type them.
+ *
+ * Derived from core's own list rather than written out again. This was a
+ * hand-written copy with a comment saying the daemon had the final say, which
+ * was true and is exactly how a list drifts — core now publishes which of its
+ * moves a client may ask for, and the only thing left here is the spelling.
+ *
+ * `mark_done` is `done` on the command line: the wire name says which of two
+ * ways of reaching `done` this is, and a person typing it has only one.
+ */
+const TASK_ACTIONS: readonly string[] = REQUESTABLE_ACTIONS.map((action) =>
+  action === 'mark_done' ? 'done' : action,
+)
 
 /** Where a CLI verb and the action it performs are spelled differently. */
 const ACTION_NAMES: Record<string, string> = { done: 'mark_done' }
@@ -332,7 +334,7 @@ async function dispatch(
         }
         return tasks.move(client, id, project, style)
       }
-      if (action !== undefined && (TASK_ACTIONS as readonly string[]).includes(action)) {
+      if (action !== undefined && TASK_ACTIONS.includes(action)) {
         const id = args[0]
         if (id === undefined) return usage(`Which task? Try "factory task ${action} <id>".`)
         return tasks.act(client, ACTION_NAMES[action] ?? action, id, style)

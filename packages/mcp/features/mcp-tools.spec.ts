@@ -2,7 +2,7 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import type { Project, Task, TaskState } from '@factory/core'
-import { factoryTools, type McpTool } from '../src/index.js'
+import { factoryTools, type McpTool, type ToolError } from '../src/index.js'
 import { FakeFactory } from './support.js'
 
 const feature = await loadFeature(fileURLToPath(new URL('./mcp-tools.feature', import.meta.url)))
@@ -38,7 +38,12 @@ const aTask = (name: string, projectId: string, state: TaskState = 'draft'): Tas
 describeFeature(feature, ({ Background, Rule }) => {
   let factory: FakeFactory
   let answer: Record<string, unknown>
+  let failure: ToolError | undefined
   let tasks: Task[]
+
+  /** What was sent with a request, so a scenario can assert the ask not the answer. */
+  const sentTo = (asked: string): unknown =>
+    factory.bodies.get(asked)
 
   // Failures are not caught here: these scenarios are about what a tool says
   // when it works, and the refusals have their own feature.
@@ -67,6 +72,7 @@ describeFeature(feature, ({ Background, Rule }) => {
     Given('a Factory with the project "factory"', () => {
       tasks = []
       answer = {}
+      failure = undefined
       factory = new FakeFactory()
       factory.answer('/api/projects', { items: [aProject('factory', 'project-1')] })
       factory.answer(`/api/projects/at?path=${encodeURIComponent(CWD)}`, {
@@ -386,6 +392,185 @@ describeFeature(feature, ({ Background, Rule }) => {
         expect(answer.approvals).toEqual([])
         expect(answer.next).toContain('Nothing is waiting')
       })
+    })
+  })
+  Rule('creating a task starts nothing', ({ RuleScenario }) => {
+    RuleScenario('A task lands in the project the agent is working in', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the agent is working in "factory"', () => {
+        factory.answer('/api/tasks', {
+          task: aTask('Add due dates', 'project-1'),
+          actions: [{ action: 'queue', label: 'Queue', to: 'queued' }],
+        })
+      })
+      When('the agent creates the task "Add due dates" with the workflow "development"', () =>
+        call('factory_task_create', {
+          name: 'Add due dates',
+          workflows: ['development'],
+        }),
+      )
+      Then('Factory was told to put it in "factory"', () =>
+        expect(sentTo('POST /api/tasks')).toMatchObject({ projectId: 'project-1' }),
+      )
+      And('Factory was told to run "development"', () =>
+        expect(sentTo('POST /api/tasks')).toMatchObject({ workflows: ['development'] }),
+      )
+      And('the agent is told to queue it when the plan is right', () =>
+        expect(answer.next).toContain('Queue it'),
+      )
+    })
+  })
+
+  Rule('queueing is what starts work, and cancelling is what stops it', ({ RuleScenario }) => {
+    const queueable = (): void => {
+      const task = aTask('Add due dates', 'project-1')
+      factory.answer(`/api/tasks/${task.id}/actions/queue`, {
+        task: { ...task, state: 'queued' },
+        actions: [{ action: 'cancel', label: 'Cancel', to: 'cancelled' }],
+      })
+    }
+    const queue = () =>
+      call('factory_task_act', { task: 'task-add-due-dates', action: 'queue' }).catch(
+        (error: unknown) => {
+          failure = error as ToolError
+        },
+      )
+
+    RuleScenario('There is no tool to start a run, and none to cancel one', ({ Then, And }) => {
+      const names = factoryTools.map((tool) => tool.name)
+      Then('no tool is called "factory_run_start"', () =>
+        expect(names).not.toContain('factory_run_start'),
+      )
+      And('no tool is called "factory_run_cancel"', () =>
+        expect(names).not.toContain('factory_run_cancel'),
+      )
+    })
+
+    RuleScenario('Queueing asks for the action by name', ({ Given, When, Then }) => {
+      Given('a task "Add due dates" that can be queued', queueable)
+      When('the agent queues it', queue)
+      Then('Factory was asked to queue that task', () =>
+        expect(factory.asked).toContain('POST /api/tasks/task-add-due-dates/actions/queue'),
+      )
+    })
+
+    RuleScenario('Queueing before anybody accepted the disclaimer carries the disclaimer', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('Factory has not been told what an agent run can reach', () => {
+        factory.answer('/api/tasks/task-add-due-dates/actions/queue', {
+          status: 409,
+          message: 'Nobody has accepted what an agent run can reach.',
+          body: { disclaimer: 'An agent run can read and write inside the workspace…' },
+        })
+      })
+      When('the agent queues a task', queue)
+      Then('it is refused as NOT_ACCEPTED', () => expect(failure?.code).toBe('NOT_ACCEPTED'))
+      And('the refusal carries the disclaimer', () =>
+        expect(failure?.details.disclaimer).toContain('An agent run can read and write'),
+      )
+      And('it says a person has to accept it', () =>
+        expect(String(failure?.details.accept)).toContain('factory accept'),
+      )
+    })
+
+    RuleScenario('An action the task does not offer comes back with the ones it does', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a task that cannot be queued because it is already running', () => {
+        factory.answer('/api/tasks/task-add-due-dates/actions/queue', {
+          status: 409,
+          message: 'Cannot queue a task that is running.',
+          body: { state: 'running', actions: [{ action: 'cancel', label: 'Cancel' }] },
+        })
+      })
+      When('the agent queues it', queue)
+      Then('it is refused as ACTION_NOT_AVAILABLE', () =>
+        expect(failure?.code).toBe('ACTION_NOT_AVAILABLE'),
+      )
+      And('the refusal lists the actions it does offer', () =>
+        expect(failure?.details.actions).toEqual([{ action: 'cancel', label: 'Cancel' }]),
+      )
+    })
+  })
+
+  Rule('a workflow is copied rather than assembled', ({ RuleScenario }) => {
+    const original = (): void => {
+      factory.answer('/api/workflows/development?project=project-1', {
+        definition: {
+          kind: 'factory.workflow/v1',
+          name: 'development',
+          description: 'Build it',
+          mode: 'once',
+          scheduling: 'sequential',
+          phases: ['work', 'verify'],
+          needs: ['analysis'],
+          variables: {},
+          extensions: {},
+        },
+        ref: { scope: 'project', file: '/repos/factory/.xaedalon/.factory/workflows/development.workflow.yaml' },
+        problems: [],
+      })
+      factory.answer('/api/workflows?project=project-1', {
+        ref: { scope: 'project', file: '/repos/factory/.xaedalon/.factory/workflows/development-fast.workflow.yaml' },
+        problems: [],
+      })
+    }
+    const copy = () =>
+      call('factory_workflow_create', { name: 'development-fast', from: 'development' })
+    const written = () => sentTo('POST /api/workflows?project=project-1') as {
+      definition: { needs?: string[]; phases?: string[]; name?: string }
+      scope?: string
+    }
+
+    RuleScenario('Copying keeps everything the original had', ({ Given, When, Then, And }) => {
+      Given('the project has a workflow "development" that needs "analysis"', original)
+      When('the agent copies it as "development-fast"', copy)
+      Then('Factory was asked to write "development-fast"', () =>
+        expect(written().definition.name).toBe('development-fast'),
+      )
+      // The fields nobody thought to ask about are the reason to copy at all.
+      And('what was written still needs "analysis"', () =>
+        expect(written().definition.needs).toEqual(['analysis']),
+      )
+    })
+
+    RuleScenario('A workflow with no phases and nothing to copy is refused', ({
+      When,
+      Then,
+      And,
+    }) => {
+      When('the agent writes a workflow with no phases', () =>
+        call('factory_workflow_create', { name: 'empty' }).catch((error: unknown) => {
+          failure = error as ToolError
+        }),
+      )
+      Then('it is refused', () => expect(failure).toBeDefined())
+      And('nothing was written', () =>
+        expect(factory.asked.some((asked) => asked.startsWith('POST /api/workflows'))).toBe(false),
+      )
+    })
+
+    RuleScenario("It goes into the project unless somebody says otherwise", ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the project has a workflow "development" that needs "analysis"', original)
+      When('the agent copies it as "development-fast"', copy)
+      Then("it was written into the project's own scope", () =>
+        expect(written().scope).toBe('project'),
+      )
     })
   })
 })

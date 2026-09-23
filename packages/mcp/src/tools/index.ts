@@ -3,6 +3,7 @@ import { projectTools } from './projects.js'
 import { taskReadTools } from './tasks.js'
 import { definitionTools } from './definitions.js'
 import { runTools } from './runs.js'
+import { mutationTools } from './mutations.js'
 
 /**
  * The whole surface, in the order an agent meets it.
@@ -16,8 +17,9 @@ export const factoryTools: readonly McpTool[] = [
   ...definitionTools,
   ...taskReadTools,
   ...runTools,
+  ...mutationTools,
 ]
 
-export { projectTools, taskReadTools, definitionTools, runTools }
+export { projectTools, taskReadTools, definitionTools, runTools, mutationTools }
 export { briefProject } from './projects.js'
 export { briefTask, briefRun } from './tasks.js'

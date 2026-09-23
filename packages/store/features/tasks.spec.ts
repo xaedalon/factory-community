@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventBus } from '@factory/events'
-import type { Task, TaskEdge } from '@factory/core'
+import { REQUESTABLE_ACTIONS, type Task, type TaskEdge } from '@factory/core'
 import {
   MIGRATIONS,
   ProjectRepository,
@@ -1077,6 +1077,35 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         expect(task?.projectId).toBe(home)
         expect(task?.updatedAt).toBe(before)
       })
+    })
+  })
+  Rule('which actions exist to ask for is published too', ({ RuleScenario }) => {
+    const mayNot = (action: string) => () =>
+      expect(REQUESTABLE_ACTIONS as readonly string[]).not.toContain(action)
+
+    RuleScenario("The engine's own moves are not on it", ({ Then, And }) => {
+      Then('a client may not ask for "start"', mayNot('start'))
+      And('a client may not ask for "idle"', mayNot('idle'))
+      And('a client may not ask for "await_approval"', mayNot('await_approval'))
+      And('a client may not ask for "block"', mayNot('block'))
+      And('a client may not ask for "complete"', mayNot('complete'))
+    })
+
+    RuleScenario('The list is exactly the moves somebody may make', ({ Then }) => {
+      Then(
+        'a client may ask for exactly "queue, approve, reject, mark_done, retry, cancel, archive, restore"',
+        () =>
+          expect(REQUESTABLE_ACTIONS).toEqual([
+            'queue',
+            'approve',
+            'reject',
+            'mark_done',
+            'retry',
+            'cancel',
+            'archive',
+            'restore',
+          ]),
+      )
     })
   })
 })

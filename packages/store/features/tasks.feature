@@ -583,3 +583,28 @@ Feature: A task, and the rules about how it moves
       Given the task "Add due dates" exists
       When I move it to the project it is already in
       Then the task is unchanged
+
+  Rule: which actions exist to ask for is published too
+
+    "A published list of what is currently allowed so no client has to
+    re-derive any of it" is what the top of this file promises, and it was two
+    thirds true. A task publishes the actions it offers *right now*; which
+    actions exist to ask for at all was not published, so the CLI kept its own
+    copy of the eight a person can type, with a comment saying the daemon had
+    the final say. That comment is how a list drifts — it is correct right up
+    until somebody adds a ninth move.
+
+    Scenario: The engine's own moves are not on it
+      # A client asking for one of these would put a task past the concurrency
+      # cap, or mark a run done while its agent was still writing.
+      Then a client may not ask for "start"
+      And a client may not ask for "idle"
+      And a client may not ask for "await_approval"
+      And a client may not ask for "block"
+      And a client may not ask for "complete"
+
+    Scenario: The list is exactly the moves somebody may make
+      # Named literally rather than filtered out of the table under test: an
+      # assertion that loops over the list it is checking passes whatever that
+      # list happens to say, including a new move with `internal` forgotten.
+      Then a client may ask for exactly "queue, approve, reject, mark_done, retry, cancel, archive, restore"

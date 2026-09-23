@@ -550,3 +550,32 @@ Feature: The factory command
       Then the exit code is 2
       And the output mentions "<path>"
 
+
+  Rule: `factory mcp` serves the protocol and says nothing else
+
+    One command owns its streams rather than returning lines, because every
+    other command's lines are printed to stdout — and a printed line here lands
+    in the middle of a JSON-RPC stream and ends the session with an error the
+    person reads as "Factory is broken".
+
+    It is also the one command nobody types. An MCP client starts it, so run by
+    hand with nothing on stdin it explains itself rather than hanging on a
+    terminal waiting for a frame that is never coming.
+
+    Scenario: It answers a client over the pipe it was given
+      Given a client that initializes and lists the tools
+      When I run "mcp"
+      Then it succeeds
+      And two frames were written to the pipe
+      And nothing was printed
+      And the tools include "factory_project_current"
+
+    Scenario: Run by hand it explains what it is for
+      When I run "mcp" with no pipe at all
+      Then it fails
+      And the output says an MCP client starts it
+      And the output shows what to put in a client's configuration
+
+    Scenario: It is in the help
+      When I run "--help"
+      Then the output mentions "factory mcp"

@@ -1346,4 +1346,76 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the output mentions "<path>"', () => expect(output).toContain('<path>'))
     })
   })
+  Rule('`factory mcp` serves the protocol and says nothing else', ({ RuleScenario }) => {
+    /** A pipe of strings: what the client sent, and what came back where. */
+    let sent: string[] = []
+    let written: string[] = []
+    let errors: string[] = []
+
+    const pipe = () => ({
+      input: {
+        async *[Symbol.asyncIterator]() {
+          for (const chunk of sent) yield chunk
+        },
+      },
+      output: { write: (text: string) => void written.push(text) },
+      error: { write: (text: string) => void errors.push(text) },
+    })
+    const frames = () =>
+      written
+        .join('')
+        .split('\n')
+        .filter((line) => line !== '')
+        .map((line) => JSON.parse(line) as { result?: { tools?: { name: string }[] } })
+
+    const serveIt = async (): Promise<void> => {
+      streamed = []
+      written = []
+      errors = []
+      result = await run({
+        argv: ['mcp'],
+        cwd: workDir,
+        env: { FACTORY_HOME: userScope, FACTORY_URL: 'http://127.0.0.1:9', PATH: '/usr/bin:/bin' },
+        write: (text) => streamed.push(text),
+        streams: pipe(),
+      })
+      output = [...streamed, ...result.lines].join('\n')
+    }
+
+    RuleScenario('It answers a client over the pipe it was given', ({ Given, When, Then, And }) => {
+      Given('a client that initializes and lists the tools', () => {
+        sent = [
+          `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'a-client' } } })}\n`,
+          `${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`,
+        ]
+      })
+      When('I run "mcp"', serveIt)
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('two frames were written to the pipe', () => expect(frames()).toHaveLength(2))
+      // The whole contract of stdio transport, asserted rather than assumed:
+      // `bin.ts` prints every line a command returns, so this one returns none.
+      And('nothing was printed', () => expect(output).toBe(''))
+      And('the tools include "factory_project_current"', () =>
+        expect(frames()[1]?.result?.tools?.map((tool) => tool.name)).toContain(
+          'factory_project_current',
+        ),
+      )
+    })
+
+    RuleScenario('Run by hand it explains what it is for', ({ When, Then, And }) => {
+      When('I run "mcp" with no pipe at all', () => invoke('mcp'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+      And('the output says an MCP client starts it', () =>
+        expect(output).toContain('An MCP client starts it'),
+      )
+      And("the output shows what to put in a client's configuration", () =>
+        expect(output).toContain('"mcpServers"'),
+      )
+    })
+
+    RuleScenario('It is in the help', ({ When, Then }) => {
+      When('I run "--help"', () => invoke('--help'))
+      Then('the output mentions "factory mcp"', () => expect(output).toContain('factory mcp'))
+    })
+  })
 })

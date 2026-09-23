@@ -10,6 +10,8 @@ import { run as runWorkflow } from './commands/run.js'
 import * as tasks from './commands/tasks.js'
 import { setup as setupCommand } from './commands/setup.js'
 import { createDaemonClient, type DaemonClient } from './daemon.js'
+import { mcp } from './commands/mcp.js'
+import type { McpStreams } from '@factory/mcp'
 import { isDefinitionKind } from '@factory/config'
 import type { ConflictPolicy, DefinitionKind, ScopeKind } from '@factory/config'
 
@@ -45,6 +47,8 @@ Usage
   factory project add <name> <path>       a repository to work in   (--in-place)
   factory project queue <name>            queue the lot, in dependency order
   factory project stop <name>             cancel whatever is in flight there
+
+  factory mcp                             serve Factory to an MCP-capable agent
 
   factory setup                           what is still missing, and how to fix it
   factory doctor                          check the installation
@@ -119,6 +123,14 @@ export interface RunOptions {
   readonly write?: (line: string) => void
   /** Injected so the task commands can be specified without a daemon running. */
   readonly daemon?: DaemonClient
+  /**
+   * Where `factory mcp` speaks, when it is what was asked for.
+   *
+   * The one command that owns its streams rather than returning lines, so the
+   * streams are handed over the way everything else here is — which is what
+   * lets the whole protocol be specified without spawning a process.
+   */
+  readonly streams?: McpStreams
 }
 
 /**
@@ -151,6 +163,7 @@ export async function run(options: RunOptions): Promise<CommandResult> {
       // Streamed straight out, so a long build is watchable rather than arriving
       // in one lump when it finishes.
       write: options.write ?? (() => {}),
+      ...(options.streams === undefined ? {} : { streams: options.streams }),
     },
     false,
     options.daemon,
@@ -165,7 +178,7 @@ async function dispatch(
   rest: string[],
   context: CliContext,
   style: ReturnType<typeof styleFor>,
-  io: { isTty: boolean; write: (line: string) => void },
+  io: { isTty: boolean; write: (line: string) => void; streams?: McpStreams },
   dryRun: boolean,
   daemon?: DaemonClient,
 ): Promise<CommandResult> {
@@ -193,6 +206,9 @@ async function dispatch(
       }
       return security.stop(daemon ?? createDaemonClient(context.env), style)
     }
+
+    case 'mcp':
+      return mcp(context, daemon ?? createDaemonClient(context.env), io.streams)
 
     case 'init': {
       const index = rest.indexOf('--scope')

@@ -1127,6 +1127,60 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a task can be moved to another project', ({ RuleScenario }) => {
+    let elsewhere = ''
+    const givenElsewhere = async (): Promise<void> => {
+      const home = projectId
+      await addProject('elsewhere', join(root, 'work'))
+      elsewhere = projectId
+      // Back to the Background's project, so the task lands where the scenario
+      // means it to and the move is what changes that.
+      projectId = home
+    }
+    const moveTo = (to: string) => () => call('PATCH', `/api/tasks/${taskId}`, { projectId: to })
+
+    RuleScenario('A task is moved', ({ Given, And, When, Then }) => {
+      Given('the project "elsewhere" also exists', givenElsewhere)
+      And('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to "elsewhere"', () => moveTo(elsewhere)())
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the task belongs to "elsewhere"', () =>
+        expect((response.body.task as { projectId: string }).projectId).toBe(elsewhere),
+      )
+    })
+
+    RuleScenario('Moving to a project that is not there is a bad request', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to a project that does not exist', () => moveTo('project-nowhere')())
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('Moving a task that is running is refused', ({ Given, And, When, Then }) => {
+      Given('the project "elsewhere" also exists', givenElsewhere)
+      // A workflow that lingers, so "running" is a state the scenario can
+      // still be in when it asks. `hello` finishes in milliseconds and the
+      // refusal would be tested or not according to how fast the machine is.
+      And('the task "Add due dates" exists', () => {
+        file(join(scope, 'workflows', 'waiting.workflow.yaml'), 'name: waiting\nphases: [linger]\n')
+        file(join(scope, 'phases', 'linger.phase.yaml'), 'name: linger\nsteps: [{run: sleep 2}]\n')
+        return create('Add due dates', ['waiting'])
+      })
+      And('"Add due dates" is running', async () => {
+        await call('POST', `/api/tasks/${taskId}/actions/queue`)
+        await until(async () => {
+          await reload()
+          return stateOf() === 'running'
+        }, 'the task to start')
+      })
+      When('I move it to "elsewhere"', () => moveTo(elsewhere)())
+      Then('the response is 409', () => expect(response.statusCode).toBe(409))
+    })
+  })
+
   Rule('A task can be renamed, and agents are definitions like any other', ({ RuleScenario }) => {
     let directoryBefore = ''
 

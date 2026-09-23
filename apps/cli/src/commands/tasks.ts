@@ -414,6 +414,47 @@ export async function depends(
 }
 
 /**
+ * `factory task move <id> <project>` — put it in another project.
+ *
+ * Named rather than by id, like `task new --project`: nobody types a uuid.
+ * Every refusal the store makes — a task that is running, one an edge joins to
+ * another — comes back as the sentence it wrote, because rewording it here
+ * would mean two explanations of one rule.
+ */
+export async function move(
+  client: DaemonClient,
+  id: string,
+  project: string,
+  style: Style,
+): Promise<CommandResult> {
+  try {
+    const resolved = await resolveId(client, id)
+    const projects = await client.request<{ items: { id: string; name: string }[] }>(
+      '/api/projects',
+    )
+    const found = projects.items.find((entry) => entry.name === project)
+    if (found === undefined) {
+      return failed([
+        `No project called "${project}".`,
+        style.dim(
+          projects.items.length === 0
+            ? 'Add one with "factory project add <name> <path>".'
+            : `Known: ${projects.items.map((entry) => entry.name).join(', ')}`,
+        ),
+      ])
+    }
+    const result = await client.request<{ task: TaskSummary }>(
+      `/api/tasks/${encodeURIComponent(resolved)}`,
+      { method: 'PATCH', body: { projectId: found.id } },
+    )
+    return ok([`${result.task.name} is now in ${project}.`], result)
+  } catch (error) {
+    if (error instanceof AmbiguousId) return failed([error.message, style.dim('Use more of it.')])
+    return asFailure(error)
+  }
+}
+
+/**
  * `factory project add <name> <path>` — somewhere to work.
  *
  * Exists because `factory setup` had to print a `curl` at a hardcoded port to

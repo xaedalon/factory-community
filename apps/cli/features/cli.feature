@@ -182,6 +182,18 @@ Feature: The factory command
     Then the daemon was asked to create a task with workflows "worktree-create, development"
     And the output says how to start it
 
+  Scenario: a task is moved to another project
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task move task-1 elsewhere"
+    Then the daemon was asked to move it to "elsewhere"
+    And the output says where it is now
+
+  Scenario: moving to a project that is not there says which exist
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task move task-1 nowhere"
+    Then it fails
+    And the output names both projects
+
   Scenario: a task lands in the only project there is
     Given a daemon with one project "work"
     When I run "task new Add due dates"

@@ -310,6 +310,33 @@ Feature: Tasks, runs and live updates over HTTP
       Then the response is 409
       And the refusal names "hello"
 
+  Rule: a task can be moved to another project
+
+    Created in the wrong project was a mistake with no remedy but deleting the
+    task and making it again, which throws away its history and its runs. A
+    task has to be created in some project, so choosing the wrong one is an
+    ordinary mistake.
+
+    Scenario: A task is moved
+      Given the project "elsewhere" also exists
+      And the task "Add due dates" exists
+      When I move it to "elsewhere"
+      Then the response is 200
+      And the task belongs to "elsewhere"
+
+    Scenario: Moving to a project that is not there is a bad request
+      Given the task "Add due dates" exists
+      When I move it to a project that does not exist
+      Then the response is 400
+
+    Scenario: Moving a task that is running is refused
+      Given the project "elsewhere" also exists
+      And the task "Add due dates" exists
+      And "Add due dates" is running
+      When I move it to "elsewhere"
+      # The request is well formed; the state is what will not have it.
+      Then the response is 409
+
   Rule: A task can be renamed, and agents are definitions like any other
 
     Scenario: A task can be renamed

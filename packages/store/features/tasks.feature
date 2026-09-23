@@ -534,3 +534,52 @@ Feature: A task, and the rules about how it moves
       Given a task "Add due dates" with the workflow "development"
       And I queue it
       Then "block" is not offered
+
+  Rule: a task can be moved to another project
+
+    A task created in the wrong project could only be deleted and made again,
+    which throws away everything recorded about it — and a task now has to be
+    created in *some* project, so choosing the wrong one is an ordinary
+    mistake rather than an exotic one.
+
+    Moving changes where the work happens, so it is refused while work is
+    happening: the task is in a worktree of the old project, the run in flight
+    is spawning steps there, and the row deciding where that is must not change
+    underneath it.
+
+    Dependencies are the other refusal. An edge may only join two tasks in the
+    same project — a dependency across projects has no owner — so moving one
+    end of one would leave behind an edge the store would refuse to create.
+
+    Scenario: A draft task is moved
+      Given the project "other" also exists
+      And the task "Add due dates" exists
+      When I move it to "other"
+      Then the task belongs to "other"
+
+    Scenario: Moving a running task is refused
+      Given the project "other" also exists
+      And the task "Add due dates" exists
+      And "Add due dates" is running
+      When I move it to "other"
+      Then it is refused
+      And the error says the task is running
+
+    Scenario: Moving a task that something waits for is refused
+      Given the project "other" also exists
+      And the task "Add due dates" exists
+      And the task "Ship it" exists
+      And "Ship it" waits for "Add due dates"
+      When I move "Add due dates" to "other"
+      Then it is refused
+      And the error mentions what it is waiting on
+
+    Scenario: Moving to a project that is not there is refused
+      Given the task "Add due dates" exists
+      When I move it to a project that does not exist
+      Then it is refused
+
+    Scenario: Moving it where it already is changes nothing
+      Given the task "Add due dates" exists
+      When I move it to the project it is already in
+      Then the task is unchanged

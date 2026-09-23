@@ -1005,4 +1005,78 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('"block" is not offered', () => expect(offered()).not.toContain('block'))
     })
   })
+  Rule('a task can be moved to another project', ({ RuleScenario }) => {
+    let elsewhere = ''
+    const givenOther = (): void => {
+      elsewhere = projectsIn().add({ name: 'other', path: somewhere() }).id
+    }
+    const move = (name: string, to: string) => (): void => {
+      try {
+        task = tasks.move(idOf(name), to)
+      } catch (error) {
+        failure = error
+      }
+    }
+
+    RuleScenario('A draft task is moved', ({ Given, And, When, Then }) => {
+      Given('the project "other" also exists', givenOther)
+      And('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to "other"', () => move('Add due dates', elsewhere)())
+      Then('the task belongs to "other"', () => expect(task?.projectId).toBe(elsewhere))
+    })
+
+    RuleScenario('Moving a running task is refused', ({ Given, And, When, Then }) => {
+      Given('the project "other" also exists', givenOther)
+      And('the task "Add due dates" exists', () => create('Add due dates', ['development']))
+      And('"Add due dates" is running', () => {
+        tasks.act(idOf('Add due dates'), 'queue')
+        tasks.act(idOf('Add due dates'), 'start')
+      })
+      When('I move it to "other"', () => move('Add due dates', elsewhere)())
+      Then('it is refused', () => expect(failure).toBeDefined())
+      And('the error says the task is running', () =>
+        expect((failure as Error).message).toContain('running'),
+      )
+    })
+
+    RuleScenario('Moving a task that something waits for is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "other" also exists', givenOther)
+      And('the task "Add due dates" exists', () => create('Add due dates'))
+      And('the task "Ship it" exists', () => create('Ship it'))
+      And('"Ship it" waits for "Add due dates"', () => {
+        tasks.dependOn(idOf('Ship it'), idOf('Add due dates'))
+      })
+      When('I move "Add due dates" to "other"', () => move('Add due dates', elsewhere)())
+      Then('it is refused', () => expect(failure).toBeDefined())
+      And('the error mentions what it is waiting on', () =>
+        expect((failure as Error).message).toContain('waits'),
+      )
+    })
+
+    RuleScenario('Moving to a project that is not there is refused', ({ Given, When, Then }) => {
+      Given('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to a project that does not exist', () =>
+        move('Add due dates', 'project-nowhere')(),
+      )
+      Then('it is refused', () => expect(failure).toBeDefined())
+    })
+
+    RuleScenario('Moving it where it already is changes nothing', ({ Given, When, Then }) => {
+      let before = ''
+      Given('the task "Add due dates" exists', () => {
+        create('Add due dates')
+        before = tasks.get(idOf('Add due dates'))?.updatedAt as string
+      })
+      When('I move it to the project it is already in', () => move('Add due dates', home)())
+      Then('the task is unchanged', () => {
+        expect(task?.projectId).toBe(home)
+        expect(task?.updatedAt).toBe(before)
+      })
+    })
+  })
 })

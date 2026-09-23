@@ -453,6 +453,47 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
+  Scenario('a task is moved to another project', ({ Given, When, Then, And }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', () => {
+      asked = []
+      daemon = fakeDaemon((path, method) =>
+        method === 'PATCH'
+          ? { task: task({ state: 'draft' }) }
+          : path.startsWith('/api/projects')
+            ? { items: [{ id: 'pr-1', name: 'work' }, { id: 'pr-2', name: 'elsewhere' }] }
+            : { items: [task()] },
+      )
+    })
+    When('I run "task move task-1 elsewhere"', () => invoke('task move task-1 elsewhere'))
+    Then('the daemon was asked to move it to "elsewhere"', () => {
+      const patch = asked.find((entry) => entry.method === 'PATCH')
+      expect((patch?.body as { projectId: string }).projectId).toBe('pr-2')
+    })
+    And('the output says where it is now', () => expect(output).toContain('elsewhere'))
+  })
+
+  Scenario('moving to a project that is not there says which exist', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', () => {
+      asked = []
+      daemon = fakeDaemon((path) =>
+        path.startsWith('/api/projects')
+          ? { items: [{ id: 'pr-1', name: 'work' }, { id: 'pr-2', name: 'elsewhere' }] }
+          : { items: [task()] },
+      )
+    })
+    When('I run "task move task-1 nowhere"', () => invoke('task move task-1 nowhere'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output names both projects', () => {
+      expect(output).toContain('work')
+      expect(output).toContain('elsewhere')
+    })
+  })
+
   Scenario('a task lands in the only project there is', ({ Given, When, Then }) => {
     Given('a daemon with one project "work"', daemonWithProjects('work'))
     When('I run "task new Add due dates"', () => invoke('task new Add due dates'))

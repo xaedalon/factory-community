@@ -339,6 +339,20 @@ export function applyAction(
   return { from: task.state, action, task: next as unknown as Task }
 }
 
+/**
+ * Work is happening on this task right now.
+ *
+ * `awaiting_approval` counts: the run is parked mid-plan holding uncommitted
+ * changes in a working copy, and the phases after the gate are still to come.
+ * Anything that would change what a run is doing or where it happens — the
+ * plan, the project — is refused while a task is in one of these.
+ *
+ * Here rather than in the route that first needed it, because the store makes
+ * the same refusal and two lists could disagree about which states mean
+ * "busy".
+ */
+export const IN_FLIGHT: readonly TaskState[] = ['running', 'awaiting_approval']
+
 /** Terminal for the board's purposes: nothing further happens on its own. */
 export const isSettled = (state: TaskState): boolean =>
   state === 'done' || state === 'cancelled' || state === 'archived'

@@ -877,7 +877,7 @@ to the database and expect it to refuse. Afterwards, dropping `NOT NULL` fails;
 equivalent too, and for a reason worth writing down: the ids go into a temp
 table first, so no delete reads `tasks` and the order cannot matter.
 
-## After 0.1.0 — the improvements list, worked through
+## After 0.1.0 — the things noticed while building something else
 
 | # | What | State |
 |--:|------|-------|
@@ -892,10 +892,12 @@ table first, so no delete reads `tasks` and the order cannot matter.
 | 104 | **Export follows `needs`** | ✅ done |
 | 105 | **The board says what to add first**, and `pnpm mutate` makes the discipline a command | ✅ done |
 
-`improvements.md` is a list kept in the commercial workspace of things noticed
-while building something else — each one a file and a line rather than a
-feeling. This is the session that worked through it. Eighteen entries are
-struck through there now, each with the commit that closed it.
+Things noticed while building something else are written down as they are
+found — each one a file and a line rather than a feeling — and the list is kept
+outside this repository, because most of its entries are about work in
+progress. This is the session that worked through it: twenty-four entries
+closed, each with the commit that closed it, and two of those closed as
+decisions to leave them alone.
 
 Four findings are worth repeating here, because they are about how this
 codebase fails rather than about any one defect.
@@ -1089,7 +1091,7 @@ this repository does not contain.
 | `apps/web/features/builder.feature` | Authoring a workflow or phase without writing YAML |
 | `apps/web/features/authoring.feature` | Delete, conflicts, phase references, and the YAML view |
 | `apps/web/features/sharing.feature` | Export a bundle, preview an import, resolve a clash |
-| `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, and the dependency picker |
+| `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, the dependency picker, what an installation with no repository is told, and the settings page — theme, scale, and what agents may reach |
 | `packages/core/features/run.feature` | Running a plan: order, failure, deadlines, approval gates |
 | `packages/core/features/execution-profiles.feature` | Which profile applies: project over installation over `default`, and one name for each |
 | `packages/core/features/workspace-boundary.feature` | What counts as inside the workspace, including `..`, a prefix sibling and a real symlink |

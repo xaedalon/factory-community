@@ -20,9 +20,9 @@
  * where the file is `[{ file, find, replace, suite?, describe? }, ...]`.
  *
  * The exit code is the useful part: 0 when every mutation was caught, 1 when
- * any survived. A surviving mutation is not necessarily a missing scenario —
- * it can be an equivalent mutant, which the report says to check — but it is
- * always worth knowing about.
+ * any survived or could not be applied — a mutation nobody ran is not a
+ * mutation that passed. A surviving mutation is not necessarily a missing
+ * scenario: it can be an equivalent mutant, which the report says to check.
  *
  * The file is restored by a `finally` and by handlers for SIGINT and SIGTERM,
  * because a script that edits source and is interrupted must not leave the

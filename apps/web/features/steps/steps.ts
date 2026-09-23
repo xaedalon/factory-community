@@ -1107,6 +1107,36 @@ Then('{string} is still listed', async ({ page }, name: string) => {
   await expect(page.getByTestId(`project-${name}`)).toBeVisible()
 })
 
+/* --------------------------------------------------------------- settings */
+
+Then('it names the file it writes', async ({ page }) => {
+  await expect(page.getByTestId('settings-file')).toContainText('settings.json')
+})
+
+Then('the file is in the user scope', async ({ page }) => {
+  await expect(page.getByTestId('settings-file')).toContainText('.xaedalon/.factory')
+})
+
+When('I choose Full Access', async ({ page }) => {
+  await page.getByTestId('profile-full-access').click()
+})
+
+When('I choose the default profile', async ({ page }) => {
+  await page.getByTestId('profile-default').click()
+})
+
+Then('Full Access is marked as chosen', async ({ page }) => {
+  await expect(page.getByTestId('profile-full-access')).toHaveAttribute('aria-pressed', 'true')
+})
+
+Then('the page warns what Full Access costs', async ({ page }) => {
+  await expect(page.getByTestId('full-access-warning')).toContainText('removes the workspace')
+})
+
+Then('the page does not warn about Full Access', async ({ page }) => {
+  await expect(page.getByTestId('full-access-warning')).toHaveCount(0)
+})
+
 When('I open the setup page', async ({ world, page }) => {
   await world.startDaemon()
   await page.goto('/setup')

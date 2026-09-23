@@ -18,9 +18,11 @@ about them — runs, logs, artifacts, history. It says how many at boot. Tasks t
 keep everything. If you have project-less tasks worth keeping, give them a project before
 upgrading. `factory run` is unaffected; it never created a task.
 
-*Also:* `POST /api/tasks` requires `projectId` and answers 400 without one. `DELETE
-/api/projects/:id` answers 409 with the count while anything is left in the project. `factory task
-new` falls into the only project there is, and otherwise asks which.
+*Also:* adding a project now creates its `.xaedalon/.factory` directory if the repository has none,
+because everything a new project does needs it — the reply says whether one was created, and the
+board lists it with whatever was copied in. `POST /api/tasks` requires `projectId` and answers 400
+without one. `DELETE /api/projects/:id` answers 409 with the count while anything is left in the
+project. `factory task new` falls into the only project there is, and otherwise asks which.
 
 **The event stream stopped naming its frames.** `GET /api/events` sent each event as an SSE frame
 named after the event, which only reaches a client that already knows to listen for that name — so

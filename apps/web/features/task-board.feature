@@ -1236,3 +1236,34 @@ Feature: The task board
       # A dependency between projects has no owner, and the store refuses one.
       # Offering it would be offering a refusal.
       And "Loose" cannot be chosen to wait for
+
+  Rule: the settings page is where an installation is configured
+
+    The theme and the interface scale are driven through this page by the
+    scenarios above, so it is opened — but the setting worth the most care had
+    no coverage at all: what agents may reach. It is the one a person is most
+    likely to change without knowing what it costs, and choosing the option
+    that removes the workspace boundary should never be quiet.
+
+    Background:
+      Given the project defines the workflow "hello" that prints "hello"
+      When I open the tasks page
+
+    Scenario: The page says where the settings file is
+      When I open the settings page
+      Then it names the file it writes
+      And the file is in the user scope
+
+    Scenario: The execution profile is chosen here and stays chosen
+      When I open the settings page
+      And I choose Full Access
+      Then Full Access is marked as chosen
+      And the page warns what Full Access costs
+      When the page is reloaded
+      Then Full Access is marked as chosen
+
+    Scenario: Confining agents again takes the warning away
+      When I open the settings page
+      And I choose Full Access
+      And I choose the default profile
+      Then the page does not warn about Full Access

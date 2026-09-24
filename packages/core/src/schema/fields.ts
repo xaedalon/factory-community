@@ -58,6 +58,7 @@ export const WORKFLOW_FIELDS: readonly FieldSpec<Workflow>[] = [
   { yaml: 'conditions', from: 'conditions', emit: 'ifPresent' },
   { yaml: 'on_fail', from: 'onFail', emit: 'ifPresent' },
   { yaml: 'override', from: 'override', emit: 'ifPresent' },
+  { yaml: 'reliability', from: 'reliability', emit: 'ifPresent' },
   { yaml: 'phases', from: 'phases', emit: 'always' },
 ]
 

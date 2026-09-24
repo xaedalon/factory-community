@@ -108,6 +108,7 @@ describeFeature(feature, ({ Scenario }) => {
             'conditions: {requires: [hasWorktree]}',
             'on_fail: development-failure',
             'override: required',
+            'reliability: {contributes: [design], expected_evidence: [technical_approach]}',
             'phases: [analysis]',
           ].join('\n'),
         ),

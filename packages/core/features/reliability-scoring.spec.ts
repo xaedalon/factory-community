@@ -183,7 +183,7 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
         drivers = [driver({ severity: 'critical', type: 'security' })]
       })
       When('the score is calculated', calculate)
-      Then('the raw score is 96', rawIs(96))
+      Then('the raw score is still above 90', () => expect(result.rawScore).toBeGreaterThan(90))
       And('the effective score is 70', effectiveIs(70))
       And('the assessment records why it was capped', () => {
         expect(result.caps.map((cap) => cap.type)).toContain('criticalOpenDriver')
@@ -228,6 +228,26 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
       })
       When('the score is calculated', calculate)
       Then('the effective score is 70', effectiveIs(70))
+    })
+
+    RuleScenario('Resolving a finding gives its cost back', ({ Given, And, When, Then }) => {
+      let clean = 0
+      Given('every dimension scores 96', () => {
+        dimensions = flat(96)
+        fullyObserved()
+        clean = score({ dimensions, drivers: [], observations, policy }).score
+      })
+      And('an open "testing" driver of "medium" severity costing 6', () => {
+        drivers = [driver({ severity: 'medium', type: 'testing', scoreImpact: -6 })]
+      })
+      When('the score is calculated', calculate)
+      And('that driver is resolved and the score recalculated', () => {
+        other = result
+        drivers = drivers.map((d) => ({ ...d, status: 'resolved' as DriverStatus }))
+        calculate()
+      })
+      Then('the score went up', () => expect(result.score).toBeGreaterThan(other.score))
+      And('it is back to what it was before the finding', () => expect(result.score).toBe(clean))
     })
 
     RuleScenario('A high-severity driver costs its impact rather than a ceiling', ({

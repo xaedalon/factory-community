@@ -242,6 +242,35 @@ export function deltaCauses(
   return causes
 }
 
+/**
+ * What the active findings do to the dimensions they name.
+ *
+ * Without this a driver's `scoreImpact` is decoration: the first version of
+ * this file computed caps from drivers and the average from evidence, and the
+ * impact reached nothing but the delta explanation — a field declared and
+ * inert, which is the shape this codebase keeps paying for.
+ *
+ * It belongs on the dimension rather than on the total because that is what a
+ * driver *is*: a named reason one dimension is worse than its evidence
+ * suggests. Applying it to the total would make two findings in different
+ * dimensions indistinguishable, and the breakdown would stop explaining the
+ * number it sits under.
+ *
+ * Resolving a driver gives the score back, which only works because the driver
+ * is what took it.
+ */
+export function withDriverImpacts(
+  dimensions: DimensionScores,
+  drivers: readonly ReliabilityDriver[],
+): DimensionScores {
+  const adjusted = { ...dimensions }
+  for (const driver of drivers) {
+    if (!ACTIVE_DRIVER_STATUSES.includes(driver.status)) continue
+    adjusted[driver.dimension] = clampScore(adjusted[driver.dimension] + driver.scoreImpact)
+  }
+  return adjusted
+}
+
 export interface ScoreInput {
   readonly dimensions: DimensionScores
   readonly drivers: readonly ReliabilityDriver[]
@@ -273,7 +302,10 @@ export interface ScoreResult {
  * evidence to a number, and this is it.
  */
 export function score(input: ScoreInput): ScoreResult {
-  const { score: raw, contributions } = rawScore(input.dimensions, input.policy)
+  // Findings first: the dimensions arrive as evidence supports them, and the
+  // active drivers are the named reasons to think worse of one.
+  const adjusted = withDriverImpacts(input.dimensions, input.drivers)
+  const { score: raw, contributions } = rawScore(adjusted, input.policy)
   const measured = coverage(input.observations, input.policy)
   const caps = capsFor(input.drivers, input.policy, measured.missing, input.observations)
   const effective = applyCaps(raw, caps)

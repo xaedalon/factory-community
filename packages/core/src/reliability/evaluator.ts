@@ -252,14 +252,12 @@ export function dimensionsFromEvidence(
         .reduce((sum, e) => sum + e.weight, 0)
       const earned = want === 0 ? 0 : (have / want) * (ceiling - policy.baseline)
 
-      const failures = observations.filter(
-        (o) => o.dimension === dimension && (o.status === 'failed' || o.status === 'missing'),
-      ).length
-      // Four points a failure, and never more than twenty: a dimension that has
-      // gone to zero stops distinguishing "one problem" from "nothing works".
-      const penalty = Math.min(20, failures * 4)
-
-      return [dimension, clampScore(policy.baseline + earned - penalty)]
+      // No penalty for failures here, deliberately. A failure that matters
+      // becomes a *driver*, and the driver's impact is what moves the
+      // dimension — see `withDriverImpacts`. Counting it in both places would
+      // charge twice for one problem, and resolving the driver would then only
+      // give half of it back.
+      return [dimension, clampScore(policy.baseline + earned)]
     }),
   ) as DimensionScores
 }

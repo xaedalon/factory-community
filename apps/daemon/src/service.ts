@@ -1,6 +1,7 @@
 import {
   Engine,
   Scheduler,
+  assessReliability,
   reconcile,
   runningInstallationPlugin,
   type FailureContext,
@@ -8,8 +9,11 @@ import {
   type ReconcileReport,
   type WorkflowFacts,
 } from '@factory/engine'
-import { definitionPath, planWorkflow, resolveWorkflow } from '@factory/config'
+import { definitionPath, namesIn, planWorkflow, resolveWorkflow } from '@factory/config'
 import {
+  DEFAULT_RELIABILITY_POLICY,
+  RELIABILITY_EVALUATOR_KIND,
+  type ReliabilityEvaluatorCapability,
   artifactsRoot,
   resolveProfile,
   systemCanonical,
@@ -22,6 +26,7 @@ import { createChains, type Chains } from './chains.js'
 import {
   MIGRATIONS,
   ProjectRepository,
+  ReliabilityRepository,
   RunRepository,
   TaskRepository,
   openStore,
@@ -95,6 +100,7 @@ export async function createService(
   const tasks = new TaskRepository({ db: store.db, events: runtime.events })
   const runs = new RunRepository({ db: store.db, events: runtime.events })
   const projects = new ProjectRepository({ db: store.db, events: runtime.events })
+  const reliability = new ReliabilityRepository({ db: store.db, events: runtime.events })
 
   // Definitions are resolved from the project's own directory, not the one the
   // daemon was started in. Everything that reads or writes a workflow goes
@@ -220,6 +226,34 @@ export async function createService(
           ...(failure === undefined ? {} : failureVariables(failure)),
         },
       }),
+    // Judged after every run that reaches a verdict. The engine assembles the
+    // facts — it is the only thing that sees the plan, the outcomes, the
+    // refusals and the artifacts together — and this supplies everything that
+    // needs a database or a host: the repository, the evaluators, and the
+    // workflows this project actually has so a recommendation can name a real
+    // one.
+    //
+    // Evaluators come off the host rather than a list here, which is what lets
+    // a plugin add one. The deterministic evaluator is a built-in and arrives
+    // the same way.
+    assess: async ({ taskId, facts }) => {
+      const task = tasks.get(taskId)
+      if (task === undefined) return []
+      const evaluators = runtime.host
+        .list<ReliabilityEvaluatorCapability>(RELIABILITY_EVALUATOR_KIND)
+        .map((entry) => entry.capability)
+      const outcome = await assessReliability({
+        taskId,
+        task: { name: task.name, description: task.description },
+        reliability,
+        evaluators,
+        policy: DEFAULT_RELIABILITY_POLICY,
+        trigger: 'run',
+        facts,
+        workflows: workflowNamesFor(task.projectId),
+      })
+      return outcome.problems
+    },
   })
 
   // Before anything is allowed to start: rows that say "running" from a process
@@ -229,6 +263,21 @@ export async function createService(
 
   // One answer to "what does this workflow say about being scheduled", shared
   // by the scheduler and by the doctor rule that explains why nothing started.
+  /**
+   * The workflows a project can actually run.
+   *
+   * Handed to the evaluators so a recommendation names one that exists — a
+   * suggestion to run something the project does not have is worse than no
+   * suggestion, because the board draws a button behind it.
+   */
+  const workflowNamesFor = (projectId?: string): readonly string[] => {
+    const chain = chains.for(projectId) ?? runtime.chain
+    // `namesIn` per scope rather than `listDefinitions`, which wants a parser:
+    // this needs the names, not the definitions, and parsing every workflow to
+    // answer "does this one exist" would be work nobody asked for.
+    return [...new Set(chain.scopes.flatMap((scope) => namesIn(scope, 'workflow')))]
+  }
+
   const workflow = (name: string, projectId?: string): WorkflowFacts | undefined => {
     const chain = chains.for(projectId) ?? runtime.chain
     const found = resolveWorkflow(chain, name)

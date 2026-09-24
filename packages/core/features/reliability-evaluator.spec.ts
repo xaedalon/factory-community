@@ -301,7 +301,7 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
       })
     })
 
-    RuleScenario('A failure lowers the dimension it was seen in', ({
+    RuleScenario('A failure on its own does not lower the dimension', ({
       Given,
       And,
       When,
@@ -319,8 +319,8 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
         ]
       })
       When('dimensions are read from the evidence', read)
-      Then('"design" is lower than it would have been', () =>
-        expect(dimensions['design']).toBeLessThan(without),
+      Then('"design" is what the evidence alone supports', () =>
+        expect(dimensions['design']).toBe(without),
       )
     })
   })

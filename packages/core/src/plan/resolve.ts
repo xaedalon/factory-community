@@ -13,7 +13,12 @@ import { PROVIDER_KIND, checkAgentStep, type ProviderCapability } from '../provi
 import { isAgentStep, type AgentStep } from '../builtins/steps.js'
 import type { Approval, Phase } from '../schema/phase.js'
 import { artifactFile, artifactsRoot, joinPath } from '../task/paths.js'
-import type { Scheduling, Workflow, WorkflowMode } from '../schema/workflow.js'
+import type {
+  Scheduling,
+  Workflow,
+  WorkflowMode,
+  WorkflowReliability,
+} from '../schema/workflow.js'
 import { substituteDeep, type VariableScope } from './variables.js'
 import {
   lexicalCanonical,
@@ -159,6 +164,13 @@ export interface ResolvedPlan {
   /** Flags cleared from the task when this run completes. */
   readonly clears: readonly string[]
   readonly onFail?: string
+  /**
+   * What the workflow said it contributes to reliability, carried through.
+   *
+   * A schema field nothing consumes is a defect here, and this is where it is
+   * consumed: the engine hands it to whoever judges the run.
+   */
+  readonly reliability?: WorkflowReliability
   readonly phases: readonly ResolvedPhase[]
 }
 
@@ -376,6 +388,7 @@ export function resolvePlan(request: PlanRequest): PlanResult {
       provides: workflow.conditions?.provides ?? [],
       clears: workflow.conditions?.clears ?? [],
       ...(workflow.onFail === undefined ? {} : { onFail: workflow.onFail }),
+      ...(workflow.reliability === undefined ? {} : { reliability: workflow.reliability }),
       phases,
     },
     problems,

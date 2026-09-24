@@ -116,11 +116,15 @@ Feature: Where judgement enters, and how far it is allowed
       When dimensions are read from the evidence
       Then no dimension reaches 100
 
-    Scenario: A failure lowers the dimension it was seen in
+    Scenario: A failure on its own does not lower the dimension
+      # A failure that matters becomes a driver, and the driver's impact is
+      # what moves the dimension. Counting it in both places would charge
+      # twice for one problem — and resolving the driver would then give back
+      # only half of what it took.
       Given everything expected of "design" has been observed
       And a failure was seen in "design"
       When dimensions are read from the evidence
-      Then "design" is lower than it would have been
+      Then "design" is what the evidence alone supports
 
   Rule: what Factory saw becomes findings without interpretation
 

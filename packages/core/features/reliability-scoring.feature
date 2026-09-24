@@ -73,7 +73,10 @@ Feature: Turning evidence into a number that can be explained
       Given every dimension scores 96
       And a "critical" open driver
       When the score is calculated
-      Then the raw score is 96
+      # The average is still in the nineties — the driver's own impact moves it
+      # a little — and the ceiling is what brings it to 70. Isolating the cap is
+      # the whole point of the scenario.
+      Then the raw score is still above 90
       And the effective score is 70
       And the assessment records why it was capped
 
@@ -100,6 +103,19 @@ Feature: Turning evidence into a number that can be explained
       And an open "regression" driver of "high" severity
       When the score is calculated
       Then the effective score is 70
+
+    Scenario: Resolving a finding gives its cost back
+      # The reason the impact belongs on the driver rather than on the total:
+      # a driver is a named reason a dimension is worse than its evidence
+      # suggests, and resolving it has to give back exactly what it took. A
+      # mutation that left a resolved driver still charging survived without
+      # this scenario, because the cap scenarios only watched the ceiling.
+      Given every dimension scores 96
+      And an open "testing" driver of "medium" severity costing 6
+      When the score is calculated
+      And that driver is resolved and the score recalculated
+      Then the score went up
+      And it is back to what it was before the finding
 
     Scenario: A high-severity driver costs its impact rather than a ceiling
       # A cap that fired on every high finding would stop the number moving,

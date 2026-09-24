@@ -136,6 +136,39 @@ const descriptorShape = {
     .default([]),
 
   /**
+   * How this CLI is told that one more command is allowed, if it can be.
+   *
+   * The seam a **custom profile** is rendered through. Declared here rather
+   * than decided in core, so a third party's provider gets it by writing YAML —
+   * the same rule that makes adding a provider a file rather than a patch.
+   *
+   * ```yaml
+   * commandAllowFlag: '--allowedTools'
+   * commandDenyFlag: '--disallowedTools'
+   * commandPattern: 'Bash({command} *)'
+   * commandSeparator: ','
+   * ```
+   *
+   * **Absent means this CLI cannot express it**, and that is a real answer
+   * rather than a gap: Copilot has four coarse switches and Codex has nothing,
+   * so a profile's commands mean nothing to either. What must not happen is the
+   * absence being *silent* — `unsupportedBy` below is how it is reported, and
+   * the planner turns that into a warning on the run.
+   *
+   * One flag with a separated value, never repeated: `--allowedTools` is
+   * variadic and a repeated variadic option **replaces** rather than appends,
+   * so four flags would leave only the last in force. That has cost this
+   * project time twice and is why the pattern and the separator are declared
+   * rather than assumed.
+   */
+  commandAllowFlag: z.string().min(1).optional(),
+  commandDenyFlag: z.string().min(1).optional(),
+  /** How one command becomes a rule. `{command}` is replaced; anything else is literal. */
+  commandPattern: z.string().min(1).default('{command}'),
+  /** What joins the rules into one value. */
+  commandSeparator: z.string().default(','),
+
+  /**
    * The flag that grants access to one more directory, if this CLI has one.
    *
    * Needed because a task's **artifacts do not live in its workspace**.
@@ -274,6 +307,110 @@ export function permissionArgsFor(
   // nothing — would be a profile that quietly ran unconfined or with no flags
   // at all, and both are the failure this function's comment already warns of.
   return declared[DEFAULT_PROFILE]
+}
+
+/**
+ * What a custom profile adds, resolved for one provider.
+ *
+ * Handed in already narrowed: `args` is *this* provider's share of the
+ * profile's `providers:` map, picked by whoever knows which provider is about
+ * to run. The renderer stays dumb, which is what keeps one profile from being
+ * interpreted two ways.
+ */
+export interface ProfileGrants {
+  readonly commands: readonly string[]
+  readonly denyCommands: readonly string[]
+  readonly args: readonly string[]
+}
+
+/** Nothing added. What a built-in profile grants. */
+export const NO_GRANTS: ProfileGrants = { commands: [], denyCommands: [], args: [] }
+
+/** One command as this CLI's rule. `git push` with `Bash({command} *)` is `Bash(git push *)`. */
+const asRule = (descriptor: ProviderDescriptor, command: string): string =>
+  descriptor.commandPattern.replace('{command}', command)
+
+/**
+ * The flags that carry a profile's commands, if this CLI can carry them.
+ *
+ * Returned as whole flag-and-value pairs rather than merged into
+ * `permissionArgs`, because the merging has to happen *before* the argv is
+ * built: the allow flag may already be in the confined list, and a second one
+ * would replace the first rather than extend it. `render` is the one place that
+ * knows both halves, so it is the one place that joins them.
+ */
+export function commandArgsFor(
+  descriptor: ProviderDescriptor,
+  grants: ProfileGrants,
+  existing: readonly string[] = [],
+): readonly string[] {
+  const args: string[] = []
+
+  if (descriptor.commandAllowFlag !== undefined && grants.commands.length > 0) {
+    const at = existing.indexOf(descriptor.commandAllowFlag)
+    // What the confined profile already allows, kept: a profile that wanted
+    // `cargo` must not cost the project its package managers.
+    const already = at === -1 ? '' : (existing[at + 1] ?? '')
+    const rules = grants.commands.map((command) => asRule(descriptor, command))
+    const joined = [already, ...rules].filter((part) => part !== '').join(descriptor.commandSeparator)
+    args.push(descriptor.commandAllowFlag, joined)
+  }
+
+  if (descriptor.commandDenyFlag !== undefined && grants.denyCommands.length > 0) {
+    const at = existing.indexOf(descriptor.commandDenyFlag)
+    const already = at === -1 ? '' : (existing[at + 1] ?? '')
+    const rules = grants.denyCommands.map((command) => asRule(descriptor, command))
+    const joined = [already, ...rules].filter((part) => part !== '').join(descriptor.commandSeparator)
+    args.push(descriptor.commandDenyFlag, joined)
+  }
+
+  return [...args, ...grants.args]
+}
+
+/** One thing a provider was asked for and cannot do. */
+export interface UnsupportedGrant {
+  readonly provider: string
+  readonly what: 'commands' | 'deny_commands'
+  readonly entries: readonly string[]
+  readonly message: string
+}
+
+/**
+ * What this provider cannot honour, said out loud.
+ *
+ * A profile is portable and the three CLIs are not: Claude has an allow-list,
+ * Copilot has coarse switches, Codex has nothing. Silence about that is the
+ * failure — an agent running under a profile that means nothing to its CLI,
+ * with everybody believing otherwise. Raw `args` are never unsupported, because
+ * there is nothing to translate.
+ */
+export function unsupportedBy(
+  descriptor: ProviderDescriptor,
+  grants: ProfileGrants,
+): readonly UnsupportedGrant[] {
+  const found: UnsupportedGrant[] = []
+  if (grants.commands.length > 0 && descriptor.commandAllowFlag === undefined) {
+    found.push({
+      provider: descriptor.id,
+      what: 'commands',
+      entries: grants.commands,
+      message:
+        `${descriptor.id} has no way to allow one command rather than all of them, so this ` +
+        `profile's commands (${grants.commands.join(', ')}) do not reach it. Its runs behave as ` +
+        `they do under the Default profile.`,
+    })
+  }
+  if (grants.denyCommands.length > 0 && descriptor.commandDenyFlag === undefined) {
+    found.push({
+      provider: descriptor.id,
+      what: 'deny_commands',
+      entries: grants.denyCommands,
+      message:
+        `${descriptor.id} has no deny-list, so this profile's denied commands ` +
+        `(${grants.denyCommands.join(', ')}) do not reach it.`,
+    })
+  }
+  return found
 }
 
 /**

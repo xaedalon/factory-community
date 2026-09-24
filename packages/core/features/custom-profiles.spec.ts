@@ -4,7 +4,14 @@ import { fileURLToPath } from 'node:url'
 import { parse as parseYaml } from 'yaml'
 import { parseProfile, type Profile } from '../src/schema/profile.js'
 import type { Problem } from '../src/problems.js'
-import { parseProviderDescriptor, permissionArgsFor } from '../src/providers/descriptor.js'
+import {
+  NO_GRANTS,
+  parseProviderDescriptor,
+  permissionArgsFor,
+  unsupportedBy,
+  type ProfileGrants,
+} from '../src/providers/descriptor.js'
+import { render } from '../src/providers/capability.js'
 import type { ProviderDescriptor } from '../src/providers/descriptor.js'
 import {
   isBuiltInProfile,
@@ -234,6 +241,243 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
       And('the refusal suggests "commands"', () =>
         expect(errors().map((p) => p.message).join(' ')).toContain('commands'),
       )
+    })
+  })
+
+  Rule('what a profile allows reaches the command line, once', ({ RuleScenario }) => {
+    let descriptor: ProviderDescriptor
+    let grants: ProfileGrants
+    let argv: readonly string[] = []
+
+    const provider = (extra: Record<string, unknown> = {}, allowed: string[] = []): void => {
+      const parsed = parseProviderDescriptor({
+        id: 'probe',
+        displayName: 'Probe',
+        command: 'probe',
+        promptFlag: '-p',
+        models: { strong: 'a', balanced: 'b', fast: 'c' },
+        permissionArgs: {
+          default: ['--restricted', ...(allowed.length > 0 ? ['--allowedTools', allowed.join(',')] : [])],
+          'full-access': ['--yolo'],
+        },
+        ...extra,
+      })
+      expect(parsed.error, JSON.stringify(parsed.error?.issues)).toBeUndefined()
+      descriptor = parsed.descriptor as ProviderDescriptor
+      grants = NO_GRANTS
+    }
+    const allows = (extra: Record<string, unknown> = {}, already: string[] = []): void =>
+      provider({ commandAllowFlag: '--allowedTools', commandPattern: 'Bash({command} *)', ...extra }, already)
+    const grant = (next: Partial<ProfileGrants>): void => {
+      grants = { ...NO_GRANTS, ...grants, ...next }
+    }
+    const renderWith = (profile: string): void => {
+      argv = render(descriptor, { prompt: 'do it', profile, grants }).args
+    }
+    /** The value that follows a flag, which is where a variadic option's whole list lives. */
+    const valueOf = (flag: string): string => {
+      const at = argv.indexOf(flag)
+      expect(at, `${flag} is not in ${argv.join(' ')}`).toBeGreaterThan(-1)
+      return argv[at + 1] ?? ''
+    }
+    const appearsOnce = (flag: string) => (): void => {
+      expect(argv.filter((a) => a === flag)).toHaveLength(1)
+    }
+
+    RuleScenario("A profile's commands are added to the confined list", ({ Given, And, When, Then }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('a profile allowing "cargo" and "make"', () => grant({ commands: ['cargo', 'make'] }))
+      When('the command is rendered', () => renderWith('development'))
+      Then('the argv still carries "--restricted"', () => expect(argv).toContain('--restricted'))
+      And('"--allowedTools" appears once', appearsOnce('--allowedTools'))
+      And('its value carries "Bash(cargo *)"', () =>
+        expect(valueOf('--allowedTools')).toContain('Bash(cargo *)'),
+      )
+      And('its value carries "Bash(make *)"', () =>
+        expect(valueOf('--allowedTools')).toContain('Bash(make *)'),
+      )
+    })
+
+    RuleScenario("The profile's own entries join the ones Default already passes", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('whose Default already allows "Bash(pnpm *)"', () => allows({}, ['Bash(pnpm *)']))
+      And('a profile allowing "cargo"', () => grant({ commands: ['cargo'] }))
+      When('the command is rendered', () => renderWith('development'))
+      Then('its value carries "Bash(pnpm *)"', () =>
+        expect(valueOf('--allowedTools')).toContain('Bash(pnpm *)'),
+      )
+      And('its value carries "Bash(cargo *)"', () =>
+        expect(valueOf('--allowedTools')).toContain('Bash(cargo *)'),
+      )
+    })
+
+    RuleScenario('The list it folded in does not linger as a loose argument', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('whose Default already allows "Bash(pnpm *)"', () => allows({}, ['Bash(pnpm *)']))
+      And('a profile allowing "cargo"', () => grant({ commands: ['cargo'] }))
+      When('the command is rendered', () => renderWith('development'))
+      Then('no argument is a bare "Bash(pnpm *)"', () => {
+        // Inside the merged value, yes. As an argv element of its own, never.
+        expect(argv).not.toContain('Bash(pnpm *)')
+      })
+    })
+
+    RuleScenario('Denied commands are rendered where a provider has a deny-list', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('that denies commands with "--disallowedTools"', () =>
+        allows({ commandDenyFlag: '--disallowedTools' }),
+      )
+      And('a profile allowing "git" and denying "git push"', () =>
+        grant({ commands: ['git'], denyCommands: ['git push'] }),
+      )
+      When('the command is rendered', () => renderWith('development'))
+      Then('"--disallowedTools" appears once', appearsOnce('--disallowedTools'))
+      And('the denied value carries "Bash(git push *)"', () =>
+        expect(valueOf('--disallowedTools')).toContain('Bash(git push *)'),
+      )
+    })
+
+    RuleScenario("A provider's own arguments are appended verbatim", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('a profile passing "--disallow-temp-dir" to that provider', () =>
+        grant({ args: ['--disallow-temp-dir'] }),
+      )
+      When('the command is rendered', () => renderWith('development'))
+      Then('the argv carries "--disallow-temp-dir"', () =>
+        expect(argv).toContain('--disallow-temp-dir'),
+      )
+    })
+
+    RuleScenario('A built-in profile renders exactly as it always did', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('whose Default already allows "Bash(pnpm *)"', () => allows({}, ['Bash(pnpm *)']))
+      When('the default profile is rendered', () => renderWith('default'))
+      Then('"--allowedTools" appears once', appearsOnce('--allowedTools'))
+      And('its value carries "Bash(pnpm *)"', () =>
+        expect(valueOf('--allowedTools')).toContain('Bash(pnpm *)'),
+      )
+      And('its value does not carry "Bash(cargo *)"', () =>
+        expect(valueOf('--allowedTools')).not.toContain('Bash(cargo *)'),
+      )
+    })
+  })
+
+  Rule('a provider that cannot honour a profile says so', ({ RuleScenario }) => {
+    let descriptor: ProviderDescriptor
+    let grants: ProfileGrants
+
+    const provider = (extra: Record<string, unknown> = {}): void => {
+      const parsed = parseProviderDescriptor({
+        id: 'probe',
+        displayName: 'Probe',
+        command: 'probe',
+        promptFlag: '-p',
+        models: { strong: 'a', balanced: 'b', fast: 'c' },
+        ...extra,
+      })
+      expect(parsed.error, JSON.stringify(parsed.error?.issues)).toBeUndefined()
+      descriptor = parsed.descriptor as ProviderDescriptor
+      grants = NO_GRANTS
+    }
+    const allows = (extra: Record<string, unknown> = {}): void =>
+      provider({ commandAllowFlag: '--allowedTools', commandPattern: 'Bash({command} *)', ...extra })
+    const grant = (next: Partial<ProfileGrants>): void => {
+      grants = { ...NO_GRANTS, ...grants, ...next }
+    }
+    const reported = (): readonly { what: string; provider: string; message: string }[] =>
+      unsupportedBy(descriptor, grants)
+
+    RuleScenario('A provider with no allow-list reports the commands it cannot honour', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a provider with no way to allow commands', () => provider())
+      And('a profile allowing "cargo" and "make"', () => grant({ commands: ['cargo', 'make'] }))
+      Then('it reports that it cannot honour the commands', () => {
+        expect(reported().map((r) => r.what)).toContain('commands')
+      })
+      And('what it reports names the provider', () => {
+        expect(reported()[0]?.message).toContain('probe')
+      })
+    })
+
+    RuleScenario('A provider with no deny-list reports that too', ({ Given, And, Then }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('a profile allowing "git" and denying "git push"', () =>
+        grant({ commands: ['git'], denyCommands: ['git push'] }),
+      )
+      Then('it reports that it cannot honour the denied commands', () => {
+        expect(reported().map((r) => r.what)).toContain('deny_commands')
+      })
+    })
+
+    RuleScenario('A provider that can honour everything reports nothing', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a provider that allows commands with "--allowedTools" as "Bash({command} *)"', () =>
+        allows(),
+      )
+      And('that denies commands with "--disallowedTools"', () =>
+        allows({ commandDenyFlag: '--disallowedTools' }),
+      )
+      And('a profile allowing "git" and denying "git push"', () =>
+        grant({ commands: ['git'], denyCommands: ['git push'] }),
+      )
+      Then('it reports nothing it cannot honour', () => expect(reported()).toEqual([]))
+    })
+
+    RuleScenario('A profile with only provider arguments is honoured by anyone', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a provider with no way to allow commands', () => provider())
+      And('a profile passing "--disallow-temp-dir" to that provider', () =>
+        grant({ args: ['--disallow-temp-dir'] }),
+      )
+      Then('it reports nothing it cannot honour', () => expect(reported()).toEqual([]))
     })
   })
 })

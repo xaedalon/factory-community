@@ -161,3 +161,93 @@ Feature: A profile somebody wrote themselves
         """
       Then it is refused
       And the refusal suggests "commands"
+
+  Rule: what a profile allows reaches the command line, once
+
+    `--allowedTools` is variadic, and a repeated variadic option **replaces**
+    rather than appends. Four flags would leave only the last in force, which
+    looks like it works. So a profile's commands become one flag with one
+    separated value, added to what the confined profile already passes.
+
+    Scenario: A profile's commands are added to the confined list
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And a profile allowing "cargo" and "make"
+      When the command is rendered
+      Then the argv still carries "--restricted"
+      And "--allowedTools" appears once
+      And its value carries "Bash(cargo *)"
+      And its value carries "Bash(make *)"
+
+    Scenario: The profile's own entries join the ones Default already passes
+      # Adding rather than replacing is the whole point: a profile that wanted
+      # cargo must not cost the project its package managers.
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And whose Default already allows "Bash(pnpm *)"
+      And a profile allowing "cargo"
+      When the command is rendered
+      Then its value carries "Bash(pnpm *)"
+      And its value carries "Bash(cargo *)"
+
+    Scenario: The list it folded in does not linger as a loose argument
+      # Taking the old flag out has to take its value with it. A value left
+      # behind is a positional argument, and for a CLI that takes its prompt
+      # positionally that is the prompt — so the agent would be asked to do
+      # "Bash(pnpm *)" instead of the work.
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And whose Default already allows "Bash(pnpm *)"
+      And a profile allowing "cargo"
+      When the command is rendered
+      Then no argument is a bare "Bash(pnpm *)"
+
+    Scenario: Denied commands are rendered where a provider has a deny-list
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And that denies commands with "--disallowedTools"
+      And a profile allowing "git" and denying "git push"
+      When the command is rendered
+      Then "--disallowedTools" appears once
+      And the denied value carries "Bash(git push *)"
+
+    Scenario: A provider's own arguments are appended verbatim
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And a profile passing "--disallow-temp-dir" to that provider
+      When the command is rendered
+      Then the argv carries "--disallow-temp-dir"
+
+    Scenario: A built-in profile renders exactly as it always did
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And whose Default already allows "Bash(pnpm *)"
+      When the default profile is rendered
+      Then "--allowedTools" appears once
+      And its value carries "Bash(pnpm *)"
+      And its value does not carry "Bash(cargo *)"
+
+  Rule: a provider that cannot honour a profile says so
+
+    Copilot has four coarse switches and Codex expresses nothing at all. A
+    profile's commands mean nothing to either, and the dangerous outcome is not
+    the absence — it is the absence being silent, which is a flag that reads
+    correctly and does nothing.
+
+    Scenario: A provider with no allow-list reports the commands it cannot honour
+      Given a provider with no way to allow commands
+      And a profile allowing "cargo" and "make"
+      Then it reports that it cannot honour the commands
+      And what it reports names the provider
+
+    Scenario: A provider with no deny-list reports that too
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And a profile allowing "git" and denying "git push"
+      Then it reports that it cannot honour the denied commands
+
+    Scenario: A provider that can honour everything reports nothing
+      Given a provider that allows commands with "--allowedTools" as "Bash({command} *)"
+      And that denies commands with "--disallowedTools"
+      And a profile allowing "git" and denying "git push"
+      Then it reports nothing it cannot honour
+
+    Scenario: A profile with only provider arguments is honoured by anyone
+      # Raw arguments are appended whatever the CLI is; there is nothing to
+      # translate and so nothing to be unable to translate.
+      Given a provider with no way to allow commands
+      And a profile passing "--disallow-temp-dir" to that provider
+      Then it reports nothing it cannot honour

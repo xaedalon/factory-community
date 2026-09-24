@@ -8,6 +8,59 @@ plugin SDK, the scope layout, the HTTP API — may still move, and a minor bump 
 
 ## Unreleased
 
+**Factory stops reporting success for work that did not happen.** A supervised run of ten tasks
+found the same shape four times: not a crash and not a wrong answer, but a tick beside work that
+never ran. Each of these was silent before, and each is loud now.
+
+**The Default profile can run your package manager again.** Claude Code auto-approves *edits* but
+not *commands*, so from 2.1.281 an agent under this profile could not run `pnpm install` at all —
+it was refused, carried on, exited 0 and wrote a report full of ticks. Factory now passes
+`--allowedTools` with `npm`, `pnpm`, `yarn` and `bun`, and nothing else.
+
+*This genuinely widens the profile, and [`docs/security/default-profile.md`](docs/security/default-profile.md)
+says so rather than implying otherwise:* `pnpm test` runs your project's own code, so the workspace
+boundary does not hold inside it. The list is package managers for that reason — an interpreter
+would be the same hole with none of the reason, and `Bash(node *)` was measured writing outside the
+workspace on the first attempt. If your check command is `cargo test` or `make check`, an *agent*
+asked to run it is still refused; the gate below is a shell step and is unaffected.
+
+**A refused command stops the run instead of disappearing into it.** The Claude descriptor now asks
+for `--output-format stream-json`, and Factory reads the transcript — so a refusal is a fact the CLI
+states rather than a sentence an agent paraphrases. A refused **command** moves the task to
+awaiting approval naming the command, whatever the exit code said, because an install that did not
+happen means everything reported after it was reported without it. A refused **path** behaves as
+before: the run may well have done the work somewhere else, so it is recorded and left alone.
+
+*Also:* the commands an agent runs are traced into the run's log as it goes, so a run that is
+thinking for six minutes is no longer silent. And `factory run` prints the refusals it had been
+collecting since profiles existed and never showing — a foreground run whose agent was refused a
+command now fails rather than printing `Completed.`
+
+**A project carries the command that checks its own work.** One setting — detected from a `test`
+script in `package.json` with the package manager read off the lockfile, from `Cargo.toml`,
+`go.mod`, or a `test:` target in a `Makefile` — editable on the project's page. It reaches a phase
+as `{{ project.check }}`, and the built-in **`project-check`** phase is exactly that one command, so
+a workflow ending in a real gate is one word in its phase list.
+
+*Why it matters:* an agent's report is a claim, and only a command is a result. A `validate`
+workflow made of an agent step alone can only ever tell you what the agent said.
+
+**A workflow or step that would run nothing is refused.** A workflow with no phases, or whose
+phases have no steps, used to finish `completed` in about three milliseconds with a tick beside it.
+It is now an error at plan time, a warning when the definition is parsed, and a `factory doctor`
+finding. So is any step whose command resolves to an empty string — `bash -c ''` exits 0, which is
+the same lie one level down.
+
+**A step cannot argue its way past its execution profile.** `args:` on a step or an agent file is
+appended to the agent's command line *after* the flags that confine it, and nothing checked it — so
+`args: ['--permission-mode', 'bypassPermissions']` in a file inside the repository meant Full Access
+with no setting changed and nothing said. It is refused at plan time now, naming the argument. What
+counts is derived from each provider's own Full Access flags, so it stays true as descriptors change
+and a third-party provider gets it without writing anything.
+
+*Upgrading:* if you added `--allowedTools` to an agent or step as a workaround for the first item
+above, remove it — it is refused now, and no longer needed.
+
 **A task belongs to a project.** `project_id` is required, and removing a project that still has
 tasks in it is refused with the count rather than orphaning them. A task with no project ran
 wherever the daemon happened to be started, wrote its artifacts beside it, could not be queued as a

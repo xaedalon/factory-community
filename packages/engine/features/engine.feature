@@ -574,6 +574,50 @@ Feature: Turning a task into runs
       # Unchanged: parking is for the case a person can actually resolve.
       Then the task is blocked
 
+  Rule: a refused command parks the run, whatever its exit code said
+
+    The rule above splits on whether the run *failed*, and a supervised run
+    found the case it cannot see. An agent was refused `pnpm install`; the CLI
+    exited 0 with `"subtype":"success"`; the tests that ran afterwards ran
+    against a project with no dependencies; and Factory said done. Nobody was
+    lied to on purpose — there was nothing to read.
+
+    A provider that emits a structured transcript says which *command* was
+    refused, and that is a different animal from a refused path. A refused path
+    leaves the agent free to write somewhere else and finish the job. A refused
+    command means an install, a build or a test did not run, and everything
+    reported after it was reported without it. So it parks, and the exit code
+    does not get a vote.
+
+    Scenario: A run that succeeded with a refused command is parked, not finished
+      Given the workflow "build" whose second phase is refused "pnpm install"
+      And it is the task's only workflow
+      And the task is queued
+      When the engine works on it
+      Then the task is awaiting approval
+      And the run is paused
+      And the task is not done
+      And a problem names the command "pnpm install"
+
+    Scenario: Approving resumes the phase the command was refused in
+      # Not the phase after it. Resuming past the work that did not happen is
+      # the same silence with an approval in front of it.
+      Given the workflow "build" whose second phase is refused "pnpm install"
+      And it is the task's only workflow
+      And the task is queued
+      When the engine works on it
+      Then the run continues from phase 1
+
+    Scenario: A workflow's flags are not earned by a run that was refused a command
+      # `provides:` is how a later workflow knows the environment is ready. A
+      # flag set here would tell the next workflow a lie that outlives the run.
+      Given the workflow "build" whose second phase is refused "pnpm install"
+      And it provides "installed"
+      And it is the task's only workflow
+      And the task is queued
+      When the engine works on it
+      Then the task does not have the flag "installed"
+
   Rule: a sequential workflow runs alone, wherever it is in the task's list
 
     `scheduling: sequential` was enforced only where a task was admitted. After

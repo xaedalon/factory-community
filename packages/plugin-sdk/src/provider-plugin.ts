@@ -8,6 +8,7 @@ import {
   type FactoryPlugin,
   type PluginContext,
   type ProviderDescriptor,
+  type StreamReaderFactory,
 } from '@factory/core'
 
 /**
@@ -22,6 +23,15 @@ export function defineProviderPlugin(options: {
   version: string
   /** Absolute path to the descriptor YAML. */
   descriptorFile: string
+  /**
+   * How to read this CLI's structured output, when it has some.
+   *
+   * The one thing about a provider that cannot be data: a transcript format is
+   * a parser. Optional, so the three-line descriptor plugin stays three lines —
+   * and so a provider that has not been measured says nothing rather than
+   * guessing, which is the rule the descriptors already follow.
+   */
+  stream?: StreamReaderFactory
 }): FactoryPlugin {
   return {
     name: options.name,
@@ -38,7 +48,11 @@ export function defineProviderPlugin(options: {
             `${first?.path.join('.') ?? ''} ${first?.message ?? 'unknown error'}`.trim(),
         )
       }
-      context.provide(PROVIDER_KIND, providerFromDescriptor(descriptor))
+      const provider = providerFromDescriptor(descriptor)
+      context.provide(
+        PROVIDER_KIND,
+        options.stream === undefined ? provider : { ...provider, stream: options.stream },
+      )
     },
   }
 }

@@ -30,6 +30,7 @@ the profile every project gets, and it is short.
 |---|---|
 | [`proposals/execution-profiles.md`](proposals/execution-profiles.md) | The safety standard Factory is being built against. **A target, not a description** — most of it is not built. It lives under `proposals/` so the path says so. |
 | [`proposals/mcp.md`](proposals/mcp.md) | The standard the MCP server is built against, and what is deliberately left out of it. Most of this one *is* built; the header says which parts are not. |
+| [`proposals/supervised-run-findings.md`](proposals/supervised-run-findings.md) | Ten tasks driven through Factory end to end with somebody watching: what it got silently wrong, what was fixed, and what is left — with the measurements attached. |
 
 
 ## Elsewhere

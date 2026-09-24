@@ -226,11 +226,11 @@ work is bounded by the daemon rather than by the client asking.
 ## Security
 
 Factory coordinates autonomous coding agents that modify files and execute
-development commands. The **Default** profile gives an agent broad authority
-inside the active project's workspace — read, write, delete, run the tests,
-install the dependencies, commit — while confining it to that workspace,
-withholding credentials from its environment, and requiring permission for
-anything outside. **Full Access** removes those boundaries, is never the
+development commands. The **Default** profile lets an agent read, write and
+delete freely inside the active project's workspace, and run a short allow-list
+of commands — the package managers, so installing dependencies and running the
+tests work — while confining it to that workspace, withholding credentials from
+its environment, and requiring permission for anything outside. **Full Access** removes those boundaries, is never the
 default, is chosen per project, and is marked on screen the whole time it is on.
 
 Factory is not a sandbox, and says so: it constrains what it launches and what

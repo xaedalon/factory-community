@@ -22,7 +22,18 @@
  * Patterns are data on the provider descriptor, because what a refusal looks
  * like is that CLI's business and a third-party provider must be able to say so
  * without a core change.
+ *
+ * **A third case arrived later, and it is the one that hurts.** A provider that
+ * emits structured output can say *which command* was refused — see
+ * `providers/stream.ts` — and a refused command is not the same animal at all.
+ * A refused path leaves the agent free to write somewhere else and get the work
+ * done. A refused `pnpm install` means the install did not happen, the tests
+ * that ran afterwards ran against nothing, and the report of success was
+ * written anyway. So a denial carrying a `command` parks the run whatever the
+ * exit code was, and the two cases above still apply to everything else.
  */
+
+import type { RefusedAction } from '../providers/stream.js'
 
 /** What a refusal looks like, as one provider words it. */
 export interface DenialPattern {
@@ -65,8 +76,50 @@ export interface Denial {
   readonly describe: string
   /** The path it was refused, when the pattern caught one. */
   readonly path?: string
+  /**
+   * The shell command it was refused, when the provider reported one.
+   *
+   * Only a structured reader can fill this in — prose does not carry it — and
+   * it is the field that changes what happens next. A refused *path* may leave
+   * the real work done: the agent writes somewhere else and carries on, and
+   * interrupting it would defeat the profile. A refused *command* means an
+   * install, a build or a test did not run, and everything reported after it
+   * was reported without it. That run is parked, whatever its exit code said.
+   */
+  readonly command?: string
   /** The line it was found in, trimmed. Evidence, so nobody has to trust this. */
   readonly evidence: string
+}
+
+/**
+ * A refusal the provider stated as a fact, turned into the same `Denial` the
+ * wording patterns produce.
+ *
+ * One type, so the engine, the board and the CLI have one thing to render and
+ * one place to de-duplicate — the source of a refusal is this module's problem
+ * and nobody else's.
+ *
+ * The id groups by the *executable*, not the whole command line, because that
+ * is the granularity of the remedy: `pnpm install` and `pnpm test` being
+ * refused is one missing entry in the allow-list, and telling somebody twice
+ * is telling them wrong.
+ */
+export function refusalDenial(refused: RefusedAction): Denial {
+  const evidence = refused.evidence.trim().slice(0, 300)
+  if (refused.command === undefined) {
+    return {
+      id: `tool-refused:${refused.tool}`,
+      describe: `permission to use the ${refused.tool} tool`,
+      evidence,
+    }
+  }
+  const executable = refused.command.trim().split(/\s+/)[0] ?? refused.command
+  return {
+    id: `command-refused:${executable}`,
+    describe: `permission to run \`${refused.command}\``,
+    command: refused.command,
+    evidence,
+  }
 }
 
 /**
@@ -161,6 +214,16 @@ export class DenialScanner {
  * act on is just bad news.
  */
 export function denialMessage(denial: Denial): string {
+  // A command reads differently because it *means* differently: the remedy is
+  // an allow-list entry rather than a directory, and the consequence — that the
+  // work did not happen — is the thing a person most needs told.
+  if (denial.command !== undefined) {
+    return (
+      `The agent was refused ${denial.describe}. That command did not run, so anything it was ` +
+      `needed for has not happened. Allow it in the provider's permission arguments, or run ` +
+      `this project under Full Access.`
+    )
+  }
   const remedy =
     denial.path === undefined
       ? 'Allow it for this project, or run this project under Full Access.'

@@ -670,6 +670,26 @@ export class Engine {
     const problems = [...result.problems, ...evidenceProblems, ...denialProblems]
     const detail = summarise(result.problems, '')
 
+    // A refused *command* is the one refusal that cannot be left alone, and it
+    // is why this branch exists at all. The supervised run that found it asked
+    // an agent to install dependencies; the command needed approval, nobody was
+    // there to give it, and the CLI exited 0 — so the tests "passed" against a
+    // project with no `node_modules`, and Factory said done.
+    //
+    // A refused path stays as it was: the agent may well have written somewhere
+    // else and finished the job, and interrupting that would defeat the
+    // profile. A refused command means an install, a build or a test did not
+    // run, and everything after it was reported without it.
+    const refusedCommand = result.denials.find((denial) => denial.command !== undefined)
+    if (refusedCommand !== undefined) {
+      // Back to the phase the refusal happened in, so approving re-runs the
+      // work that was missing its command rather than the whole workflow.
+      const resumeFrom = this.#phaseOfDenial(plan, result)
+      this.#runs.pause(run.id, resumeFrom, denialMessage(refusedCommand))
+      move('await_approval')
+      return { run: this.#runs.get(run.id) as Run, stop: 'paused', problems }
+    }
+
     switch (result.status) {
       case 'completed': {
         this.#runs.finish(run.id, 'completed')
@@ -899,6 +919,29 @@ export class Engine {
   }
 
   /** Phases the run never reached, so the timeline shows what did not happen. */
+  /**
+   * Which phase to resume into after a command was refused.
+   *
+   * The phase the refusal happened in, so approving re-runs the step that was
+   * missing its command rather than the whole workflow — and rather than the
+   * phase *after* it, which would resume past the very work that did not
+   * happen. Derived from the step outcomes because they are the only record of
+   * where the refusal was; the run's `denials` are flattened across the run on
+   * purpose, so one refusal is reported once.
+   *
+   * Falls back to the start. A denial with no step to attribute it to should be
+   * impossible, and re-running a workflow from the top is the answer that
+   * cannot lose work.
+   */
+  #phaseOfDenial(plan: ResolvedPlan, result: RunResult): number {
+    const step = result.steps.find((outcome) =>
+      (outcome.denials ?? []).some((denial) => denial.command !== undefined),
+    )
+    if (step === undefined) return 0
+    const at = plan.phases.findIndex((phase) => phase.name === step.phase)
+    return at < 0 ? 0 : at
+  }
+
   #recordSkipped(runId: string, plan: ResolvedPlan, result: RunResult): void {
     const skipped = new Set(result.skipped)
     for (const phase of plan.phases) {

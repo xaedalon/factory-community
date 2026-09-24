@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import {
   DenialScanner,
   denialMessage,
+  refusalDenial,
   type Denial,
   type DenialPattern,
 } from '../src/security/denials.js'
@@ -209,6 +210,58 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario }) => {
         output('/tmp/probe.txt is outside the configured working directories'),
       )
       Then('one refusal was found', oneFound)
+    })
+  })
+
+  Rule('a refusal a provider stated outright names the command', ({ RuleScenario }) => {
+    /** The CLI's own sentence, abbreviated. Not the agent's summary of it. */
+    const words = 'Permission for this tool use was denied.'
+    const reports = (command: string) => (): void => {
+      found = [...found, refusalDenial({ tool: 'Bash', command, evidence: words })]
+    }
+
+    RuleScenario('A refused command is carried through to the refusal', ({ When, Then, And }) => {
+      When('the provider reports that "pnpm install" was refused', reports('pnpm install'))
+      Then('the refusal names the command "pnpm install"', () =>
+        expect(found[0]?.command).toBe('pnpm install'),
+      )
+      And("it carries the provider's own words", () => expect(found[0]?.evidence).toBe(words))
+    })
+
+    RuleScenario('Two refusals of the same executable are one problem', ({ When, And, Then }) => {
+      When('the provider reports that "pnpm install" was refused', reports('pnpm install'))
+      And('the provider reports that "pnpm test" was refused', reports('pnpm test'))
+      Then('both refusals have the same id', () => expect(found[0]?.id).toBe(found[1]?.id))
+    })
+
+    RuleScenario('Two different executables are two problems', ({ When, And, Then }) => {
+      When('the provider reports that "pnpm install" was refused', reports('pnpm install'))
+      And('the provider reports that "docker compose up" was refused', reports('docker compose up'))
+      Then('the refusals have different ids', () => expect(found[0]?.id).not.toBe(found[1]?.id))
+    })
+
+    RuleScenario('A refused tool that ran no command still says what it was', ({ When, Then, And }) => {
+      When('the provider reports that the "WebFetch" tool was refused', () => {
+        found = [refusalDenial({ tool: 'WebFetch', evidence: words })]
+      })
+      Then('the refusal names no command', () => expect(found[0]?.command).toBeUndefined())
+      And('its description names "WebFetch"', () => expect(found[0]?.describe).toContain('WebFetch'))
+    })
+
+    RuleScenario('The message for a command says the work did not happen', ({
+      When,
+      And,
+      Then,
+    }) => {
+      When('the provider reports that "pnpm install" was refused', reports('pnpm install'))
+      And('I ask what to tell the reader', () => {
+        message = denialMessage(found[0] as Denial)
+      })
+      Then('the message names "pnpm install"', () => expect(message).toContain('pnpm install'))
+      And('the message says that command did not run', () =>
+        expect(message).toContain('did not run'),
+      )
+      And('the message mentions "Full Access"', () => expect(message).toContain('Full Access'))
     })
   })
 

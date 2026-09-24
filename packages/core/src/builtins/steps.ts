@@ -15,6 +15,8 @@ import {
   type ProviderCapability,
   type RenderRequest,
 } from '../providers/capability.js'
+import { profileWideningArgs } from '../providers/descriptor.js'
+import { DEFAULT_PROFILE } from '../security/profile.js'
 import { worktreeStepKind } from './worktree.js'
 import type { Problem } from '../problems.js'
 import { MODEL_ROLES, type ModelRole } from '../model-roles.js'
@@ -64,8 +66,27 @@ export const shellStepKind: StepKindCapability = defineStepKind({
   schema: shellSchema,
   // Lets `- run: npm test` stand on its own, which is most steps.
   sugarKey: 'run',
-  plan(step): PlannedStep {
+  plan(step): PlannedStep | PlanFailure {
     const shell = step as ShellStep
+    // `bash -c ''` exits 0. A step that resolved to nothing would therefore be
+    // a tick beside work that never happened — the exact shape of every defect
+    // on this branch. The schema cannot catch it: `run` is non-empty in the
+    // file and becomes empty during substitution, which is what
+    // `{{ project.check }}` does on a project that has never set one.
+    if (shell.run.trim() === '') {
+      return {
+        problems: [
+          {
+            severity: 'error',
+            message:
+              'This step has no command to run. A `{{ … }}` in it resolved to nothing — most ' +
+              'often `{{ project.check }}` on a project that has not been given a check command.',
+            field: 'run',
+            rule: 'plan.emptyCommand',
+          } satisfies Problem,
+        ],
+      }
+    }
     // A shell step genuinely wants a shell -- pipes, globs and && are the point.
     return { describe: shell.run, command: 'bash', args: ['-c', shell.run] }
   },
@@ -166,6 +187,36 @@ export const agentStepKind: StepKindCapability = defineStepKind({
     const chosen = chooseProvider(agent, context)
     if ('problems' in chosen) return chosen
 
+    // Before the command is rendered, because the whole point is that this
+    // argv is never built. `args` is appended *after* `permissionArgs`, so an
+    // agent file saying `args: ['--permission-mode', 'bypassPermissions']`
+    // used to get Full Access under the Default profile by editing a file in
+    // the repository the agent can write to — no setting changed, nothing
+    // said. Refusing at plan time means the run is recorded `refused` and the
+    // task blocked with a reason, which is the loud path a bad definition
+    // already takes.
+    const widening = profileWideningArgs(
+      chosen.provider.descriptor,
+      context.profile ?? DEFAULT_PROFILE,
+      agent.args ?? [],
+    )
+    if (widening.length > 0) {
+      return {
+        problems: [
+          {
+            severity: 'error',
+            message:
+              `This step passes ${widening.map((argument) => `"${argument}"`).join(', ')} to ` +
+              `${chosen.provider.id}, which would give it more authority than the ` +
+              `${context.profile ?? DEFAULT_PROFILE} profile allows. Run this project under Full ` +
+              `Access if it needs that, rather than asking for it one argument at a time.`,
+            field: 'args',
+            rule: 'plan.argsWidenProfile',
+          } satisfies Problem,
+        ],
+      }
+    }
+
     const request: RenderRequest = {
       prompt: withArtifactInstruction(agent, context),
       ...(agent.model === undefined ? {} : { model: agent.model }),
@@ -217,6 +268,11 @@ export const agentStepKind: StepKindCapability = defineStepKind({
       ...(rendered.denialPatterns === undefined
         ? {}
         : { denialPatterns: rendered.denialPatterns }),
+      // Off the capability rather than the rendered command: a reader belongs
+      // to the CLI, not to one invocation of it. The provider that has none
+      // contributes nothing and its output is read as text, which is what every
+      // provider did before this existed.
+      ...(chosen.provider.stream === undefined ? {} : { stream: chosen.provider.stream }),
       ...(rendered.stdin === undefined ? {} : { stdin: rendered.stdin }),
       ...(resuming === undefined ? {} : { retryArgs: resuming.args }),
       ...(rendered.session === undefined

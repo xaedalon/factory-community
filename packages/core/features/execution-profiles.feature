@@ -123,3 +123,66 @@ Feature: How much authority an agent gets
       # that would quietly mean Full Access.
       Then its "default" list is empty
       And its "full-access" list is what it named
+
+  Rule: a step cannot argue its way out of the profile it runs under
+
+    `args:` on an agent step — and on a named agent, which is a file in the
+    project the agent itself can edit — is appended to the argv *after* the
+    permission arguments. Nothing checked it, so
+    `args: ['--permission-mode', 'bypassPermissions']` was Full Access under the
+    Default profile: no setting changed, nothing said, and the only trace a line
+    in a YAML file.
+
+    The rule is derived rather than listed, so it stays true when a descriptor
+    is edited and a third-party provider gets it for free: under a confined
+    profile, an argument out of that provider's own `full-access` list is
+    refused. A descriptor may name more, for the cases derivation cannot see.
+
+    Scenario: An argument from the provider's Full Access list is refused
+      Given a descriptor whose Full Access arguments are "--yolo"
+      When a step under "default" passes "--yolo"
+      Then that argument is refused
+
+    Scenario: The same argument under Full Access is not refused
+      # There is no boundary left to widen.
+      Given a descriptor whose Full Access arguments are "--yolo"
+      When a step under "full-access" passes "--yolo"
+      Then nothing is refused
+
+    Scenario: An ordinary argument is left alone
+      Given a descriptor whose Full Access arguments are "--yolo"
+      When a step under "default" passes "--verbose"
+      Then nothing is refused
+
+    Scenario: An argument the confined profile already passes is not refused
+      # Otherwise a descriptor that names the same flag in both lists — with
+      # different values — would refuse a step for repeating Factory's own.
+      Given a descriptor that passes "--mode" under both profiles
+      When a step under "default" passes "--mode"
+      Then nothing is refused
+
+    Scenario: A flag written with "=" is the same flag
+      Given a descriptor whose Full Access arguments are "--yolo"
+      When a step under "default" passes "--yolo=true"
+      Then that argument is refused
+
+    Scenario: A descriptor may forbid more than derivation can see
+      # `--allowedTools` appears in neither list and replaces Factory's own,
+      # because the option is variadic. Nothing could derive that.
+      Given a descriptor that forbids "--allowedTools"
+      When a step under "default" passes "--allowedTools"
+      Then that argument is refused
+
+    Scenario: A provider that has measured nothing forbids nothing
+      # An empty Full Access list derives an empty rule. That is the honest
+      # answer for a descriptor nobody has run — and doctor already says that
+      # provider tells the profiles apart in no way at all.
+      Given a descriptor with no permission arguments at all
+      When a step under "default" passes "--yolo"
+      Then nothing is refused
+
+    Scenario: The provider Factory ships refuses the flag that started this
+      Given the descriptor Factory ships for Claude
+      When a step under "default" passes "--permission-mode bypassPermissions"
+      Then that argument is refused
+

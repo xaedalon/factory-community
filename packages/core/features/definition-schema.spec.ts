@@ -288,4 +288,27 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario }) => {
       )
     })
   })
+  Rule('a workflow with no phases says so while somebody can still see it', ({ RuleScenario }) => {
+    RuleScenario('A workflow with no phases parses, with a warning', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the workflow YAML:', givenWorkflow)
+      When('the workflow is parsed', whenWorkflowParsed)
+      Then('parsing succeeds', () => expect(workflow).toBeDefined())
+      And('a warning says the workflow will do nothing', () => {
+        expect(warnings().map((problem) => problem.rule)).toContain('workflow.noPhases')
+        expect(warnings()[0]?.message).toContain('do nothing')
+      })
+    })
+
+    RuleScenario('A workflow with a phase says nothing', ({ Given, When, Then, And }) => {
+      Given('the workflow YAML:', givenWorkflow)
+      When('the workflow is parsed', whenWorkflowParsed)
+      Then('parsing succeeds', () => expect(workflow).toBeDefined())
+      And('there are no warnings', () => expect(warnings()).toEqual([]))
+    })
+  })
 })

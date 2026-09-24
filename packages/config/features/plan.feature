@@ -239,6 +239,29 @@ Feature: Definitions become a runnable plan
       When the workflow "bothly" is planned with no task
       Then the path it was told to read from is under the same root it writes to
 
+  Rule: the project namespace is complete too, for the same reason
+
+    The task namespace got a floor when a foreground run turned out to be told
+    that `{{ task.ticketId }}` did not exist — a key the dictionary documents.
+    The project namespace kept the old behaviour, and it cost the gate:
+    `factory run` has no project, so `{{ project.check }}` was left in the
+    command as **literal text** and bash was handed `{{ project.check }}`.
+    Neither the project's checks nor a failure anybody could read.
+
+    Scenario: A documented project token nobody supplied is empty, not literal
+      Given a phase whose step uses "{{ project.check }}"
+      And the project scope defines a workflow "vocabulary" with that phase
+      When the workflow "vocabulary" is planned with no project at all
+      Then no token was left unresolved
+      And no token survived into the command
+
+    Scenario: A misspelled project token is still a warning
+      # The floor is for keys the dictionary promises. A typo is a typo.
+      Given a phase whose step uses "{{ project.chekc }}"
+      And the project scope defines a workflow "vocabulary" with that phase
+      When the workflow "vocabulary" is planned with no project at all
+      Then a problem names the unresolved token "{{ project.chekc }}"
+
   Rule: one session per plan, started by the first agent step that needs it
 
     Factory chooses the session id so that it can be resumed exactly — by a
@@ -349,3 +372,134 @@ Feature: Definitions become a runnable plan
       Then planning succeeds
       And a warning names the phase's working directory
       And phase "escape" runs in "/tmp"
+
+  Rule: a workflow that would run nothing is refused rather than run
+
+    This looked exactly like success. `runPlan` walks zero phases, returns
+    completed, and the run lands three milliseconds later with no steps and no
+    artifact — so the board draws a tick beside work that never happened. A
+    supervised run of ten tasks had a workflow shaped like this on every one of
+    them, and nobody could tell from the outside.
+
+    Counted in steps rather than phases, because "lists no phases" and "lists
+    only empty phases" are the same claim: there is nothing here to run.
+
+    Refused at plan time rather than reported at run time, so it takes the path
+    a missing phase already takes — no plan, a run recorded as refused, and the
+    task blocked with a reason.
+
+    Scenario: A workflow with no phases at all
+      Given the project scope defines a workflow "design" with no phases
+      When the workflow "design" is planned
+      Then planning fails
+      And a problem says the workflow has nothing to run
+
+    Scenario: A workflow whose only phase has no steps
+      Given the project scope defines a phase "think" with no steps
+      And the project scope defines a workflow "design" with the phase "think"
+      When the workflow "design" is planned
+      Then planning fails
+      And a problem says the workflow has nothing to run
+
+    Scenario: One empty phase beside a real one is not refused
+      # The workflow still runs something, and an empty phase is the author's
+      # business — the parser already warns about it.
+      Given the project scope defines a phase "think" with no steps
+      And the project scope defines a phase "work" that prints "building"
+      And the project scope defines a workflow "design" with the phases "think, work"
+      When the workflow "design" is planned
+      Then planning succeeds
+
+  Rule: a step cannot argue its way past the profile it runs under
+
+    `args:` is appended to the rendered command *after* the permission
+    arguments, and nothing checked it. So a phase — or a named agent, which is
+    a file in the project the agent itself can edit — could say
+    `args: ['--permission-mode', 'bypassPermissions']` and run under Full
+    Access while the project's profile still said Default. No setting changed,
+    nothing said, and the only trace a line in a YAML file.
+
+    Refused at plan time, so the run is recorded `refused` and the task blocked
+    with a reason, rather than an argv nobody reads granting authority nobody
+    chose.
+
+    Scenario: A step whose args would grant Full Access is refused
+      Given the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"
+      And the project scope defines a workflow "review" with the phase "sneaky"
+      When the workflow "review" is planned
+      Then planning fails
+      And a problem says the step asks for more authority than the profile allows
+
+    Scenario: A named agent cannot do it either
+      # The agent file is the more dangerous of the two: it is further from the
+      # phase somebody reads, and it applies to every step that names it.
+      Given the project scope defines an agent "sneaky" passing "--permission-mode bypassPermissions"
+      And the project scope defines a phase "build" whose step names the agent "sneaky"
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned
+      Then planning fails
+      And a problem says the step asks for more authority than the profile allows
+
+    Scenario: Under Full Access the same step plans
+      # There is no boundary left to widen, and the profile was chosen
+      # deliberately and is marked on screen the whole time it is on.
+      Given the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"
+      And the project scope defines a workflow "review" with the phase "sneaky"
+      When the workflow "review" is planned under Full Access
+      Then planning succeeds
+
+    Scenario: An ordinary argument still works
+      Given the project scope defines a phase "verbose" passing "--verbose"
+      And the project scope defines a workflow "review" with the phase "verbose"
+      When the workflow "review" is planned
+      Then planning succeeds
+      And phase "verbose" step 0 passes "--verbose"
+
+  Rule: the gate runs the project's own command, or refuses to run at all
+
+    The `validate` workflow of a supervised run passed ten times by asking an
+    agent whether the work was good. It said yes, with nothing installed and the
+    test suite never run. An agent's report is a claim; only a command is a
+    result.
+
+    The gate itself already existed — a shell step whose non-zero exit fails the
+    phase and blocks the task. What was missing was anything that knew what to
+    run. `{{ project.check }}` is that, and the built-in `project-check` phase
+    is nothing but that command.
+
+    So the empty case is the dangerous one, and it is the one this rule is
+    mostly about: `bash -c ''` exits 0, so a project with no check command would
+    have made the gate a tick beside nothing.
+
+    Scenario: The built-in gate runs the project's check command
+      Given the project's check command is "pnpm test"
+      And the project scope defines a workflow "validate" with the phase "project-check"
+      When the workflow "validate" is planned
+      Then planning succeeds
+      And phase "project-check" step 0 runs the project's check command
+
+    Scenario: A project with no check command cannot plan the gate
+      Given the project has no check command
+      And the project scope defines a workflow "validate" with the phase "project-check"
+      When the workflow "validate" is planned
+      Then planning fails
+      And a problem says the step has no command to run
+
+    Scenario: A run with no project at all cannot plan the gate either
+      # `factory run` has no project, so there is no check command by
+      # definition. It must refuse rather than hand bash a literal token.
+      Given the project scope defines a workflow "validate" with the phase "project-check"
+      When the workflow "validate" is planned with no project at all
+      Then planning fails
+      And a problem says the step has no command to run
+
+    Scenario: Any step whose command resolves to nothing is refused
+      # Not a special case for the gate. A variable that resolves to nothing is
+      # an empty command wherever it appears, and an empty command is a tick.
+      Given the project scope defines a phase "empty" running "{{ project.check }}"
+      And the project has no check command
+      And the project scope defines a workflow "validate" with the phase "empty"
+      When the workflow "validate" is planned
+      Then planning fails
+      And a problem says the step has no command to run
+

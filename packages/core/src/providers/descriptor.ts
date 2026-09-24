@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { closedWithExtensions, slug } from '../schema/common.js'
-import type { ExecutionProfile } from '../security/profile.js'
+import { isConfined, type ExecutionProfile } from '../security/profile.js'
 import { MODEL_ROLES } from '../model-roles.js'
 
 /**
@@ -199,6 +199,25 @@ const descriptorShape = {
     .default([]),
 
   /**
+   * Arguments a step may never pass under a confined profile.
+   *
+   * The derivation below catches the obvious case — an argument out of this
+   * provider's own `full-access` list — and it is not enough on its own. Two
+   * shapes it cannot see:
+   *
+   * - a flag that grants authority without appearing in either list, such as
+   *   `--dangerously-skip-permissions`;
+   * - a flag Factory already passes whose *repetition replaces* what Factory
+   *   said. `--allowedTools` is declared `<tools...>`, so a step passing it
+   *   again does not add to the allow-list, it becomes the allow-list.
+   *
+   * Names only, and a bare flag matches `--flag=value` too. Additive: the
+   * derived set is always in force as well, so a descriptor cannot widen a
+   * profile by leaving this empty.
+   */
+  forbiddenArgs: z.array(z.string().min(1)).default([]),
+
+  /**
    * True when this descriptor has not been checked against the real CLI.
    * `doctor` says so out loud rather than letting someone discover it when a
    * run fails with an unrecognised flag.
@@ -242,6 +261,59 @@ export function permissionArgsFor(
   // `default` would quietly mean Full Access. The schema is the guarantee, and
   // it has a scenario of its own.
   return declared[profile]
+}
+
+/**
+ * Arguments this step is not allowed to pass, given the profile it runs under.
+ *
+ * `Agent.args` and `AgentStep.args` are appended to the argv *after*
+ * `permissionArgs`, and for a long time nothing checked them — so a project's
+ * own agent file containing `args: ['--permission-mode', 'bypassPermissions']`
+ * got Full Access under the Default profile, silently, by editing a file in
+ * the repository the agent itself can write to.
+ *
+ * Derived rather than listed. What widens a profile is whatever that CLI's own
+ * `full-access` arguments are, minus whatever the confined profile already
+ * passes — so it stays correct when a descriptor is edited, and a third-party
+ * provider gets the same protection without naming anything. `forbiddenArgs`
+ * adds the cases derivation cannot see.
+ *
+ * Nothing is forbidden under Full Access: there is no boundary left to widen.
+ * A provider whose `full-access` list is empty derives nothing, which is the
+ * honest answer for a descriptor that has never been measured — `doctor`
+ * already says that provider distinguishes no profiles.
+ */
+export function forbiddenArgsFor(
+  descriptor: ProviderDescriptor,
+  profile: ExecutionProfile,
+): readonly string[] {
+  if (!isConfined(profile)) return []
+  const confined = new Set(permissionArgsFor(descriptor, profile))
+  const widening = permissionArgsFor(descriptor, 'full-access').filter(
+    (argument) => !confined.has(argument),
+  )
+  return [...new Set([...widening, ...descriptor.forbiddenArgs])]
+}
+
+/**
+ * Which of a step's arguments would widen the profile it runs under.
+ *
+ * `--flag=value` is compared on the flag, because a CLI that accepts one
+ * accepts the other and a guard that could tell them apart is a guard with a
+ * hole in it.
+ */
+export function profileWideningArgs(
+  descriptor: ProviderDescriptor,
+  profile: ExecutionProfile,
+  args: readonly string[],
+): readonly string[] {
+  const forbidden = new Set(forbiddenArgsFor(descriptor, profile))
+  if (forbidden.size === 0) return []
+  return args.filter((argument) => {
+    if (forbidden.has(argument)) return true
+    const equals = argument.indexOf('=')
+    return equals > 0 && forbidden.has(argument.slice(0, equals))
+  })
 }
 
 /**

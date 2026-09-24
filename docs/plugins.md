@@ -166,6 +166,54 @@ one CI keeps honest.
 Mark a descriptor `provisional: true` if you have not verified it against the real CLI. `doctor`
 reports provisional providers, because a flag someone guessed is worse than one nobody wrote.
 
+A step's own `args:` cannot widen the profile it runs under. Anything in your `full-access` list
+that the confined profile does not already pass is refused at plan time, derived — you write
+nothing. Add `forbiddenArgs:` for what derivation cannot see: a flag that grants authority without
+appearing in either list, or one whose *repetition replaces* what Factory passed. Claude Code's
+`--allowedTools` is the second kind: it is variadic, so a step passing it again does not add to the
+allow-list, it becomes the allow-list.
+
+### Reading a structured transcript
+
+One part of a provider cannot be data: a transcript format is a parser. If your CLI can emit its
+session as machine-readable events, pass a reader and Factory will use it.
+
+```js
+import { LineBuffer } from '@factory/plugin-sdk'
+
+const acmeStream = () => {
+  const lines = new LineBuffer()
+  const read = (raw) => raw.flatMap((line) => {
+    const event = JSON.parse(line)
+    if (event.kind === 'denied') {
+      return [{ refused: { tool: event.tool, command: event.command, evidence: event.reason } }]
+    }
+    if (event.kind === 'say') return [{ log: { text: `${event.text}\n`, stream: 'stdout' } }]
+    return []
+  })
+  return { push: (chunk) => read(lines.push(chunk)), end: () => read(lines.end()) }
+}
+
+export default defineProviderPlugin({ /* … */ stream: acmeStream })
+```
+
+Three things come out of a reader, and each has one job:
+
+| | |
+|---|---|
+| `log` | what a person reads. Put the agent's prose on `stdout` and anything you add on `stderr`. |
+| `scan` | text the log does not carry, offered to the descriptor's `denialPatterns`. A tool *result* belongs here: it is where the CLI's own wording lives. |
+| `refused` | a refusal stated as a fact. With a `command`, Factory **parks the run** — see [`security/default-profile.md`](security/default-profile.md). |
+
+Report `refused` only for a genuine permission refusal, never for a command that merely exited
+non-zero: a failing test suite is not a permissions problem, and parking every red build is the
+fastest way to have this turned off. Prefer whatever your CLI states structurally — an event kind,
+a field — over its wording. Factory's own reader was written after a wording pattern was measured
+missing the exact run it was written for, because the CLI said "no approval surface" and the agent's
+summary of it said "no approval interface".
+
+A provider with no reader is read as plain text, exactly as before.
+
 ## A doctor rule
 
 ```js

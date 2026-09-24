@@ -1,0 +1,22 @@
+# Run the project's own checks, and fail the phase if they fail.
+#
+# This is the gate. Everything before it in a workflow is an agent *claiming*
+# the work is done; this is the only step that can disagree. A supervised run
+# of ten tasks had a `validate` workflow that asked an agent whether the work
+# was good, and it said yes every time — with no dependencies installed and the
+# test suite never run.
+#
+# One line, because the gate was never the hard part. What was missing is
+# anything that knew what to run, and `{{ project.check }}` is that: one
+# command per project, detected when the project is added where a repository
+# says plainly enough what it is, and editable on the project's page.
+#
+# A project that has not set one makes this phase *refuse to plan* — the run is
+# recorded refused and the task blocked with a reason. That is deliberate and
+# it is the whole point: `bash -c ''` exits 0, so the alternative is a tick
+# beside nothing.
+kind: factory.phase/v1
+name: project-check
+description: Runs the project's own check command, and fails if it fails.
+steps:
+  - run: '{{ project.check }}'

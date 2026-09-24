@@ -823,4 +823,83 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('it is refused', () => expect(failure).toBeDefined())
     })
   })
+
+  Rule('a project carries the one command that checks its own work', ({ RuleScenario }) => {
+    const exists = (): void => add('factory')
+    const setCheck = (check: string | undefined) => (): void =>
+      attempt(() => {
+        project = projects.setCheck((project as Project).id, check)
+      })
+    const hasNone = (): void => expect(project?.check).toBeUndefined()
+    const is = (command: string) => (): void => expect(project?.check).toBe(command)
+
+    RuleScenario('A new project has no check command', ({ When, Then }) => {
+      When('I add the project "factory" at that directory', exists)
+      Then('the project has no check command', hasNone)
+    })
+
+    RuleScenario('A check command can be given when the project is added', ({ When, Then }) => {
+      When('I add the project "factory" with the check command "pnpm test"', () =>
+        attempt(() => {
+          project = projects.add({ name: 'factory', path: repo, check: 'pnpm test' })
+        }),
+      )
+      Then('the project\'s check command is "pnpm test"', is('pnpm test'))
+    })
+
+    RuleScenario('A check command can be set later', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its check command to "make check"', setCheck('make check'))
+      Then('the project\'s check command is "make check"', is('make check'))
+    })
+
+    RuleScenario('Whitespace around it is not part of the command', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its check command to "  pnpm test  "', setCheck('  pnpm test  '))
+      Then('the project\'s check command is "pnpm test"', is('pnpm test'))
+    })
+
+    RuleScenario('A blank check command clears it', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its check command is "pnpm test"', setCheck('pnpm test'))
+      When('I set its check command to "   "', setCheck('   '))
+      Then('the project has no check command', hasNone)
+    })
+
+    RuleScenario('A check command edited to blank by hand reads as unset', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('the project "factory" exists', exists)
+      And('its check command column is edited by hand to "   "', () => {
+        store.db.run(
+          'UPDATE projects SET check_command = ? WHERE id = ?',
+          '   ',
+          (project as Project).id,
+        )
+        project = projects.get((project as Project).id)
+      })
+      Then('the project has no check command', hasNone)
+    })
+
+    RuleScenario('Setting it is announced', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its check command to "pnpm test"', setCheck('pnpm test'))
+      Then('a "project.changed" event says so', () =>
+        expect(events.filter((event) => event.name === 'project.changed')).not.toHaveLength(0),
+      )
+    })
+
+    RuleScenario('It survives a rename', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its check command is "pnpm test"', setCheck('pnpm test'))
+      When('I rename it to "factory-core"', () =>
+        attempt(() => {
+          project = projects.rename((project as Project).id, 'factory-core')
+        }),
+      )
+      Then('the project\'s check command is "pnpm test"', is('pnpm test'))
+    })
+  })
 })

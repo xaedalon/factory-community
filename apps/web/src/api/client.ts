@@ -555,6 +555,14 @@ export interface Project {
    * follows the installation's setting, so changing that setting changes it.
    */
   profile?: ExecutionProfile
+  /**
+   * The command that says whether this project's work is sound.
+   *
+   * Absent means nobody has said. The built-in `project-check` phase then
+   * refuses to plan rather than running an empty command and reporting
+   * success, which is the whole reason this is a field and not a convention.
+   */
+  check?: string
   /** Directories its agents may reach beyond the workspace, granted for good. */
   grantedDirectories: string[]
   createdAt: string
@@ -801,6 +809,9 @@ export const api = {
       // project starts and what it returns to.
       tone?: number | null
       initials?: string | null
+      // `null` clears the check command, which is a real answer: a project
+      // whose gate should not run is better off saying so.
+      check?: string | null
     },
   ) =>
     request<{ project: Project; scaffolded: ScaffoldReport }>(
@@ -814,6 +825,8 @@ export const api = {
     defaultBranch?: string
     usesWorktrees?: boolean
     usesEnvironments?: boolean
+    /** Omit entirely and the daemon detects it from the repository. */
+    check?: string
   }) =>
     request<{ project: Project; scope: ScopeReport; scaffolded: ScaffoldReport }>('/api/projects', {
       method: 'POST',

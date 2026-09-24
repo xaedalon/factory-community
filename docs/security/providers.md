@@ -8,12 +8,13 @@ security page that averaged them would be wrong about all three.
 
 ## Claude Code
 
-**Measured** against 2.1.273 on 2026-09-15, by running it against a confined
-workspace and reading what happened.
+**Measured** against 2.1.281 on 2026-09-24, and before that against 2.1.273 on
+2026-09-15, by running the real CLI against a throwaway workspace and reading
+what happened.
 
 | | |
 |---|---|
-| Default | `--restricted --tools Bash,Edit,Write,Read,Glob,Grep,… --permission-mode acceptEdits --permission-prompts none` |
+| Default | `--restricted --tools Bash,Edit,Write,Read,Glob,Grep,… --permission-mode acceptEdits --permission-prompts none --allowedTools 'Bash(npm *),Bash(pnpm *),Bash(yarn *),Bash(bun *)'` |
 | Full Access | `--permission-mode bypassPermissions` |
 | Extra directories | `--add-dir <path>` |
 
@@ -21,24 +22,64 @@ What was observed under Default, in a neutral directory:
 
 ```text
 write a file in the workspace        OK
-run a shell command                  OK
 write a file outside the workspace   REFUSED
 shell redirection outside it         REFUSED
+run `pnpm --version`                 OK    <- the allow-list; see below
+run `git --version`                  REFUSED
 ```
 
-The third and fourth are the useful ones. `--restricted` confines the file
-tools *and* the shell's writes, which is more than the flag's own description
-promises. The run never blocks waiting for a person, because
-`--permission-prompts none` denies anything that would prompt rather than
-waiting for an answer nobody is there to give.
+The refusals are the useful part. `--restricted` confines the file tools *and*
+the shell's writes, which is more than the flag's own description promises. The
+run never blocks waiting for a person, because `--permission-prompts none`
+denies anything that would prompt rather than waiting for an answer nobody is
+there to give.
 
-Two configurations that read correctly and did not work, recorded so nobody
-tries them again: `--tools default` does **not** name the code-running tools
-back in — the session had no Bash at all — and `--permission-mode dontAsk` means
-"do not ask, and deny", which refused every write.
+### Why there is an allow-list, and why it is this one
 
-**Known limitation:** in `--print` mode, a settings file that fails validation
-is ignored silently. Factory does not rely on one, for that reason.
+`acceptEdits` auto-approves **edits**, not **commands**. Against 2.1.281 a
+session with `Bash` in `--tools` and no allow-list was refused `pnpm --version`
+— and then carried on, exited 0, and reported the work as done. That is the
+whole reason the `--allowedTools` flag is there.
+
+What each candidate was measured doing:
+
+| added to Default | dev command | write outside the workspace |
+|---|---|---|
+| *(nothing)* | `pnpm --version` **denied** | refused |
+| `Bash(pnpm *)` | allowed | refused — **boundary holds** |
+| `Bash` | allowed | **written to `/tmp` — boundary gone** |
+| `Bash(node *)` | allowed | **written to `/tmp` — boundary gone** |
+
+Rows three and four are why the list is package managers and nothing else.
+`--restricted` confines Claude Code's own file tools and the shell's
+redirection; it cannot confine what a child interpreter does with its own
+syscalls. `node -e "require('fs').writeFileSync('/tmp/…')"` escaped on the first
+attempt. Any entry that ends in an interpreter — `node`, `python`, `sh`, `env`
+— removes the boundary the profile exists to provide.
+
+Package managers are not innocent either: `pnpm test` runs the project's own
+code and `pnpm exec` runs anything. The trade is deliberate and
+[`default-profile.md`](default-profile.md) states it. The difference is that
+running the project's tests is the thing the profile is *for*.
+
+`--allowedTools` is variadic (`<tools...>` in `--help`), and a repeated
+variadic option **replaces** rather than appends. Four flags would leave only
+the last in force — which looks like it works. Factory passes one flag with a
+comma-separated value.
+
+### Configurations that read correctly and did not work
+
+Recorded so nobody tries them again.
+
+- `--tools default` does **not** name the code-running tools back in — the
+  session had no Bash at all.
+- `--permission-mode dontAsk` means "do not ask, and deny": it refused every
+  write.
+- A project `.claude/settings.json` whose `permissions.allow` names
+  `Bash(git --version)` does **not** grant it: the command was still refused, so
+  the allow-list cannot be delegated to the project and has to be a flag.
+- **Known limitation:** in `--print` mode a settings file that fails validation
+  is ignored silently. Factory does not rely on one, for that reason.
 
 ## GitHub Copilot CLI
 

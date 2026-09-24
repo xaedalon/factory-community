@@ -84,6 +84,21 @@ export interface Project {
   /** The letters on the square, when chosen. Absent means derived from the name. */
   readonly initials?: string
   /**
+   * The one command that says whether this project's work is sound.
+   *
+   * `npm test`, `make check`, `cargo test` — whatever this repository already
+   * runs in CI. It reaches a phase as `{{ project.check }}`, and the built-in
+   * `project-check` phase is nothing but that command, so a workflow ending in
+   * a real gate is one word in its phase list.
+   *
+   * Absent means nobody has said, which is not the same as "there is nothing
+   * to run": `project-check` then refuses to plan rather than running an empty
+   * command and reporting success, which is the failure this whole field
+   * exists to stop. `detectCheckCommand` fills it in where a repository says
+   * plainly enough what it is.
+   */
+  readonly check?: string
+  /**
    * Directories this project has allowed beyond its workspace, for good.
    *
    * What "allow for this project" leaves behind. Directories rather than

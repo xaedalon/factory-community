@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { SCOPE_DIR, createScope, scaffoldProjectDefinitions } from '@factory/config'
 import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import {
   DISCLAIMER,
   admitAction,
@@ -8,9 +9,11 @@ import {
   EXECUTION_PROFILES,
   NOT_ACCEPTED,
   PROJECT_TONES,
+  detectCheckCommand,
   hasAccepted,
   isExecutionProfile,
   queueOrder,
+  type ProjectFileReader,
 } from '@factory/core'
 import type { ExecutionProfile, Project, ProjectSetting, Task } from '@factory/core'
 import { AmbiguousProjectError, ProjectHasTasksError } from '@factory/store'
@@ -34,6 +37,22 @@ const merge = (reports: readonly (ScaffoldReport | undefined)[]): ScaffoldReport
     kept: present.flatMap((report) => report.kept),
     missing: present.flatMap((report) => report.missing),
     ...(error === undefined ? {} : { error }),
+  }
+}
+
+/**
+ * Reads a file out of the repository being registered.
+ *
+ * The detection itself is in core and takes a reader, so it can be driven by a
+ * scenario without a repository on disk — and so core keeps its promise that
+ * every path comes from `scopes.ts`. This is the one place that turns a reader
+ * into actual files, and anything it cannot read is simply not there.
+ */
+const projectFileReader = (root: string): ProjectFileReader => (relative) => {
+  try {
+    return readFileSync(join(root, relative), 'utf8')
+  } catch {
+    return undefined
   }
 }
 
@@ -183,6 +202,7 @@ export function registerProjectRoutes(
       worktreesRoot?: string
       usesWorktrees?: boolean
       usesEnvironments?: boolean
+      check?: string
     }
   }>(
     '/api/projects',
@@ -192,6 +212,12 @@ export function registerProjectRoutes(
         return reply.code(400).send({ error: 'Send { name, path }.' })
       }
       try {
+        // Detected only when the caller said nothing at all. A caller that
+        // sent a blank string meant blank — "this project has no gate" is a
+        // real answer, and overruling it with a guess would be the kind of
+        // helpfulness nobody can switch off.
+        const check =
+          body.check === undefined ? detectCheckCommand(projectFileReader(body.path)) : body.check
         const project = projects.add({
           name: body.name,
           path: body.path,
@@ -201,6 +227,7 @@ export function registerProjectRoutes(
           ...(body.usesEnvironments === undefined
             ? {}
             : { usesEnvironments: body.usesEnvironments }),
+          ...(check === undefined ? {} : { check }),
         })
         // A scope of its own, before anything tries to write into it.
         //
@@ -258,6 +285,7 @@ export function registerProjectRoutes(
       usesWorktrees?: boolean
       usesEnvironments?: boolean
       profile?: unknown
+      check?: unknown
     }
   }>('/api/projects/:id', async (request, reply) => {
     if (projects.get(request.params.id) === undefined) {
@@ -269,6 +297,8 @@ export function registerProjectRoutes(
     // name, so "in the body" is the question, not "has a value".
     const settingTone = 'tone' in (request.body ?? {})
     const settingInitials = 'initials' in (request.body ?? {})
+    // Present-and-blank clears it, so "in the body" is the question here too.
+    const settingCheck = 'check' in (request.body ?? {})
     if (
       name === undefined &&
       defaultBranch === undefined &&
@@ -276,12 +306,14 @@ export function registerProjectRoutes(
       usesEnvironments === undefined &&
       !settingProfile &&
       !settingTone &&
-      !settingInitials
+      !settingInitials &&
+      !settingCheck
     ) {
       return reply.code(400).send({
         error:
           'Send { name } or { defaultBranch } to change what the project is called or where ' +
           'work starts, { usesWorktrees } or { usesEnvironments }, true or false, ' +
+          '{ check } for the command that verifies its work, ' +
           'or { profile } to say how much authority its runs get.',
       })
     }
@@ -326,6 +358,11 @@ export function registerProjectRoutes(
     ) {
       return reply.code(400).send({ error: 'Settings are true or false.' })
     }
+    if (settingCheck && request.body.check !== null && typeof request.body.check !== 'string') {
+      return reply
+        .code(400)
+        .send({ error: 'check is the command that verifies this project, or null to clear it.' })
+    }
 
     try {
       let project = projects.get(request.params.id) as Project
@@ -355,6 +392,14 @@ export function registerProjectRoutes(
       if (usesEnvironments !== undefined) {
         project = projects.setEnvironments(request.params.id, usesEnvironments)
         if (usesEnvironments) scaffolded.push(await scaffold(project, 'environments'))
+      }
+      if (settingCheck) {
+        // Nothing is scaffolded for a check command either: it changes what
+        // the gate runs, not what the repository contains.
+        project = projects.setCheck(
+          request.params.id,
+          (request.body.check as string | null) ?? undefined,
+        )
       }
       if (settingProfile) {
         // Nothing is scaffolded for a profile: it changes what the next run is

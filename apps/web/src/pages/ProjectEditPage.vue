@@ -37,6 +37,14 @@ const isNew = computed(() => id.value === undefined)
 const name = ref('')
 const path = ref('')
 const branch = ref('main')
+/**
+ * The command that says whether this project's work is sound.
+ *
+ * Blank is a real answer — "no gate here" — so it is never filled in from the
+ * name or guessed on this side. The daemon detects it once, when the project
+ * is added, from what is actually in the repository.
+ */
+const check = ref('')
 const usesWorktrees = ref(true)
 const usesEnvironments = ref(false)
 const profile = ref('')
@@ -90,6 +98,7 @@ async function load(): Promise<void> {
     name.value = found.name
     path.value = found.path
     branch.value = found.defaultBranch
+    check.value = found.check ?? ''
     usesWorktrees.value = found.usesWorktrees
     usesEnvironments.value = found.usesEnvironments
     profile.value = found.profile ?? ''
@@ -127,6 +136,9 @@ async function save(): Promise<void> {
         ...(branch.value.trim() === '' ? {} : { defaultBranch: branch.value.trim() }),
         usesWorktrees: usesWorktrees.value,
         usesEnvironments: usesEnvironments.value,
+        // Only when typed. Omitting it entirely is what asks the daemon to
+        // look in the repository, and a blank string would mean "no gate".
+        ...(check.value.trim() === '' ? {} : { check: check.value.trim() }),
       })
       // Back to the list, the way the definition editors do it. The list is
       // where the change is visible — the badges, the branch, the name — and
@@ -147,6 +159,7 @@ async function save(): Promise<void> {
       profile: profile.value === '' ? null : (profile.value as ExecutionProfile),
       tone: tone.value ?? null,
       initials: letters.value ?? null,
+      check: check.value.trim() === '' ? null : check.value.trim(),
     })
     // A scaffold *error* is a reason to stay: it is about this form, and the
     // person is mid-edit. A scaffold *report* is a result, and travels.
@@ -289,6 +302,21 @@ onMounted(load)
         :error="fieldErrors.branch"
       >
         <TextInput id="project-branch" v-model="branch" mono data-testid="project-branch" placeholder="main" />
+      </FieldRow>
+
+      <FieldRow
+        label="Checked by"
+        icon="check"
+        for="project-check"
+        hint="One command that says whether the work is sound — whatever this repository already runs in CI. The built-in project-check phase is exactly this command, so a workflow ending in a real gate is one word in its phase list. Left empty, that phase refuses to run rather than passing on nothing."
+      >
+        <TextInput
+          id="project-check"
+          v-model="check"
+          mono
+          data-testid="project-check"
+          placeholder="pnpm test"
+        />
       </FieldRow>
 
       <FieldRow

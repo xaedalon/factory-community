@@ -116,3 +116,42 @@ Feature: Noticing that an agent was refused something
       When the agent's output is "outside /repos/app; --restricted confines the file tools to the working directory."
       And I ask what to tell the reader
       Then the message offers to allow it for this project
+
+  Rule: a refusal a provider stated outright names the command
+
+    The wording patterns can only read prose, and prose does not carry the
+    command. A provider that emits a structured transcript says it as a fact —
+    and that changes what happens next, because a refused *command* means an
+    install or a test did not run, while a refused *path* may leave the work
+    done.
+
+    Scenario: A refused command is carried through to the refusal
+      When the provider reports that "pnpm install" was refused
+      Then the refusal names the command "pnpm install"
+      And it carries the provider's own words
+
+    Scenario: Two refusals of the same executable are one problem
+      # The remedy is one allow-list entry, and telling somebody twice is
+      # telling them wrong.
+      When the provider reports that "pnpm install" was refused
+      And the provider reports that "pnpm test" was refused
+      Then both refusals have the same id
+
+    Scenario: Two different executables are two problems
+      When the provider reports that "pnpm install" was refused
+      And the provider reports that "docker compose up" was refused
+      Then the refusals have different ids
+
+    Scenario: A refused tool that ran no command still says what it was
+      When the provider reports that the "WebFetch" tool was refused
+      Then the refusal names no command
+      And its description names "WebFetch"
+
+    Scenario: The message for a command says the work did not happen
+      # The consequence is the part a person most needs told: everything the
+      # agent reported after this point was reported without it.
+      When the provider reports that "pnpm install" was refused
+      And I ask what to tell the reader
+      Then the message names "pnpm install"
+      And the message says that command did not run
+      And the message mentions "Full Access"

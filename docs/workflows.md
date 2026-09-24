@@ -95,7 +95,7 @@ steps:
     effort: high
     subagent: implementer        # a named persona, mapped per provider
     session: task                # task | workflow | phase | none
-    args: ['--verbose']          # appended verbatim
+    args: ['--verbose']          # appended verbatim — but see below
 
   - uses: worktree
     action: create               # or `remove`
@@ -103,6 +103,13 @@ steps:
     branch: "{{ task.branch }}"
     from: origin/main            # optional starting point
 ```
+
+**`args`** is appended verbatim, with one exception: an argument that would give the agent more
+authority than the project's execution profile allows is **refused at plan time**, naming the
+argument. `args: ['--permission-mode', 'bypassPermissions']` in a phase — or in an agent file, which
+is a file in the repository the agent itself can edit — used to mean Full Access with nothing said.
+If a project needs that, choose it as the project's profile, where it is a decision and is marked on
+screen. See [`security/default-profile.md`](security/default-profile.md).
 
 **`retries`** and **`retry_delay`** work on any step, of any kind — core takes them out before the
 kind's own schema sees them, so no plugin has to implement retrying to be retryable. `retries: 2`
@@ -133,7 +140,7 @@ failure is the common case, not the rare one.
 
 `{{ task.name }}`, `{{ task.ticketId }}`, `{{ task.branch }}`, `{{ task.directory }}`,
 `{{ project.name }}`, `{{ project.path }}`, `{{ project.branch }}`, `{{ project.worktrees }}`,
-and anything you put in `variables:` as `{{ variables.x }}`.
+`{{ project.check }}`, and anything you put in `variables:` as `{{ variables.x }}`.
 
 Phase variables beat workflow variables, which beat project values. A recovery workflow also gets
 `{{ project.failedWorkflow }}`, `{{ project.failedPhase }}` and `{{ project.failureReason }}`.
@@ -164,6 +171,48 @@ step is always shown.
 An agent is not a provider. A provider is *what is installed* — a CLI, its flags,
 how a command is rendered. An agent is *how you want to use one*, and several can
 share a provider and differ only in model or persona.
+
+## The gate
+
+An agent's report is a **claim**. Only a command is a **result**, and a workflow that ends with an
+agent saying the work is good can only ever tell you that it said so. A supervised run of ten tasks
+had a `validate` workflow shaped exactly like that: it passed every time, with no dependencies
+installed and the test suite never run.
+
+The gate is a shell step after the agent step. Its non-zero exit fails the phase, which blocks the
+task — that has always worked; what was missing was anything that knew what to run.
+
+```yaml
+name: validate
+steps:
+  - uses: agent
+    prompt: Check the work against the specification and report what is wrong.
+  - run: '{{ project.check }}'   # the gate. Not the agent's opinion of it.
+```
+
+**`{{ project.check }}`** is one command per project — whatever this repository already runs in CI.
+Factory detects it when the project is added (a `test` script in `package.json`, `Cargo.toml`,
+`go.mod`, a `test:` target in a `Makefile`) and it is editable on the project's page.
+
+The built-in **`project-check`** phase is exactly that one step, so a workflow ending in a real gate
+is one word:
+
+```yaml
+name: validate
+phases: [review, project-check]
+```
+
+A project that has not been given a check command makes that phase **refuse to plan** — the run is
+recorded refused and the task blocked with a reason. That is deliberate: `bash -c ''` exits 0, so
+the alternative is a tick beside nothing. The same refusal applies to any step whose command
+resolves to an empty string.
+
+The gate itself always runs: a `shell` step is started by Factory, not by an agent, so the Default
+profile's allow-list has nothing to do with it. What that allow-list does constrain is an **agent**
+running the same command while it works — under Claude Code's Default profile it may run the package
+managers and nothing else, so an agent told to run `cargo test` is refused. Loudly, now: the run is
+paused naming the command rather than finishing with a tick.
+[`security/providers.md`](security/providers.md) has the list.
 
 ## Artifacts
 

@@ -3206,4 +3206,90 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
     })
   })
+
+  Rule('a project is asked what checks its work, and told when it cannot be guessed', ({
+    RuleScenario,
+  }) => {
+    let directory = ''
+    let added = ''
+
+    const withManifest = (): void => {
+      directory = join(root, 'checked')
+      file(join(directory, 'package.json'), '{"name":"checked","scripts":{"test":"vitest"}}')
+    }
+    const withNothing = (): void => {
+      directory = join(root, 'bare')
+      mkdirSync(directory, { recursive: true })
+    }
+    const register = async (payload: Record<string, unknown> = {}): Promise<void> => {
+      await call('POST', '/api/projects', { name: `checked-${added.length}`, path: directory, ...payload })
+      added = (response.body.project as { id: string } | undefined)?.id ?? ''
+    }
+    /** Read back from the list, not from the create reply: the row is the truth. */
+    const stored = async (): Promise<{ check?: string } | undefined> => {
+      await call('GET', '/api/projects')
+      return (response.body.items as { id: string; check?: string }[]).find(
+        (item) => item.id === added,
+      )
+    }
+    const checkIs = (command: string) => async (): Promise<void> => {
+      expect((await stored())?.check).toBe(command)
+    }
+    const noCheck = async (): Promise<void> => {
+      expect((await stored())?.check).toBeUndefined()
+    }
+
+    RuleScenario('Adding a repository with a test script detects its command', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      When('I add a project at that directory', () => register())
+      Then('the project\'s check command is "npm test"', checkIs('npm test'))
+    })
+
+    RuleScenario('A repository that says nothing gets no command', ({ Given, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      When('I add a project at that directory', () => register())
+      Then('the project has no check command', noCheck)
+    })
+
+    RuleScenario('A command sent with the request is used as sent', ({ Given, When, Then }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      When('I add a project at that directory with the check command "make verify"', () =>
+        register({ check: 'make verify' }),
+      )
+      Then('the project\'s check command is "make verify"', checkIs('make verify'))
+    })
+
+    RuleScenario('The command can be changed afterwards', ({ Given, And, When, Then }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      And('a project added at that directory', () => register())
+      When("I set that project's check command to \"pnpm verify\"", () =>
+        call('PATCH', `/api/projects/${added}`, { check: 'pnpm verify' }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the project\'s check command is "pnpm verify"', checkIs('pnpm verify'))
+    })
+
+    RuleScenario('The command can be cleared afterwards', ({ Given, And, When, Then }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      And('a project added at that directory', () => register())
+      When("I clear that project's check command", () =>
+        call('PATCH', `/api/projects/${added}`, { check: null }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the project has no check command', noCheck)
+    })
+
+    RuleScenario('A check command that is not text is refused', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', () => register())
+      When("I set that project's check command to the number 7", () =>
+        call('PATCH', `/api/projects/${added}`, { check: 7 }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+  })
 })

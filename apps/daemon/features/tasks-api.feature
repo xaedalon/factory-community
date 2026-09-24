@@ -1255,3 +1255,50 @@ Feature: Tasks, runs and live updates over HTTP
       Then the response is 200
       And one task was queued
       And the one it is running inside was skipped with a reason
+
+  Rule: a project is asked what checks its work, and told when it cannot be guessed
+
+    The gate a `validate` workflow needs is a command, and Factory cannot invent
+    one. What it can do is read the repository it was just handed: a `test`
+    script in a `package.json` is not a difficult guess, and asking somebody to
+    fill in a field they were not expecting is how a field ends up empty.
+
+    Detected only when the caller said nothing at all. A caller that sent a
+    blank string meant blank — "this project has no gate" is a real answer, and
+    overruling it with a guess would be help nobody can switch off.
+
+    Scenario: Adding a repository with a test script detects its command
+      Given a directory whose "package.json" declares a "test" script
+      When I add a project at that directory
+      Then the project's check command is "npm test"
+
+    Scenario: A repository that says nothing gets no command
+      Given a directory with nothing Factory recognises
+      When I add a project at that directory
+      Then the project has no check command
+
+    Scenario: A command sent with the request is used as sent
+      Given a directory whose "package.json" declares a "test" script
+      When I add a project at that directory with the check command "make verify"
+      Then the project's check command is "make verify"
+
+    Scenario: The command can be changed afterwards
+      Given a directory whose "package.json" declares a "test" script
+      And a project added at that directory
+      When I set that project's check command to "pnpm verify"
+      Then the response is 200
+      And the project's check command is "pnpm verify"
+
+    Scenario: The command can be cleared afterwards
+      Given a directory whose "package.json" declares a "test" script
+      And a project added at that directory
+      When I clear that project's check command
+      Then the response is 200
+      And the project has no check command
+
+    Scenario: A check command that is not text is refused
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's check command to the number 7
+      Then the response is 400
+

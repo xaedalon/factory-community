@@ -149,6 +149,42 @@ const phaseReferences: DoctorRuleCapability = {
   },
 }
 
+/**
+ * A workflow that would run nothing.
+ *
+ * `phase-references` iterates `workflow?.phases ?? []`, so a workflow with none
+ * passes it without a word — and every other rule too. The parser warns, but a
+ * warning lives in the file's own problems and nobody opens a file they think
+ * is fine.
+ *
+ * Planning refuses to run one. This is how somebody finds out before a task
+ * blocks: a supervised run had a workflow like this on ten tasks, and the first
+ * notice anybody got was a run that finished in three milliseconds.
+ */
+const emptyWorkflows: DoctorRuleCapability = {
+  id: 'empty-workflows',
+  summary: 'Every workflow lists at least one phase.',
+  check({ chain, workflows }) {
+    const problems: Problem[] = []
+    for (const entry of workflows) {
+      if (!entry.valid) continue
+      const workflow = resolveWorkflow(chain, entry.name)?.value
+      if (workflow === undefined || workflow.phases.length > 0) continue
+      problems.push({
+        severity: 'warning',
+        message:
+          `Workflow "${entry.name}" lists no phases, so it will do nothing. ` +
+          `A task that runs it is refused rather than finishing instantly — add a phase, or ` +
+          `take the workflow off the tasks that name it.`,
+        file: entry.winner.file,
+        field: 'phases',
+        rule: 'doctor.emptyWorkflow',
+      })
+    }
+    return problems
+  },
+}
+
 const onFailReferences: DoctorRuleCapability = {
   id: 'on-fail-references',
   summary: 'Every on_fail workflow exists.',
@@ -449,6 +485,7 @@ export const BUILTIN_DOCTOR_RULES: readonly DoctorRuleCapability[] = [
   legacyScopes,
   definitionsParse,
   phaseReferences,
+  emptyWorkflows,
   onFailReferences,
   needsReferences,
   stepKindsRunnable,

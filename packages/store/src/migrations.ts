@@ -607,4 +607,20 @@ export const MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    version: 20,
+    describe: "a project knows the command that checks its own work",
+    up: (db) => {
+      // Nullable, and null means "nobody has said" rather than "there is
+      // nothing to run". The difference is load-bearing: the built-in
+      // `project-check` phase refuses to plan on a project with no command,
+      // because `bash -c ''` exits 0 and a default here would be a tick beside
+      // work that never happened.
+      //
+      // `check_command` rather than `check`: `CHECK` is a reserved word in
+      // SQLite's column-constraint grammar, and a column that needs quoting
+      // everywhere is a column somebody eventually forgets to quote.
+      db.exec('ALTER TABLE projects ADD COLUMN check_command TEXT')
+    },
+  },
 ]

@@ -737,6 +737,54 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
     })
   })
 
+  Rule('the project namespace is complete too, for the same reason', ({ RuleScenario }) => {
+    const usingToken = (token: string) => (): void => {
+      box.phase(project, 'vocabulary', `name: vocabulary\nsteps: [{run: 'echo ${token}'}]\n`)
+    }
+    const planNoProject = (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      // No `project`, exactly what `factory run` hands over.
+      result = planWorkflow({ chain, host, workflow: 'vocabulary', workspace: box.dir('work') })
+    }
+    const stillUnresolved = (): readonly string[] =>
+      result.problems
+        .filter((problem) => problem.rule === 'variables.unknownKey')
+        .map((problem) => problem.message)
+
+    RuleScenario('A documented project token nobody supplied is empty, not literal', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a phase whose step uses "{{ project.check }}"', usingToken('{{ project.check }}'))
+      And('the project scope defines a workflow "vocabulary" with that phase', () =>
+        workflow('vocabulary', 'vocabulary'),
+      )
+      When('the workflow "vocabulary" is planned with no project at all', planNoProject)
+      Then('no token was left unresolved', () => expect(stillUnresolved()).toEqual([]))
+      // The rendered argv, because the warning going away is not the point —
+      // the literal `{{ … }}` reaching bash is.
+      And('no token survived into the command', () =>
+        expect(result.plan?.phases[0]?.steps[0]?.planned.args.join(' ')).not.toContain('{{'),
+      )
+    })
+
+    RuleScenario('A misspelled project token is still a warning', ({ Given, And, When, Then }) => {
+      Given('a phase whose step uses "{{ project.chekc }}"', usingToken('{{ project.chekc }}'))
+      And('the project scope defines a workflow "vocabulary" with that phase', () =>
+        workflow('vocabulary', 'vocabulary'),
+      )
+      When('the workflow "vocabulary" is planned with no project at all', planNoProject)
+      Then('a problem names the unresolved token "{{ project.chekc }}"', () =>
+        expect(stillUnresolved().join('\n')).toContain('{{ project.chekc }}'),
+      )
+    })
+  })
+
   Rule('one session per plan, started by the first agent step that needs it', ({
     RuleScenario,
   }) => {
@@ -1254,6 +1302,27 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
         () => workflow('validate', 'project-check'),
       )
       When('the workflow "validate" is planned', planned)
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the step has no command to run', noCommand)
+    })
+
+    RuleScenario('A run with no project at all cannot plan the gate either', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'the project scope defines a workflow "validate" with the phase "project-check"',
+        () => workflow('validate', 'project-check'),
+      )
+      When('the workflow "validate" is planned with no project at all', () => {
+        const chain = resolveScopes({
+          cwd: box.dir('work', 'src'),
+          env: { FACTORY_HOME: box.scope('home', 'user') },
+        })
+        result = planWorkflow({ chain, host, workflow: 'validate', workspace: box.dir('work') })
+      })
       Then('planning fails', () => expect(result.plan).toBeUndefined())
       And('a problem says the step has no command to run', noCommand)
     })

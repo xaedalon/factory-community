@@ -239,6 +239,29 @@ Feature: Definitions become a runnable plan
       When the workflow "bothly" is planned with no task
       Then the path it was told to read from is under the same root it writes to
 
+  Rule: the project namespace is complete too, for the same reason
+
+    The task namespace got a floor when a foreground run turned out to be told
+    that `{{ task.ticketId }}` did not exist — a key the dictionary documents.
+    The project namespace kept the old behaviour, and it cost the gate:
+    `factory run` has no project, so `{{ project.check }}` was left in the
+    command as **literal text** and bash was handed `{{ project.check }}`.
+    Neither the project's checks nor a failure anybody could read.
+
+    Scenario: A documented project token nobody supplied is empty, not literal
+      Given a phase whose step uses "{{ project.check }}"
+      And the project scope defines a workflow "vocabulary" with that phase
+      When the workflow "vocabulary" is planned with no project at all
+      Then no token was left unresolved
+      And no token survived into the command
+
+    Scenario: A misspelled project token is still a warning
+      # The floor is for keys the dictionary promises. A typo is a typo.
+      Given a phase whose step uses "{{ project.chekc }}"
+      And the project scope defines a workflow "vocabulary" with that phase
+      When the workflow "vocabulary" is planned with no project at all
+      Then a problem names the unresolved token "{{ project.chekc }}"
+
   Rule: one session per plan, started by the first agent step that needs it
 
     Factory chooses the session id so that it can be resumed exactly — by a
@@ -459,6 +482,14 @@ Feature: Definitions become a runnable plan
       Given the project has no check command
       And the project scope defines a workflow "validate" with the phase "project-check"
       When the workflow "validate" is planned
+      Then planning fails
+      And a problem says the step has no command to run
+
+    Scenario: A run with no project at all cannot plan the gate either
+      # `factory run` has no project, so there is no check command by
+      # definition. It must refuse rather than hand bash a literal token.
+      Given the project scope defines a workflow "validate" with the phase "project-check"
+      When the workflow "validate" is planned with no project at all
       Then planning fails
       And a problem says the step has no command to run
 

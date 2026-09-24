@@ -123,6 +123,27 @@ export const blankTaskTokens = (): Record<keyof typeof TASK_TOKENS, string> =>
     string
   >
 
+/**
+ * Every documented project token, empty. Including the recovery ones.
+ *
+ * The same floor `blankTaskTokens` provides, for the namespace that did not
+ * have one — and the asymmetry cost something concrete. `factory run` has no
+ * project, so `{{ project.check }}` did not resolve and was left in the command
+ * *literally*: `bash -c '{{ project.check }}'`, which is neither the gate nor a
+ * useful failure. Empty is the honest value, and an empty command is refused a
+ * line further on.
+ *
+ * A misspelled key still warns, which is what the warning is for. A documented
+ * one with no value here is not a mistake.
+ */
+export const blankProjectTokens = (): Record<
+  keyof typeof PROJECT_TOKENS | keyof typeof FAILURE_TOKENS,
+  string
+> =>
+  Object.fromEntries(
+    [...Object.keys(PROJECT_TOKENS), ...Object.keys(FAILURE_TOKENS)].map((key) => [key, '']),
+  ) as Record<keyof typeof PROJECT_TOKENS | keyof typeof FAILURE_TOKENS, string>
+
 const entries = (table: Readonly<Record<string, string>>): TokenEntry[] =>
   Object.entries(table).map(([key, summary]) => ({ key, summary }))
 

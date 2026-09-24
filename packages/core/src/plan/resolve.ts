@@ -22,7 +22,7 @@ import {
   type Canonicalise,
 } from '../security/boundary.js'
 import { DEFAULT_PROFILE, isConfined, type ExecutionProfile } from '../security/profile.js'
-import { blankTaskTokens } from './tokens.js'
+import { blankProjectTokens, blankTaskTokens } from './tokens.js'
 
 /**
  * Turn definitions into something that could actually be run.
@@ -219,11 +219,20 @@ export function resolvePlan(request: PlanRequest): PlanResult {
       // prompt and the collector came to name different files once already.
       // There is one derivation, and both halves read it.
       task: asStrings({ ...blankTaskTokens(), ...(request.task ?? {}), artifacts }),
-      project: request.project ?? {},
+      // The same floor the task namespace has had since it was needed. Without
+      // it a foreground run left `{{ project.check }}` in the command as
+      // literal text, which is neither the project's gate nor a failure worth
+      // reading.
+      project: { ...blankProjectTokens(), ...(request.project ?? {}) },
       workflow: workflow.variables,
       phase: phase.variables,
       // Phase values win over workflow values, which win over project values.
-      variables: { ...request.project, ...workflow.variables, ...phase.variables },
+      variables: {
+        ...blankProjectTokens(),
+        ...request.project,
+        ...workflow.variables,
+        ...phase.variables,
+      },
     }
 
     const cwd = phase.workingDir === undefined ? workspace : join(workspace, phase.workingDir)

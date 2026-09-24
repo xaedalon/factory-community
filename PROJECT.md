@@ -1015,6 +1015,117 @@ two were scenarios that passed for the wrong reason — one never set up the
 condition it was about, and one could not tell "the rule said nothing" from
 "the rule threw and doctor swallowed it".
 
+## After 0.1.0 — what a supervised run found
+
+Ten tasks were driven through Factory's MCP server end to end on 2026-09-23,
+each checked against a specification before the next started. The work came out
+right — and it took a person watching to make that true. Without one, Factory
+would have said **done** at least four times over broken work.
+
+| # | What | State |
+|--:|------|-------|
+| 110 | **A workflow that would run nothing is refused**, not completed in 3 ms | ✅ done |
+| 111 | **The Default profile can run the project's package manager again**, by an allow-list that was measured entry by entry | ✅ done |
+| 112 | **A refused command is seen, and parks the run** — the CLI's transcript read as events rather than prose | ✅ done |
+| 113 | **A project carries the command that checks its own work**, and a step whose command resolves to nothing is refused | ✅ done |
+| 114 | **A step's own `args` cannot widen the profile it runs under** | ✅ done |
+
+Everything else the report found is in
+[`docs/proposals/supervised-run-findings.md`](docs/proposals/supervised-run-findings.md), with the
+measurements attached and each item marked with what it is waiting on.
+
+**Every defect here had the same shape, and it is worth naming.** Not a crash,
+not a wrong answer — a **tick beside work that never happened**. `runPlan`
+walking zero phases returns `completed`. `bash -c ''` exits 0. `claude -p`
+exits 0 with `"subtype":"success"` on a run where the install was refused. In
+each case Factory was reading *absence of failure* as *evidence of success*,
+and absence of failure is what a thing that did nothing at all produces.
+
+**The measurements changed three of the five fixes**, which is the argument for
+running the real CLI rather than reading its help:
+
+- **A denial pattern on the CLI's wording would not have worked.** The report
+  recommended matching the refusal's phrasing. Factory sees the agent's prose,
+  and the agent paraphrases: the CLI said "no approval *surface*" and the
+  agent's own report of the same event said "no approval *interface*". A
+  pattern on either would have missed the very run that produced the report. So
+  the detector matches an **event kind** — `{"type":"system",
+  "subtype":"permission_denied"}` — which is a fact rather than a sentence.
+- **Most of the suggested allow-list could not be used.** Fifteen entries were
+  proposed, including `node`, `python`, `npx`, `make` and `cargo`, with a note
+  to re-measure each. Re-measuring removed most of them. `--restricted`
+  confines Claude Code's own file tools and the shell's redirection; it cannot
+  confine what a *child interpreter* does with its own syscalls, and
+  `Bash(node *)` wrote to `/tmp` from a confined workspace on the first
+  attempt. So did a bare `Bash`. The list that ships is four package managers,
+  and `docs/security/providers.md` records what was tried and what happened.
+- **Two findings were one defect.** `design.workflow.yaml` on disk was
+  `phases: []`. That is why the run took 3 ms, and it is also why
+  `progress.total` said 4 on five workflows — the same file contributed
+  nothing to both.
+
+**And one thing the report did not find.** `Agent.args` and `AgentStep.args`
+are appended to the argv *after* `permissionArgs`, and nothing checked them. A
+project's own agent file saying `args: ['--permission-mode',
+'bypassPermissions']` got Full Access under the Default profile — no setting
+changed, nothing said, and the only trace a line in a YAML file the agent
+itself can write. The guard is **derived**, not listed: under a confined
+profile, an argument out of that provider's own `full-access` list is refused,
+so it stays true when a descriptor is edited and a third-party provider gets it
+for nothing. `forbiddenArgs` covers what derivation cannot see — chiefly
+`--allowedTools`, which is variadic, so a step passing it does not *add* to
+Factory's allow-list, it *becomes* the allow-list.
+
+Decisions taken while building it:
+
+- **The transcript reader is a provider capability, not a capability kind of
+  its own.** A parser is the one part of a provider that cannot be YAML, so it
+  has to be code — but a reader without the provider whose output it reads is
+  meaningless, and a separate kind would have made that pairing something to
+  get wrong. It sits on `ProviderCapability`, is supplied through
+  `defineProviderPlugin`, and a provider with none is read as text exactly as
+  before. Binding rule 4 holds: the built-in ships through the seam a third
+  party would use.
+- **A refused *command* parks the run; a refused *path* still does not.** This
+  is a deliberate change to documented behaviour and the distinction is the
+  whole of it. A refused path may leave the real work done — the agent writes
+  somewhere else and carries on, and interrupting that would defeat the
+  profile. A refused command means an install, a build or a test did not run,
+  and everything reported afterwards was reported without it.
+- **`is_error` on a tool result is not a refusal.** A failing test suite sets
+  the same flag, and parking every red build is the fastest way to have the
+  feature switched off. Only the permission event counts.
+- **No new schema for the gate.** A shell step whose non-zero exit fails the
+  phase already existed and already blocked the task; nothing was missing from
+  the mechanism. What was missing was anything that knew what to run, so a
+  project carries one command and the built-in `project-check` phase is nothing
+  but that command. The report's suggested `gate: true` field would have been a
+  second way to say what a failing step already says.
+- **An empty command is an error everywhere, not a special case for the gate.**
+  `{{ project.check }}` on a project that never set one resolves to `''`, and
+  `bash -c ''` exits 0. Refusing it at plan time is the same rule as refusing a
+  plan with no steps, one level down.
+- **Detection needs positive evidence.** A `check`/`verify`/`test` script in
+  `package.json` with the package manager read off the *lockfile*, `Cargo.toml`,
+  `go.mod`, a `test:` target in a `Makefile` — and nothing else. A wrong guess
+  is worse than none: it is a command nobody chose, failing for a reason they
+  have to go and find, in a gate they did not know was there.
+- **Left out on purpose.** The plan also called for scaffolded `validate` and
+  `verify` phases and richer default prompts. Factory ships no starter workflow
+  set in the open core, so that means deciding what every new project is
+  given — a product decision rather than an implementation one. It is in the
+  proposal document with the reasoning.
+
+**What the mutations taught this time.** Two survived the first round on the
+stream reader, and both were the same lesson in different clothes: an assertion
+that cannot tell two things apart. Reading the event's `type` and ignoring its
+`subtype` turned every `init` and `thinking_tokens` event into a refusal, and
+every scenario still passed — none of them fed the reader an ordinary run. And
+"the denial is visible in the log" passed with the denial's log line deleted,
+because the *tool call* had already written the command to the same stream one
+line earlier. Both were fixed by asserting on the thing itself: an ordinary run
+produces no refusals, and the refusal's own line reads `refused — <command>`.
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -1191,6 +1302,8 @@ this repository does not contain.
 | `packages/config/features/provider-config.feature` | `providers.<id>.command` — the way out when discovery cannot help |
 | `packages/config/features/setup.feature` | What is still missing, contributed by whoever knows |
 | `packages/store/features/projects.feature` (extended) | Whether a project gives each task a worktree, and what that costs |
+| `packages/plugins/provider-claude/features/stream.feature` | Reading a CLI's structured transcript: a refusal as an event rather than a sentence, and what is not one |
+| `packages/core/features/project-check.feature` | The one command that checks a project's work, and what a repository has to say before Factory guesses it |
 
 **Verifying everything** (from `factory-community`, then `factory-pro`):
 

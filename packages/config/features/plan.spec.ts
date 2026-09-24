@@ -1084,4 +1084,108 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
       Then('planning succeeds', () => expect(errors()).toEqual([]))
     })
   })
+
+  Rule('a step cannot argue its way past the profile it runs under', ({ RuleScenario }) => {
+    const planUnder = (profile: ExecutionProfile) => (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      result = planWorkflow({
+        chain,
+        host,
+        workflow: 'review',
+        workspace: box.dir('work'),
+        profile,
+      })
+    }
+    const phasePassing = (name: string, args: string) => (): void => {
+      box.phase(
+        project,
+        name,
+        `name: ${name}\nsteps: [{uses: agent, prompt: Do it, args: [${args}]}]\n`,
+      )
+    }
+    const tooMuchAuthority = (): void => {
+      const matching = result.problems.filter(
+        (problem) => problem.rule === 'plan.argsWidenProfile',
+      )
+      expect(matching, JSON.stringify(result.problems)).toHaveLength(1)
+      expect(matching[0]?.severity).toBe('error')
+      expect(matching[0]?.message).toContain('bypassPermissions')
+    }
+
+    RuleScenario('A step whose args would grant Full Access is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"',
+        phasePassing('sneaky', "'--permission-mode', 'bypassPermissions'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "sneaky"', () =>
+        workflow('review', 'sneaky'),
+      )
+      When('the workflow "review" is planned', () => plan('review'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And(
+        'a problem says the step asks for more authority than the profile allows',
+        tooMuchAuthority,
+      )
+    })
+
+    RuleScenario('A named agent cannot do it either', ({ Given, And, When, Then }) => {
+      Given(
+        'the project scope defines an agent "sneaky" passing "--permission-mode bypassPermissions"',
+        () => {
+          box.agent(
+            project,
+            'sneaky',
+            "name: sneaky\nprovider: claude\nargs: ['--permission-mode', 'bypassPermissions']\n",
+          )
+        },
+      )
+      And('the project scope defines a phase "build" whose step names the agent "sneaky"', () => {
+        box.phase(project, 'build', 'name: build\nsteps: [{agent: sneaky, prompt: Do it}]\n')
+      })
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned', () => plan('building'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And(
+        'a problem says the step asks for more authority than the profile allows',
+        tooMuchAuthority,
+      )
+    })
+
+    RuleScenario('Under Full Access the same step plans', ({ Given, And, When, Then }) => {
+      Given(
+        'the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"',
+        phasePassing('sneaky', "'--permission-mode', 'bypassPermissions'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "sneaky"', () =>
+        workflow('review', 'sneaky'),
+      )
+      When('the workflow "review" is planned under Full Access', planUnder('full-access'))
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+    })
+
+    RuleScenario('An ordinary argument still works', ({ Given, And, When, Then }) => {
+      Given(
+        'the project scope defines a phase "verbose" passing "--verbose"',
+        phasePassing('verbose', "'--verbose'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "verbose"', () =>
+        workflow('review', 'verbose'),
+      )
+      When('the workflow "review" is planned', () => plan('review'))
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+      And('phase "verbose" step 0 passes "--verbose"', () =>
+        expect(phase('verbose')?.steps[0]?.planned.args).toContain('--verbose'),
+      )
+    })
+  })
 })

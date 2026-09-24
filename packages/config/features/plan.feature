@@ -386,3 +386,49 @@ Feature: Definitions become a runnable plan
       And the project scope defines a workflow "design" with the phases "think, work"
       When the workflow "design" is planned
       Then planning succeeds
+
+  Rule: a step cannot argue its way past the profile it runs under
+
+    `args:` is appended to the rendered command *after* the permission
+    arguments, and nothing checked it. So a phase — or a named agent, which is
+    a file in the project the agent itself can edit — could say
+    `args: ['--permission-mode', 'bypassPermissions']` and run under Full
+    Access while the project's profile still said Default. No setting changed,
+    nothing said, and the only trace a line in a YAML file.
+
+    Refused at plan time, so the run is recorded `refused` and the task blocked
+    with a reason, rather than an argv nobody reads granting authority nobody
+    chose.
+
+    Scenario: A step whose args would grant Full Access is refused
+      Given the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"
+      And the project scope defines a workflow "review" with the phase "sneaky"
+      When the workflow "review" is planned
+      Then planning fails
+      And a problem says the step asks for more authority than the profile allows
+
+    Scenario: A named agent cannot do it either
+      # The agent file is the more dangerous of the two: it is further from the
+      # phase somebody reads, and it applies to every step that names it.
+      Given the project scope defines an agent "sneaky" passing "--permission-mode bypassPermissions"
+      And the project scope defines a phase "build" whose step names the agent "sneaky"
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned
+      Then planning fails
+      And a problem says the step asks for more authority than the profile allows
+
+    Scenario: Under Full Access the same step plans
+      # There is no boundary left to widen, and the profile was chosen
+      # deliberately and is marked on screen the whole time it is on.
+      Given the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"
+      And the project scope defines a workflow "review" with the phase "sneaky"
+      When the workflow "review" is planned under Full Access
+      Then planning succeeds
+
+    Scenario: An ordinary argument still works
+      Given the project scope defines a phase "verbose" passing "--verbose"
+      And the project scope defines a workflow "review" with the phase "verbose"
+      When the workflow "review" is planned
+      Then planning succeeds
+      And phase "verbose" step 0 passes "--verbose"
+

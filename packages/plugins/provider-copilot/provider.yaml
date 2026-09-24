@@ -60,6 +60,15 @@ permissionArgs:
   default: ['--allow-all-tools']
   full-access: ['--allow-all']
 
+# Arguments a step may not pass under a confined profile, on top of `--allow-all`
+# derived from the list above.
+#
+# These are the two the Default profile deliberately stopped passing. A step
+# that passed one itself would put back exactly the confinement this provider
+# was changed to stop switching off — and it would do it from a file in the
+# repository, with no setting changed and nothing said.
+forbiddenArgs: ['--allow-all-paths', '--allow-all-urls']
+
 # Documented as "Allow file access to a directory"; Factory uses it for the
 # artifacts root, which lives outside the worktree by design.
 directoryFlag: '--add-dir'

@@ -166,6 +166,13 @@ one CI keeps honest.
 Mark a descriptor `provisional: true` if you have not verified it against the real CLI. `doctor`
 reports provisional providers, because a flag someone guessed is worse than one nobody wrote.
 
+A step's own `args:` cannot widen the profile it runs under. Anything in your `full-access` list
+that the confined profile does not already pass is refused at plan time, derived — you write
+nothing. Add `forbiddenArgs:` for what derivation cannot see: a flag that grants authority without
+appearing in either list, or one whose *repetition replaces* what Factory passed. Claude Code's
+`--allowedTools` is the second kind: it is variadic, so a step passing it again does not add to the
+allow-list, it becomes the allow-list.
+
 ### Reading a structured transcript
 
 One part of a provider cannot be data: a transcript format is a parser. If your CLI can emit its

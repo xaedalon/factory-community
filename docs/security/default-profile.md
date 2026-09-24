@@ -49,6 +49,12 @@ attempt — it is not on the list and will not be.
   The one exception is the agent's own credential, which its provider declares.
 - **A phase that names a directory outside the workspace.** `working_dir: /tmp`
   is refused at plan time rather than run there.
+- **A step that asks for more authority in its own arguments.** `args:` on a
+  step, or on an agent file, is appended after the profile's flags — so
+  `args: ['--permission-mode', 'bypassPermissions']` was Full Access with no
+  setting changed and nothing said. It is refused at plan time now, naming the
+  argument. What counts is derived from each provider's own Full Access flags,
+  so it stays true as descriptors change.
 
 When something is withheld, the run says so against the step that lost it —
 names only, never values. When an agent is refused something, the refusal is

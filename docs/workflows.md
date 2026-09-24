@@ -95,7 +95,7 @@ steps:
     effort: high
     subagent: implementer        # a named persona, mapped per provider
     session: task                # task | workflow | phase | none
-    args: ['--verbose']          # appended verbatim
+    args: ['--verbose']          # appended verbatim — but see below
 
   - uses: worktree
     action: create               # or `remove`
@@ -103,6 +103,13 @@ steps:
     branch: "{{ task.branch }}"
     from: origin/main            # optional starting point
 ```
+
+**`args`** is appended verbatim, with one exception: an argument that would give the agent more
+authority than the project's execution profile allows is **refused at plan time**, naming the
+argument. `args: ['--permission-mode', 'bypassPermissions']` in a phase — or in an agent file, which
+is a file in the repository the agent itself can edit — used to mean Full Access with nothing said.
+If a project needs that, choose it as the project's profile, where it is a decision and is marked on
+screen. See [`security/default-profile.md`](security/default-profile.md).
 
 **`retries`** and **`retry_delay`** work on any step, of any kind — core takes them out before the
 kind's own schema sees them, so no plugin has to implement retrying to be retryable. `retries: 2`

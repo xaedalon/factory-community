@@ -15,6 +15,8 @@ import {
   type ProviderCapability,
   type RenderRequest,
 } from '../providers/capability.js'
+import { profileWideningArgs } from '../providers/descriptor.js'
+import { DEFAULT_PROFILE } from '../security/profile.js'
 import { worktreeStepKind } from './worktree.js'
 import type { Problem } from '../problems.js'
 import { MODEL_ROLES, type ModelRole } from '../model-roles.js'
@@ -165,6 +167,36 @@ export const agentStepKind: StepKindCapability = defineStepKind({
     const agent = settings.step
     const chosen = chooseProvider(agent, context)
     if ('problems' in chosen) return chosen
+
+    // Before the command is rendered, because the whole point is that this
+    // argv is never built. `args` is appended *after* `permissionArgs`, so an
+    // agent file saying `args: ['--permission-mode', 'bypassPermissions']`
+    // used to get Full Access under the Default profile by editing a file in
+    // the repository the agent can write to — no setting changed, nothing
+    // said. Refusing at plan time means the run is recorded `refused` and the
+    // task blocked with a reason, which is the loud path a bad definition
+    // already takes.
+    const widening = profileWideningArgs(
+      chosen.provider.descriptor,
+      context.profile ?? DEFAULT_PROFILE,
+      agent.args ?? [],
+    )
+    if (widening.length > 0) {
+      return {
+        problems: [
+          {
+            severity: 'error',
+            message:
+              `This step passes ${widening.map((argument) => `"${argument}"`).join(', ')} to ` +
+              `${chosen.provider.id}, which would give it more authority than the ` +
+              `${context.profile ?? DEFAULT_PROFILE} profile allows. Run this project under Full ` +
+              `Access if it needs that, rather than asking for it one argument at a time.`,
+            field: 'args',
+            rule: 'plan.argsWidenProfile',
+          } satisfies Problem,
+        ],
+      }
+    }
 
     const request: RenderRequest = {
       prompt: withArtifactInstruction(agent, context),

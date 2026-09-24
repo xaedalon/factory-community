@@ -125,6 +125,21 @@ permissionArgs:
     - 'Bash(npm *),Bash(pnpm *),Bash(yarn *),Bash(bun *)'
   full-access: ['--permission-mode', 'bypassPermissions']
 
+# Arguments a step may not pass under a confined profile, on top of the ones
+# derived from `full-access` above.
+#
+# `--allowedTools` is the dangerous one and the reason this field exists.
+# `--help` declares it `<tools...>`, and a repeated variadic option *replaces*
+# rather than appends — so a step passing it does not add to Factory's
+# allow-list, it becomes the allow-list, and `--allowedTools Bash` was measured
+# writing outside the workspace. The rest set authority directly.
+forbiddenArgs:
+  - '--allowedTools'
+  - '--permission-mode'
+  - '--permission-prompts'
+  - '--dangerously-skip-permissions'
+  - '--tools'
+
 # Measured to extend the confinement: a file in the added directory was written
 # and a third directory was still refused. Factory uses it for the artifacts
 # root, which lives under the project rather than the worktree.

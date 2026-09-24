@@ -1139,6 +1139,123 @@ Feature: Tasks, runs and live updates over HTTP
       Then the response is 200
       And the findings say nothing about git
 
+  Rule: a directory can ask which project it is in
+
+    Everything that asks the daemon about a project has so far known its id or
+    its name, because a person picked it. An agent knows the directory it was
+    started in and nothing else, so the question has to be answerable over the
+    wire — and answerable *here*, because the CLI and the board want the same
+    answer and a client that worked it out for itself would disagree with this
+    one the first time the rule changed.
+
+    Scenario: A directory inside a project resolves to it
+      Given a project "factory" at a repository
+      When I ask which project is at a directory inside it
+      Then the response is 200
+      And the project is "factory"
+      And it matched an ancestor
+
+    Scenario: A directory nobody registered is not found
+      Given a project "factory" at a repository
+      When I ask which project is at a directory outside every project
+      Then the response is 404
+
+    Scenario: A task's worktree resolves to the project and the task
+      Given a project "factory" at a repository
+      And a task "Add due dates" in it with a worktree on disk
+      When I ask which project is at that worktree
+      Then the response is 200
+      And the project is "factory"
+      And the answer names the task "Add due dates"
+
+    Scenario: Two projects at one directory are a conflict
+      Given a project "factory" at a repository
+      And a second project "factory-again" at the same repository
+      When I ask which project is at that repository
+      Then the response is 409
+      And both project names are in the answer
+
+    Scenario: Asking without a path is a usage error
+      When I ask which project is at no path at all
+      Then the response is 400
+      # The status alone would pass without the guard: unguarded, the missing
+      # path reaches the repository and comes back as a TypeError about a
+      # string, which is a 400 that tells nobody what to do.
+      And the answer says what to pass instead
+
+  Rule: how far work may start work is the daemon's to decide
+
+    An agent Factory launched can reach this API: it is on 127.0.0.1, there is
+    no authentication, and the address is not credential-shaped so it survives
+    the environment filter. Serving MCP did not create that reach — it made it
+    ergonomic, and an ergonomic way to start work from inside work is an
+    ergonomic way to start work from inside that.
+
+    So the bound is here, for the reason the disclaimer gate is here: a rule
+    only the MCP server enforced would be advice, with `curl` as the exception.
+
+    Scenario: A request with nobody behind it is a person
+      Given a project to work in
+      When I create a task with no initiator
+      Then the response is 201
+
+    Scenario: Work four levels deep is refused
+      Given a project to work in
+      And a run "deep" at depth 3
+      When I create a task from inside "deep"
+      Then the response is 409
+      And the answer is coded RECURSION_LIMIT
+      And no task was created
+
+    Scenario: The eleventh task from one run is refused
+      Given a project to work in
+      And a run "busy" at depth 0 that has already asked for 10 tasks
+      When I create a task from inside "busy"
+      Then the response is 409
+      And the answer is coded FAN_OUT_LIMIT
+
+    Scenario: A task created from inside a run remembers which
+      Given a project to work in
+      And a run "asker" at depth 0
+      When I create a task from inside "asker"
+      Then the response is 201
+      And the task says "asker" asked for it
+      And the task says who the client called itself
+
+    Scenario: An initiator that is not an object is refused rather than half-read
+      Given a project to work in
+      # A half-read initiator is one whose taskId went missing, and the guard
+      # that stops an agent reaching around its own run would then do nothing.
+      When I create a task with an initiator of "yes please"
+      Then the response is 400
+
+    Scenario: An agent cannot queue the task it is running inside
+      Given a project to work in
+      And a task "Add due dates" that can be queued
+      And the disclaimer has been accepted
+      When the agent running that task tries to queue it
+      Then the response is 409
+      And the answer is coded SELF_ORCHESTRATION_BLOCKED
+      And the task was not queued
+
+    Scenario: An agent cannot approve what its own run asked for
+      Given a project to work in
+      And a run "asker" at depth 0
+      And a task "Add due dates" that "asker" asked for, waiting for approval
+      When the agent in "asker" tries to approve it
+      Then the response is 409
+      And the answer is coded APPROVAL_SEPARATION
+      And the task is still waiting for approval
+
+    Scenario: Queue all skips the agent's own task and queues the rest
+      Given a project to work in
+      And the disclaimer has been accepted
+      And two tasks that can be queued
+      When the agent running the first one queues the whole project
+      Then the response is 200
+      And one task was queued
+      And the one it is running inside was skipped with a reason
+
   Rule: a project is asked what checks its work, and told when it cannot be guessed
 
     The gate a `validate` workflow needs is a command, and Factory cannot invent

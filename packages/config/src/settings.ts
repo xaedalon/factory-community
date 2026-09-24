@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import {
   closedWithExtensions,
+  DEFAULT_ORCHESTRATION_LIMITS,
   DEFAULT_PROFILE,
   EXECUTION_PROFILES,
   problemsFromZod,
@@ -85,6 +86,33 @@ const shape = {
      */
     profile: z.enum(EXECUTION_PROFILES).default(DEFAULT_PROFILE),
   }).default({ profile: DEFAULT_PROFILE }),
+  orchestration: closedWithExtensions({
+    /**
+     * How far work may start work.
+     *
+     * An agent Factory launched can reach the daemon, so it can ask for a task,
+     * whose agent can ask for a task. Three is deep enough for the shape this
+     * is for — delegate, verify, stop — and shallow enough that a runaway is
+     * over in seconds rather than after an afternoon of agents. Zero means only
+     * a person may start work, which is a legitimate thing to want.
+     */
+    maxDepth: z.number().int().min(0).max(10).default(DEFAULT_ORCHESTRATION_LIMITS.maxDepth),
+    /**
+     * How many tasks one run's agent may ask for.
+     *
+     * The other half of the same bound: depth alone leaves a single run free to
+     * queue a thousand.
+     */
+    maxTasksPerRun: z
+      .number()
+      .int()
+      .min(0)
+      .max(1000)
+      .default(DEFAULT_ORCHESTRATION_LIMITS.maxTasksPerRun),
+  }).default({
+    maxDepth: DEFAULT_ORCHESTRATION_LIMITS.maxDepth,
+    maxTasksPerRun: DEFAULT_ORCHESTRATION_LIMITS.maxTasksPerRun,
+  }),
   plugins: closedWithExtensions({
     /**
      * Plugins the installation has switched off.
@@ -108,6 +136,10 @@ export interface SettingsPatch {
   readonly security?: {
     readonly acceptedVersion?: number
     readonly profile?: ExecutionProfile
+  }
+  readonly orchestration?: {
+    readonly maxDepth?: number
+    readonly maxTasksPerRun?: number
   }
 }
 

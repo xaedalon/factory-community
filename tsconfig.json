@@ -41,6 +41,9 @@
       "path": "./packages/plugins/provider-copilot"
     },
     {
+      "path": "./packages/mcp"
+    },
+    {
       "path": "./apps/cli"
     },
     {

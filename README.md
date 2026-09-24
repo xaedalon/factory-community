@@ -206,6 +206,22 @@ there. Rules are a capability, so a plugin adds its own.
 | `factory` | Definitions, scopes, plugins, `run`, `doctor`, and `task` — all with `--json` |
 | `factory-daemon` | HTTP on `127.0.0.1:7317`, including a live event stream |
 | the board | Tasks, runs, logs, evidence, and the builder, at the same address |
+| `factory mcp` | The same contract again, for the coding agent you already have |
+
+### From your coding agent
+
+Factory runs coding agents. It can also be driven by one: `factory mcp` serves the Model Context
+Protocol over stdio, so Claude Code, Codex, Copilot CLI or anything else that speaks it can resolve
+the project you are in, create a task, pick a workflow, queue it and read what came back.
+
+```json
+{ "mcpServers": { "factory": { "command": "factory", "args": ["mcp"] } } }
+```
+
+It is a control surface, not a way round anything: the same disclaimer gate, the same execution
+profile, the same workspace boundary. It cannot approve its own work, and how far work may start
+work is bounded by the daemon rather than by the client asking.
+[`docs/mcp.md`](docs/mcp.md) is the whole feature.
 
 ## Security
 

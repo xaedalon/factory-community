@@ -236,4 +236,25 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario }) => {
       And('the report contains no value', () => expect(report).not.toContain(VALUE))
     })
   })
+  Rule('what the agent is told about its own run survives the filter', ({ RuleScenario }) => {
+    RuleScenario('A confined step is told which run and task it is', ({ Given, When, Then, And }) => {
+      Given(
+        'the environment holds "FACTORY_RUN_ID" and "FACTORY_TASK_ID"',
+        holding('FACTORY_RUN_ID', 'FACTORY_TASK_ID'),
+      )
+      When('the environment is built for a confined step', build('default'))
+      Then('all of them are passed through', passedThrough(true))
+      And('nothing was withheld', withheldCount(0))
+    })
+
+    RuleScenario('And which project, and how deep', ({ Given, When, Then, And }) => {
+      Given(
+        'the environment holds "FACTORY_PROJECT_ID" and "FACTORY_ORCHESTRATION_DEPTH"',
+        holding('FACTORY_PROJECT_ID', 'FACTORY_ORCHESTRATION_DEPTH'),
+      )
+      When('the environment is built for a confined step', build('default'))
+      Then('all of them are passed through', passedThrough(true))
+      And('nothing was withheld', withheldCount(0))
+    })
+  })
 })

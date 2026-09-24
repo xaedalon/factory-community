@@ -7,10 +7,12 @@ import { fileURLToPath } from 'node:url'
 import { EventBus, type FactoryEvent } from '@factory/events'
 import type { ExecutionProfile, Project, Task } from '@factory/core'
 import {
+  AmbiguousProjectError,
   MIGRATIONS,
   ProjectRepository,
   TaskRepository,
   openStore,
+  type ProjectAt,
   type Store,
 } from '../src/index.js'
 
@@ -701,6 +703,124 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       )
       Then('the database refuses it', () => expect(failure).toBeDefined())
       And('the task still exists', () => expect(tasks.get(task?.id as string)).toBeDefined())
+    })
+  })
+  Rule('a directory is asked which project it is in', ({ RuleScenario }) => {
+    let answer: ProjectAt | undefined
+
+    /**
+     * Cleared per scenario: `at` returns undefined for "no project there".
+     *
+     * Takes a function rather than a string because the steps are registered
+     * before Background runs — `ask(repo)` would capture the empty string it
+     * still was, and a scenario expecting "no project" would pass for that
+     * reason rather than the one it names.
+     */
+    const ask = (path: () => string) => () => {
+      answer = undefined
+      attempt(() => {
+        answer = projects.at(path())
+      })
+    }
+    const inside = (...parts: string[]) => {
+      const path = join(repo, ...parts)
+      mkdirSync(path, { recursive: true })
+      return path
+    }
+    const named = (name: string) => () => expect(answer?.project.name).toBe(name)
+    const by = (how: string) => () => expect(answer?.matchedBy).toBe(how)
+
+    RuleScenario('A project\'s own directory is the project', ({ Given, When, Then, And }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      When('I ask which project is at that directory', ask(() => repo))
+      Then('the answer is "factory"', named('factory'))
+      And('it matched the project\'s own directory', by('directory'))
+    })
+
+    RuleScenario('A directory inside a project is the project', ({ Given, When, Then, And }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      When('I ask which project is at "packages/core/src" inside it', () =>
+        ask(() => inside('packages', 'core', 'src'))(),
+      )
+      Then('the answer is "factory"', named('factory'))
+      And('it matched an ancestor', by('ancestor'))
+    })
+
+    RuleScenario('A directory the project is inside is not the project', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      When('I ask which project is at the directory above it', ask(() => root))
+      Then('there is no project there', () => expect(answer).toBeUndefined())
+    })
+
+    RuleScenario('A sibling whose name starts the same way is not inside', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      When('I ask which project is at the sibling "factory-pro"', () => {
+        const sibling = join(root, 'factory-pro')
+        mkdirSync(sibling, { recursive: true })
+        ask(() => sibling)()
+      })
+      Then('there is no project there', () => expect(answer).toBeUndefined())
+    })
+
+    RuleScenario('The innermost project wins', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      And('the project "web" exists at "apps/web" inside it', () => {
+        add('web', inside('apps', 'web'))
+      })
+      When('I ask which project is at "apps/web/src" inside "factory"', () =>
+        ask(() => inside('apps', 'web', 'src'))(),
+      )
+      Then('the answer is "web"', named('web'))
+    })
+
+    RuleScenario('Two projects at one directory are refused by name', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      And('the project "factory-again" exists at the same directory', () => add('factory-again'))
+      When('I ask which project is at that directory', ask(() => repo))
+      Then('it is refused', () => expect(failure).toBeInstanceOf(AmbiguousProjectError))
+      And('the refusal names "factory" and "factory-again"', () =>
+        expect((failure as AmbiguousProjectError).names).toEqual(['factory', 'factory-again']),
+      )
+    })
+
+    RuleScenario('A task\'s worktree is the project, and says which task', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      let worktree = ''
+      Given('the project "factory" exists', () => add('factory'))
+      And('a task "Add due dates" in "factory" has a worktree', () => {
+        task = tasks.create({ name: 'Add due dates', projectId: project?.id as string })
+        worktree = join(project?.worktreesRoot as string, task.directory as string)
+        mkdirSync(worktree, { recursive: true })
+      })
+      When('I ask which project is at that worktree', () => ask(() => worktree)())
+      Then('the answer is "factory"', named('factory'))
+      And('it matched a worktree', by('worktree'))
+      And('it names the directory "add-due-dates"', () =>
+        expect(answer?.taskDirectory).toBe('add-due-dates'),
+      )
+    })
+
+    RuleScenario('A relative path is refused', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', () => add('factory'))
+      When('I ask which project is at "../somewhere"', ask(() => '../somewhere'))
+      Then('it is refused', () => expect(failure).toBeDefined())
     })
   })
 

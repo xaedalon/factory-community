@@ -3,7 +3,11 @@ import {
   IN_FLIGHT,
   DISCLAIMER,
   NOT_ACCEPTED,
+  admitAction,
+  admitTask,
   dependencyStatus,
+  isRefusal,
+  parseInitiator,
   TASK_ACTIONS,
   TASK_STATES,
   TASK_TOOL_KIND,
@@ -17,6 +21,8 @@ import {
   type Evidence,
   type Task,
   type TaskEdge,
+  type Initiator,
+  type OrchestrationFacts,
   type TaskAction,
   type TaskState,
   type TaskToolCapability,
@@ -60,6 +66,40 @@ export function registerTaskRoutes(
    * restart, and the holder is the one live copy.
    */
   const accepted = (): boolean => hasAccepted(runtime.settings.current().security.acceptedVersion)
+
+  /**
+   * What the orchestration rules are allowed to know.
+   *
+   * Built per request rather than captured, for the reason `accepted()` is read
+   * fresh: the limits live in settings and a person changing them should not
+   * need a restart.
+   */
+  const facts: OrchestrationFacts = {
+    depthOf: (runId) => runs.get(runId)?.depth,
+    tasksCreatedBy: (runId) => tasks.countCreatedBy(runId),
+    creatorOf: (taskId) => tasks.get(taskId)?.createdByRunId,
+    originOf: (runId) => runs.get(runId)?.originRunId,
+  }
+  const limits = () => runtime.settings.current().orchestration
+
+  /**
+   * Read the initiator off a request, or refuse the request.
+   *
+   * A malformed one is a 400 rather than a shrug, because a half-read initiator
+   * is one whose `taskId` went missing — and the guard that stops an agent
+   * reaching around its own run would then quietly do nothing.
+   */
+  const initiatorOf = (
+    body: { initiator?: unknown } | undefined,
+    reply: { code: (n: number) => { send: (value: unknown) => unknown } },
+  ): Initiator | undefined | typeof REFUSED => {
+    try {
+      return parseInitiator(body?.initiator)
+    } catch (error) {
+      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) })
+      return REFUSED
+    }
+  }
 
   /**
    * Phases carried out over phases the plan contains.
@@ -362,9 +402,27 @@ export function registerTaskRoutes(
     if (service.projects.get(body.projectId) === undefined) {
       return reply.code(400).send({ error: `No project ${body.projectId}.` })
     }
+
+    const initiator = initiatorOf(body, reply)
+    if (initiator === REFUSED) return reply
+
+    // How far work may start work, checked here rather than in whichever client
+    // asked — the disclaimer settled that argument once, and a limit only the
+    // MCP server enforced would be advice with `curl` as the exception.
+    //
+    // A refusal touches nothing that is already running. The work in flight is
+    // somebody's, and stopping it because its agent asked for one task too many
+    // would punish the wrong thing.
+    const admitted = admitTask({ initiator, limits: limits(), facts })
+    if (isRefusal(admitted)) {
+      return reply.code(409).send({ error: admitted.message, code: admitted.code })
+    }
+
     const task = tasks.create({
       name: body.name.trim(),
       projectId: body.projectId,
+      ...(initiator?.label === undefined ? {} : { createdBy: initiator.label }),
+      ...(initiator?.runId === undefined ? {} : { createdByRunId: initiator.runId }),
       ...(body.description === undefined ? {} : { description: body.description }),
       ...(body.ticketId === undefined ? {} : { ticketId: body.ticketId }),
       ...(body.branch === undefined ? {} : { branch: body.branch }),
@@ -593,7 +651,7 @@ export function registerTaskRoutes(
     },
   )
 
-  app.post<{ Params: { id: string; action: string }; Body: { reason?: string } }>(
+  app.post<{ Params: { id: string; action: string }; Body: { reason?: string; initiator?: unknown } }>(
     '/api/tasks/:id/actions/:action',
     async (request, reply) => {
       const task = tasks.get(request.params.id)
@@ -627,6 +685,17 @@ export function registerTaskRoutes(
           error: NOT_ACCEPTED,
           disclaimer: DISCLAIMER,
         })
+      }
+
+      // An agent may not reach around the run it is in, and may not approve
+      // what its own branch of the tree asked for. Both are about an agent and
+      // its own work, and both are refused here rather than in a client for the
+      // same reason as the gate above.
+      const initiator = initiatorOf(request.body, reply)
+      if (initiator === REFUSED) return reply
+      const refusal = admitAction({ initiator, action, taskId: task.id, facts })
+      if (refusal !== undefined) {
+        return reply.code(409).send({ error: refusal.message, code: refusal.code })
       }
 
       const updated = tasks.act(task.id, action, {
@@ -741,6 +810,9 @@ export function registerTaskRoutes(
  * tickbox through a save, so there is one door into these rows rather than a
  * second route with its own copy of the rules.
  */
+/** "The reply has already been sent." Distinguishable from a real absence. */
+const REFUSED = Symbol('refused')
+
 const isSelection = (value: unknown): value is WorkflowSelection[] =>
   Array.isArray(value) &&
   value.every(
@@ -755,6 +827,8 @@ const isSelection = (value: unknown): value is WorkflowSelection[] =>
   )
 
 interface CreateBody {
+  /** Where the request came from, when it came from inside a run. */
+  initiator?: unknown
   name?: string
   description?: string
   projectId?: string

@@ -28,6 +28,9 @@
     },
     {
       "path": "../../packages/runtime"
+    },
+    {
+      "path": "../../packages/mcp"
     }
   ]
 }

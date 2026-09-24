@@ -9,6 +9,7 @@ What you might want, in the order most people want them.
 | [`workflows.md`](workflows.md) | Writing a workflow: phases, steps, agents, artifacts, approval gates. |
 | [`plugins.md`](plugins.md) | Adding a capability — a step kind, a provider, a button on a task, a doctor rule. |
 | [`task-dependencies.md`](task-dependencies.md) | One task waiting for another, marking one done by hand, and the two whole-project buttons. |
+| [`mcp.md`](mcp.md) | Driving Factory from the coding agent you already have, and what it may not do. |
 | [`security/`](security/) | What an agent may reach, and what it may not. |
 
 ## Security
@@ -28,6 +29,7 @@ the profile every project gets, and it is short.
 | | |
 |---|---|
 | [`proposals/execution-profiles.md`](proposals/execution-profiles.md) | The safety standard Factory is being built against. **A target, not a description** — most of it is not built. It lives under `proposals/` so the path says so. |
+| [`proposals/mcp.md`](proposals/mcp.md) | The standard the MCP server is built against, and what is deliberately left out of it. Most of this one *is* built; the header says which parts are not. |
 | [`proposals/supervised-run-findings.md`](proposals/supervised-run-findings.md) | Ten tasks driven through Factory end to end with somebody watching: what it got silently wrong, what was fixed, and what is left — with the measurements attached. |
 
 

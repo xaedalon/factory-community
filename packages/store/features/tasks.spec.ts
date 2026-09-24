@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { EventBus } from '@factory/events'
-import type { Task, TaskEdge } from '@factory/core'
+import { REQUESTABLE_ACTIONS, type Task, type TaskEdge } from '@factory/core'
 import {
   MIGRATIONS,
   ProjectRepository,
@@ -1077,6 +1077,77 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         expect(task?.projectId).toBe(home)
         expect(task?.updatedAt).toBe(before)
       })
+    })
+  })
+  Rule('which actions exist to ask for is published too', ({ RuleScenario }) => {
+    const mayNot = (action: string) => () =>
+      expect(REQUESTABLE_ACTIONS as readonly string[]).not.toContain(action)
+
+    RuleScenario("The engine's own moves are not on it", ({ Then, And }) => {
+      Then('a client may not ask for "start"', mayNot('start'))
+      And('a client may not ask for "idle"', mayNot('idle'))
+      And('a client may not ask for "await_approval"', mayNot('await_approval'))
+      And('a client may not ask for "block"', mayNot('block'))
+      And('a client may not ask for "complete"', mayNot('complete'))
+    })
+
+    RuleScenario('The list is exactly the moves somebody may make', ({ Then }) => {
+      Then(
+        'a client may ask for exactly "queue, approve, reject, mark_done, retry, cancel, archive, restore"',
+        () =>
+          expect(REQUESTABLE_ACTIONS).toEqual([
+            'queue',
+            'approve',
+            'reject',
+            'mark_done',
+            'retry',
+            'cancel',
+            'archive',
+            'restore',
+          ]),
+      )
+    })
+  })
+  Rule('how many tasks a run has asked for is counted, never kept', ({ RuleScenario }) => {
+    let made: Task[] = []
+    const createdBy = (runId: string, count: number) => () => {
+      made = []
+      for (let index = 0; index < count; index += 1) {
+        made.push(
+          tasks.create({
+            name: `Asked for ${runId} ${index}`,
+            projectId: home,
+            createdByRunId: runId,
+          }),
+        )
+      }
+    }
+    const asked = (runId: string, count: number) => () =>
+      expect(tasks.countCreatedBy(runId)).toBe(count)
+
+    RuleScenario('A run that has asked for nothing has asked for nothing', ({ Then }) => {
+      Then('"run-1" has asked for 0 tasks', asked('run-1', 0))
+    })
+
+    RuleScenario('Tasks a run asked for are counted', ({ Given, Then }) => {
+      Given('two tasks created by "run-1"', createdBy('run-1', 2))
+      Then('"run-1" has asked for 2 tasks', asked('run-1', 2))
+    })
+
+    RuleScenario('A task somebody else asked for is not counted', ({ Given, And, Then }) => {
+      Given('two tasks created by "run-1"', createdBy('run-1', 2))
+      And('a task created by "run-2"', () => {
+        tasks.create({ name: 'Elsewhere', projectId: home, createdByRunId: 'run-2' })
+      })
+      Then('"run-1" has asked for 2 tasks', asked('run-1', 2))
+    })
+
+    RuleScenario('An archived task still counts', ({ Given, And, Then }) => {
+      Given('two tasks created by "run-1"', createdBy('run-1', 2))
+      And('one of them is archived', () => {
+        tasks.act((made[0] as Task).id, 'archive')
+      })
+      Then('"run-1" has asked for 2 tasks', asked('run-1', 2))
     })
   })
 })

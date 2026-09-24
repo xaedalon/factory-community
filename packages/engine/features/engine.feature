@@ -719,3 +719,42 @@ Feature: Turning a task into runs
       When the engine runs the task
       # Nothing to ignore on somebody's behalf: this is a directory they chose.
       Then no ignore file was written
+
+  Rule: an agent is told where it is in the tree
+
+    Factory puts four names into the environment of every process it starts, so
+    that an MCP server run by that agent knows which run it is inside without
+    being asked to be honest about it. Everything that bounds work starting
+    work rests on them arriving.
+
+    Asserted by running a real command and reading what it printed, because the
+    interesting failure is not "the object had the wrong key" — it is a name
+    that never reached the process at all.
+
+    Scenario: A step can see the run and the task it belongs to
+      Given the task has the workflow "development"
+      And "development" prints what it was told about itself
+      And the task is queued
+      When the engine runs the task
+      Then the output names the run it is part of
+      And the output names the task it is part of
+      And the output says it is at depth 0
+
+  Rule: a run remembers who asked for its task
+
+    Scenario: A task a person created starts a run at the top of the tree
+      Given the task has the workflow "development"
+      And "development" prints "building" and succeeds
+      And the task is queued
+      When the engine runs the task
+      Then the run is at depth 0
+      And the run came from nowhere
+
+    Scenario: A task an agent asked for starts a run one deeper
+      Given a finished run "run-earlier" at depth 0
+      And a task created by "run-earlier"
+      And that task has a workflow that succeeds
+      And the task is queued
+      When the engine runs the task
+      Then the run is at depth 1
+      And the run came from "run-earlier"

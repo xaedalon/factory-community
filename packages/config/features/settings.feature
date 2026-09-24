@@ -137,3 +137,28 @@ Feature: Settings Factory owns
       When the interface scale is set to 2
       Then the profile is still "full-access"
       And the scale is 2
+
+  Rule: how far work may start work is a setting
+
+    Factory can now be driven by an agent, and an agent Factory launched can
+    reach the daemon. The limits on how deep that may go belong here rather
+    than in the code, because the right number depends on what somebody is
+    doing — and belong here rather than in the client that is asking, because a
+    rule only one client enforces is advice.
+
+    Scenario: A fresh installation allows three levels and ten tasks a run
+      Given an installation with the default settings
+      Then work may start work three levels deep
+      And one run may ask for ten tasks
+
+    Scenario: The depth can be turned down to nothing
+      # A legitimate thing to want: only a person starts work here.
+      Given an installation with the default settings
+      When the orchestration depth is set to 0
+      Then work may start work zero levels deep
+
+    Scenario: A depth nobody could have meant is refused
+      Given an installation with the default settings
+      When the orchestration depth is set to 500
+      Then the settings are refused
+      And what is saved still allows three levels

@@ -5,6 +5,10 @@ import {
   PROJECT_TONES,
   defaultWorktreesRoot,
   isExecutionProfile,
+  lexicalCanonical,
+  systemCanonical,
+  withinWorkspace,
+  type Canonicalise,
   type ExecutionProfile,
   type Project,
 } from '@factory/core'
@@ -81,6 +85,47 @@ export class ProjectHasTasksError extends Error {
       `Cannot remove "${project}": ${count} task${count === 1 ? '' : 's'} still in it` +
         (archived > 0 ? ` (${archived} archived)` : '') +
         `. Delete ${count === 1 ? 'it' : 'them'} first.`,
+    )
+  }
+}
+
+/** Which project a directory is in, and how that was decided. */
+export interface ProjectAt {
+  readonly project: Project
+  /**
+   * `directory` — the project's own path.
+   * `ancestor` — somewhere below it.
+   * `worktree` — below where that project's worktrees go.
+   */
+  readonly matchedBy: 'directory' | 'ancestor' | 'worktree'
+  /**
+   * For a worktree match, the directory holding it — which is a task's, and is
+   * how a caller turns "where am I" into "which task am I working on".
+   *
+   * The task itself is not looked up here: this repository writes project rows,
+   * and reaching into tasks from it would be the second place that knows how a
+   * worktree path is built.
+   */
+  readonly taskDirectory?: string
+}
+
+/**
+ * Two projects with an equal claim on one directory.
+ *
+ * Its own type for the reason `ProjectHasTasksError` has one: the route turns
+ * this into a 409 and the names are what the message is for. Picking between
+ * them would queue somebody's work against the wrong repository, and it would
+ * do it silently.
+ */
+export class AmbiguousProjectError extends Error {
+  override readonly name = 'AmbiguousProjectError'
+  constructor(
+    path: string,
+    readonly names: readonly string[],
+  ) {
+    super(
+      `${path} is in more than one project: ${names.join(', ')}. ` +
+        `Say which one you mean.`,
     )
   }
 }
@@ -172,6 +217,76 @@ export class ProjectRepository {
 
   list(): Project[] {
     return this.#db.all<ProjectRow>('SELECT * FROM projects ORDER BY name').map(hydrate)
+  }
+
+  /**
+   * Which project is this directory in?
+   *
+   * Every client so far knew a project's id or its name, because a person had
+   * picked it from a list. An agent standing in a directory knows neither, and
+   * the one question it can answer had nowhere to go — projects were looked up
+   * by id and by name, and nothing ever read the path column.
+   *
+   * Longest match wins, so a project registered inside another resolves to the
+   * inner one, which is what somebody working in it means. Two projects with
+   * the same claim are refused by name rather than picked between: a wrong
+   * answer here queues work against somebody else's repository.
+   *
+   * A project's worktrees count as its territory, and a worktree names the task
+   * whose it is. That is not only a convenience — it is an identity Factory can
+   * check against a path, which matters wherever a caller's account of itself
+   * cannot be trusted.
+   *
+   * `canonical` is a parameter for the reason `withinWorkspace` takes one, and
+   * it defaults to the real thing here because this repository already reads the
+   * filesystem to add a project. It is load-bearing rather than tidy: a macOS
+   * temporary directory is a symlink and so is many a home directory, and
+   * comparing the written strings answers "no project" for a directory that
+   * plainly is one.
+   */
+  at(path: string, canonical: Canonicalise = systemCanonical): ProjectAt | undefined {
+    if (!isAbsolute(path)) {
+      throw new Error(
+        `Cannot say which project is at "${path}": the path has to be absolute. ` +
+          `Whoever asked is the only one that knows what it is relative to.`,
+      )
+    }
+    const here = canonical(path)
+
+    // Both sides are canonical by the time they are compared, so the rule left
+    // for `withinWorkspace` is the one worth borrowing rather than rewriting:
+    // the workspace itself counts, and a sibling whose name merely starts the
+    // same way does not.
+    const claims: { readonly at: ProjectAt; readonly length: number }[] = []
+    for (const project of this.list()) {
+      const root = canonical(project.path)
+      if (withinWorkspace(here, root, lexicalCanonical)) {
+        claims.push({
+          at: { project, matchedBy: here === root ? 'directory' : 'ancestor' },
+          length: root.length,
+        })
+      }
+
+      const worktrees = canonical(project.worktreesRoot)
+      if (withinWorkspace(here, worktrees, lexicalCanonical)) {
+        const directory = here.slice(worktrees.length + 1).split('/')[0]
+        claims.push({
+          at: {
+            project,
+            matchedBy: 'worktree',
+            ...(directory === undefined || directory === '' ? {} : { taskDirectory: directory }),
+          },
+          length: worktrees.length,
+        })
+      }
+    }
+    if (claims.length === 0) return undefined
+
+    const longest = Math.max(...claims.map((claim) => claim.length))
+    const best = claims.filter((claim) => claim.length === longest)
+    const names = [...new Set(best.map((claim) => claim.at.project.name))].sort()
+    if (names.length > 1) throw new AmbiguousProjectError(here, names)
+    return best[0]?.at
   }
 
   /**

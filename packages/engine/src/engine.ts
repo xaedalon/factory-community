@@ -1,5 +1,6 @@
 import {
   denialMessage,
+  depthFor,
   isRunFinished,
   ProcessRegistry,
   runPlan,
@@ -500,6 +501,20 @@ export class Engine {
             // ran, so no authority was granted, and inventing one would be the
             // only false entry in the table.
             profile: plan.profile,
+            // Where this work came from, and how far in. The task records the
+            // run whose agent asked for it; the depth is that run's plus one,
+            // walked rather than stored on the task because a task can be
+            // retried, moved and re-queued and the answer has to be about this
+            // attempt.
+            ...(task.createdByRunId === undefined
+              ? {}
+              : { originRunId: task.createdByRunId }),
+            depth: depthFor(task.createdByRunId, {
+              depthOf: (runId) => this.#runs.get(runId)?.depth,
+              tasksCreatedBy: () => 0,
+              creatorOf: () => undefined,
+              originOf: (runId) => this.#runs.get(runId)?.originRunId,
+            }),
           })
 
     // Keyed by where the step is in the plan rather than by "the step running
@@ -532,7 +547,24 @@ export class Engine {
       }
       result = await this.#execute({
         plan,
-        env: this.#env,
+        // What the agent is told about the work it is doing.
+        //
+        // This is the honest half of "do not trust what a client says about
+        // itself": an MCP server started inside this process reads these and
+        // sends them back, so Factory knows where a request came from without
+        // taking the caller's word for it. A client can leave them out, which
+        // makes it look like a person — the direction that loses authority.
+        //
+        // None of them is credential-shaped, so none is withheld by the
+        // environment filter. `agent-environment.feature` says so, because a
+        // name that quietly disappeared would take the whole model with it.
+        env: {
+          ...this.#env,
+          FACTORY_RUN_ID: run.id,
+          FACTORY_TASK_ID: task.id,
+          FACTORY_PROJECT_ID: task.projectId,
+          FACTORY_ORCHESTRATION_DEPTH: String(run.depth),
+        },
         processes: this.#processes,
         ...(this.#timeoutSeconds === undefined ? {} : { timeoutSeconds: this.#timeoutSeconds }),
         ...(this.#events === undefined ? {} : { events: this.#events }),

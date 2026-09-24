@@ -61,6 +61,49 @@ and a third-party provider gets it without writing anything.
 *Upgrading:* if you added `--allowedTools` to an agent or step as a workaround for the first item
 above, remove it — it is refused now, and no longer needed.
 
+**Factory speaks the Model Context Protocol.** `factory mcp` serves it over stdio, so the coding
+agent you already have can resolve the project you are standing in, list what that project can run,
+create a task, queue it, follow the run and read what it produced. Point a client at it and there
+is nothing else to configure:
+
+```json
+{ "mcpServers": { "factory": { "command": "factory", "args": ["mcp"] } } }
+```
+
+It is a client of the same HTTP API the board and the CLI use, so every guarantee that was already
+there applies without a second copy: the disclaimer gate, the execution profile the project
+resolves to, the workspace boundary, and a task's own list of what it will accept next.
+[`docs/mcp.md`](docs/mcp.md) is the feature; [`docs/proposals/mcp.md`](docs/proposals/mcp.md) is
+what it is built against, including what is deliberately left out.
+
+*Or let your agent set it up:* **`/factory-mcp-install`** in Claude Code, "add Factory to my MCP
+servers" in Copilot. It asks whether you want Factory everywhere on this machine or only in one
+repository — everywhere by default — checks the daemon and its port first, and says what it wrote
+where. `/factory-mcp-uninstall` takes it back out, and removes no Factory data at all.
+
+*What it cannot do:* choose a profile — there is no parameter for one — accept the disclaimer for
+you, or approve anything. `approve` and `reject` are not offered at all, because Factory cannot
+tell your own session from an agent acting unasked inside it, and an approval an agent can give
+itself is not a gate.
+
+*Work that starts work is bounded.* An agent Factory launched could already reach the daemon;
+serving MCP makes it ergonomic, so there are now limits on it, enforced by the daemon rather than
+by the client asking. Every run records where it came from and how deep it is, every agent process
+is told which run and task it is in, and an agent may not act on the task it is running inside or
+approve what its own branch asked for.
+
+```yaml
+# ~/.xaedalon/.factory/settings.yaml — the defaults
+orchestration:
+  maxDepth: 3
+  maxTasksPerRun: 10
+```
+
+*Upgrading:* a migration adds four nullable columns and one with a default of 0. Nothing is deleted
+and nothing existing changes meaning — every run recorded before this was started by a person, and
+depth 0 says so. `POST /api/tasks` and `POST /api/tasks/:id/actions/:action` now accept an optional
+`initiator`, and `GET /api/projects/at?path=` is new: it answers which project a directory is in.
+
 **A task belongs to a project.** `project_id` is required, and removing a project that still has
 tasks in it is refused with the count rather than orphaning them. A task with no project ran
 wherever the daemon happened to be started, wrote its artifacts beside it, could not be queued as a

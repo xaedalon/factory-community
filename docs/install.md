@@ -66,6 +66,11 @@ pointers to that runbook rather than duplicates of it, so a fix to the install p
 everywhere. Read it before you run it — it is a page and a half, and it is the same sequence the
 rest of this document gives by hand.
 
+Three more runbooks travel the same way, each swapping its name into the commands above:
+`factory-mcp-install` points your agent at Factory over MCP so it can drive Factory rather than only
+install it ([`mcp.md`](mcp.md) is what that gets you), `factory-mcp-uninstall` takes that back out,
+and `factory-uninstall` removes Factory itself.
+
 ## Install
 
 ```bash
@@ -169,6 +174,11 @@ That is the software. Your **data is a separate decision**, and Factory will not
 | a repository's `.xaedalon/` | your files. Usually **none** are committed, because Factory ignores the directory it creates: `git ls-files .xaedalon` says which are, if any, and those go with a commit rather than an `rm`. |
 | artifacts | `<repo>/.xaedalon/.factory/tasks/*/artifacts/` — what the agents wrote, and usually the reason to keep a run. |
 | worktrees | only if that project uses them, at the path it stores. `git worktree list`, then `git worktree remove` — never `rm -rf`, which leaves `.git/worktrees/` behind. The branches stay; they are your work. |
+
+If you pointed a coding agent at Factory over MCP, that entry is in *its* configuration rather than
+anywhere Factory owns, and it outlives all of this — `claude mcp remove factory` and
+`copilot mcp remove factory`, or **`/factory-mcp-uninstall`**. Left behind, it points an agent at a
+command that is no longer there.
 
 Or ask your agent: **`/factory-uninstall`** in Claude Code, "uninstall Factory" in Copilot or Codex.
 The runbook is [`../skills/factory-uninstall/SKILL.md`](../skills/factory-uninstall/SKILL.md) — it

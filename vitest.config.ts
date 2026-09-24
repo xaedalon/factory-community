@@ -15,6 +15,7 @@ export default defineConfig({
       '@factory/config': src('config'),
       '@factory/plugin-sdk': src('plugin-sdk'),
       '@factory/runtime': src('runtime'),
+      '@factory/mcp': src('mcp'),
       '@factory/provider-claude': plugin('provider-claude'),
       '@factory/provider-codex': plugin('provider-codex'),
       '@factory/provider-copilot': plugin('provider-copilot'),

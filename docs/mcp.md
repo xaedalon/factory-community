@@ -55,7 +55,7 @@ takes it back out.
 | `factory_task_create` · `factory_task_update` | Make a piece of work, or change its plan |
 | `factory_task_list` · `factory_task_get` | What is in the project, and what one task will accept next |
 | `factory_task_act` | Queue it, cancel it, retry it, archive it, mark it done |
-| `factory_workflow_create` | Write a workflow, or copy one that already exists |
+| `factory_workflow_create` | Write a workflow, or copy one that already exists — with `needs:` to chain it |
 | `factory_run_get` · `factory_run_logs` | What happened, and what it printed |
 | `factory_approval_list` | What is waiting for you |
 

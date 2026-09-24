@@ -32,7 +32,21 @@ export class FakeFactory implements FactoryApi {
     if (reply === undefined) {
       throw { status: 404, message: `Nothing answers ${path}.`, body: {} }
     }
-    if (typeof reply === 'object' && reply !== null && 'status' in reply) throw reply
+    // A stubbed *failure* is `{ status, message }`, which is the shape the api
+    // client throws. `status` alone is not enough to mean one: `WriteOutcome`
+    // carries a `status` of its own — `created`, `updated`, `exists` — so a
+    // stub answering the way the write route really answers was being thrown
+    // instead of returned, and the only way to make a write scenario pass was
+    // to stub a shape the daemon never sends. Which is how a reply reading the
+    // wrong field went unnoticed.
+    if (
+      typeof reply === 'object' &&
+      reply !== null &&
+      'status' in reply &&
+      'message' in reply
+    ) {
+      throw reply
+    }
     return reply as T
   }
 }

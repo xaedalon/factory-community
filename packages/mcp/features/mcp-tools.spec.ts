@@ -648,6 +648,65 @@ describeFeature(feature, ({ Background, Rule }) => {
         expect(written().scope).toBe('project'),
       )
     })
+
+    /**
+     * The write route's answer, which is a `WriteOutcome`.
+     *
+     * The file is at the top level; `ref` is what the *read* route returns.
+     * The stub used to answer in the read route's shape, which is why the
+     * reply reading `written.ref.file` looked right and was always undefined.
+     */
+    const writeRoute = (): void => {
+      factory.answer('/api/workflows?project=project-1', {
+        status: 'created',
+        file: '/repos/factory/.xaedalon/.factory/workflows/design.workflow.yaml',
+        etag: 'abc',
+      })
+    }
+
+    RuleScenario('A workflow can say what it needs when it is written', ({ When, Then }) => {
+      When('the agent writes a workflow "design" that needs "analysis"', async () => {
+        writeRoute()
+        await call('factory_workflow_create', {
+          name: 'design',
+          phases: ['think'],
+          needs: ['analysis'],
+        })
+      })
+      Then('what was written needs "analysis"', () =>
+        expect(written().definition.needs).toEqual(['analysis']),
+      )
+    })
+
+    RuleScenario('What a copy needs beats what the original needed', ({ Given, When, Then }) => {
+      Given('the project has a workflow "development" that needs "analysis"', original)
+      When('the agent copies it as "development-fast" needing "design"', () =>
+        call('factory_workflow_create', {
+          name: 'development-fast',
+          from: 'development',
+          needs: ['design'],
+        }),
+      )
+      Then('what was written needs "design"', () =>
+        expect(written().definition.needs).toEqual(['design']),
+      )
+    })
+
+    RuleScenario('The reply says where the workflow landed', ({ When, Then }) => {
+      When('the agent writes a workflow "design" that needs "analysis"', async () => {
+        writeRoute()
+        await call('factory_workflow_create', {
+          name: 'design',
+          phases: ['think'],
+          needs: ['analysis'],
+        })
+      })
+      Then('the reply names the file it wrote', () =>
+        expect(answer.file).toBe(
+          '/repos/factory/.xaedalon/.factory/workflows/design.workflow.yaml',
+        ),
+      )
+    })
   })
   Rule("approving is a person's, and the surface says so by not offering it", ({
     RuleScenario,

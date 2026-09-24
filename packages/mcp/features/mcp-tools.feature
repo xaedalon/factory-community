@@ -204,6 +204,25 @@ Feature: The tools an agent is given
       When the agent copies it as "development-fast"
       Then it was written into the project's own scope
 
+    Scenario: A workflow can say what it needs when it is written
+      # Without this an agent chaining analysis → design → implement has to
+      # list all of them on every task, in order, and nothing enforces the
+      # order it listed.
+      When the agent writes a workflow "design" that needs "analysis"
+      Then what was written needs "analysis"
+
+    Scenario: What a copy needs beats what the original needed
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent copies it as "development-fast" needing "design"
+      Then what was written needs "design"
+
+    Scenario: The reply says where the workflow landed
+      # It said nothing at all: the write route answers with the file at the
+      # top level and the reply was reading it from `ref`, which is the shape
+      # the *read* route returns.
+      When the agent writes a workflow "design" that needs "analysis"
+      Then the reply names the file it wrote
+
   Rule: approving is a person's, and the surface says so by not offering it
 
     Factory can tell an agent it launched from a person's own session: the

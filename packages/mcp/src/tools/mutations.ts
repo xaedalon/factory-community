@@ -192,6 +192,14 @@ export const mutationTools: readonly McpTool[] = [
         .array(z.string())
         .optional()
         .describe('Phase names, in order. Required unless `from` supplies them.'),
+      needs: z
+        .array(z.string())
+        .optional()
+        .describe(
+          'Workflows that must have finished on the same task before this one runs. This is how ' +
+            'a pipeline is chained — without it every task has to list all of them in order, ' +
+            'and nothing stops them running in the wrong one.',
+        ),
       from: z.string().optional().describe('An existing workflow to copy.'),
       project: PROJECT,
       scope: z
@@ -237,8 +245,16 @@ export const mutationTools: readonly McpTool[] = [
         name: input.name,
         phases,
         ...(input.description === undefined ? {} : { description: input.description }),
+        // After `base`, so an agent that copies a workflow *and* says what the
+        // copy needs gets what it asked for rather than what the original had.
+        ...(input.needs === undefined ? {} : { needs: input.needs }),
       }
-      const written = await post<{ ref?: { file?: string }; problems?: unknown[] }>(
+      // `WriteOutcome`, which carries the file at the top level. It was read as
+      // `written.ref.file` — the shape the *read* route returns — so the path
+      // was always undefined and the reply never said where the workflow
+      // landed. Nothing caught it: no scenario asserted on the field, and the
+      // stub answered in the read route's shape.
+      const written = await post<{ status?: string; file?: string; problems?: unknown[] }>(
         context,
         `/api/workflows${inProject}`,
         { definition, scope: input.scope ?? 'project' },
@@ -246,7 +262,7 @@ export const mutationTools: readonly McpTool[] = [
       return {
         workflow: input.name,
         project: { id: found.project.id, name: found.project.name },
-        ...(written.ref?.file === undefined ? {} : { file: written.ref.file }),
+        ...(written.file === undefined ? {} : { file: written.file }),
         ...(input.from === undefined ? {} : { copiedFrom: input.from }),
         next: `Name it in a task's workflows to run it.`,
       }

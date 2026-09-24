@@ -173,7 +173,10 @@ export async function assessReliability(input: AssessInput): Promise<AssessOutco
       coverage: result.coverage,
       delta: result.delta,
       summary: summaries.join(' ') || describe(result.score, result.delta),
-      dimensions,
+      // What the score was computed from, not what went in: the drivers moved
+      // the dimensions they name, and a card showing the un-moved ones is a
+      // breakdown that cannot add up to the number above it.
+      dimensions: result.dimensions,
       caps: result.caps,
       explanation: result.explanation,
       ...(input.facts?.runId === undefined ? {} : { consideredRunId: input.facts.runId }),

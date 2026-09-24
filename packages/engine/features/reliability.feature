@@ -106,6 +106,16 @@ Feature: Judging a task after something happened to it
       When the task is assessed again with a regression found
       Then the score is lower than it was
 
+    Scenario: The assessment records the dimensions the score came from
+      # Reported from a real task: the card read "implementation 60" beside a
+      # score of 66.4, which was computed from 48 — the driver's cost had moved
+      # the dimension, and what was written down was the value from before it
+      # moved. The breakdown could not add up to the number above it.
+      Given a task assessed once
+      When the task is assessed again with a regression found
+      Then the recorded dimensions carry the finding's cost
+      And the breakdown adds up to the raw score
+
     Scenario: History keeps both
       Given a task assessed once
       When the task is assessed again with a regression found

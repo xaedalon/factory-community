@@ -157,6 +157,28 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
       })
     })
 
+    RuleScenario('The dimensions it reports are the ones it scored', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('every dimension scores 96', allAt(96))
+      And('an open "testing" driver of "medium" severity costing 6', () => {
+        drivers = [driver({ severity: 'medium', type: 'testing', scoreImpact: -6 })]
+      })
+      When('the score is calculated', calculate)
+      Then("the reported dimensions carry the finding's cost", () => {
+        const named = drivers[0]?.dimension as keyof typeof result.dimensions
+        expect(result.dimensions[named]).toBe(90)
+      })
+      And('each contribution line agrees with the dimension it names', () => {
+        for (const line of result.explanation.contributions) {
+          expect(line.score).toBe(result.dimensions[line.dimension])
+        }
+      })
+    })
+
     RuleScenario('A dimension score outside the range is brought back into it', ({
       Given,
       When,

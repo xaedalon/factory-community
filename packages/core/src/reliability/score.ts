@@ -296,6 +296,16 @@ export interface ScoreInput {
 export interface ScoreResult {
   readonly score: number
   readonly rawScore: number
+  /**
+   * The dimensions this score was actually computed from.
+   *
+   * The ones handed in, plus every active driver's impact on the dimension it
+   * names. Returned rather than left inside, because the caller records what it
+   * shows a person — and recording the *pre-impact* map meant a task read
+   * "implementation 60" beside a score computed from 48, with a breakdown that
+   * could not add up to the number above it.
+   */
+  readonly dimensions: DimensionScores
   readonly coverage: number
   readonly delta: number
   readonly caps: readonly ReliabilityCap[]
@@ -326,6 +336,7 @@ export function score(input: ScoreInput): ScoreResult {
   return {
     score: effective,
     rawScore: raw,
+    dimensions: adjusted,
     coverage: measured.percent,
     // Rounded again after the subtraction, not only before it. Two scores each
     // rounded to one decimal, subtracted, is not a number rounded to one

@@ -357,6 +357,33 @@ describeFeature(feature, ({ Rule, BeforeEachScenario, AfterEachScenario }) => {
       )
     })
 
+    RuleScenario('The assessment records the dimensions the score came from', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a task assessed once', assessedOnce)
+      When('the task is assessed again with a regression found', regressionFound)
+      Then("the recorded dimensions carry the finding's cost", () => {
+        const newest = reliability.newest(task.id) as ReliabilityAssessment
+        const drivers = reliability.drivers(task.id)
+        const found = drivers.find((d) => d.status === 'open')
+        expect(found).toBeDefined()
+        // The dimension the finding names reads lower than the baseline it
+        // would have had on evidence alone.
+        expect(newest.dimensions[(found as { dimension: 'design' }).dimension]).toBeLessThan(
+          policy.baseline,
+        )
+      })
+      And('the breakdown adds up to the raw score', () => {
+        const newest = reliability.newest(task.id) as ReliabilityAssessment
+        for (const line of newest.explanation.contributions) {
+          expect(line.score).toBe(newest.dimensions[line.dimension])
+        }
+      })
+    })
+
     RuleScenario('History keeps both', ({ Given, When, Then }) => {
       Given('a task assessed once', assessedOnce)
       When('the task is assessed again with a regression found', regressionFound)

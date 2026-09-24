@@ -58,6 +58,19 @@ Feature: Turning evidence into a number that can be explained
       And each line carries the dimension's score and its weight
       And the contributions sum to the raw score
 
+    Scenario: The dimensions it reports are the ones it scored
+      # A driver moves the dimension it names, and the contribution lines show
+      # the moved value — but the dimension map handed back was the one *before*
+      # the drivers were applied. So a task read implementation 60 beside a
+      # score computed from 48, and the breakdown on the card could not add up
+      # to the number above it. Two accounts of one thing, which is the whole
+      # failure this subsystem exists to end.
+      Given every dimension scores 96
+      And an open "testing" driver of "medium" severity costing 6
+      When the score is calculated
+      Then the reported dimensions carry the finding's cost
+      And each contribution line agrees with the dimension it names
+
     Scenario: A dimension score outside the range is brought back into it
       # An evaluator that returns 150 has tried to set the score. It gets 100.
       Given every dimension scores 100 except "design" which scores 150

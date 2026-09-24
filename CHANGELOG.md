@@ -40,6 +40,12 @@ and a newer board is the ordinary way to be in that position. The board and the 
 a non-JSON success outright rather than handing their callers nothing — naming the request and
 saying the daemon may be older than they are.
 
+**A task's dimension breakdown adds up to its score.** A finding moves the dimension it names, and
+the contribution lines showed the moved value — but the dimension map recorded beside them was the
+one from *before* the findings were applied. So a task read `implementation 60` next to a score
+computed from 48, and the breakdown could not explain the number above it. Both now come from the
+same place.
+
 **Clearing a field on the board now actually clears it.** Emptying a list — an agent's `args`, a
 phase's `variables`, a workflow's `needs` — or clearing a field back to its default looked like it
 saved and changed nothing: the writer does not emit an empty list, and the delete beside it was

@@ -1552,4 +1552,200 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('the output mentions "factory mcp"', () => expect(output).toContain('factory mcp'))
     })
   })
+
+  Rule('how much to trust a task, from a terminal', ({ RuleScenario }) => {
+    const TASK_ID = 'abc123de-0000-4000-8000-000000000000'
+
+    /**
+     * A daemon that knows one task and whatever this scenario says about it.
+     *
+     * The short id has to be expanded first, so every one of these answers the
+     * task listing too — which is also what makes the "no such task" scenario
+     * mean something rather than failing on the wrong request.
+     */
+    const answering = (routes: Record<string, unknown>) => (): void => {
+      asked = []
+      daemon = fakeDaemon((path) => {
+        for (const [suffix, value] of Object.entries(routes)) {
+          if (path.includes(suffix)) return value
+        }
+        if (path.startsWith('/api/tasks?')) {
+          return { items: [{ id: TASK_ID, name: 'Add due dates' }] }
+        }
+        return { items: [] }
+      })
+    }
+
+    const summary = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+      state: 'assessed',
+      score: 88,
+      rawScore: 88,
+      coverage: 70,
+      delta: -3,
+      dimensions: { understanding: 90, regressionSafety: 84 },
+      caps: [],
+      attention: { agent: 1, developer: 0, either: 0, external: 0, potential: {} },
+      ...over,
+    })
+    const withSummary = (over: Record<string, unknown> = {}) =>
+      answering({ '/reliability': { reliability: summary(over) } })
+
+    const says = (fragment: string) => (): void => expect(output).toContain(fragment)
+
+    RuleScenario('A task nobody has judged says so, and how to fix that', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a daemon that says the task is unassessed', () =>
+        withSummary({
+          state: 'unassessed',
+          score: undefined,
+          attention: { agent: 0, developer: 0, either: 0, external: 0, potential: {} },
+        })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says it is not assessed', says('not assessed'))
+      And('the output names the command that would assess it', says('reliability abc123 assess'))
+    })
+
+    RuleScenario('A judged task shows the score and the coverage together', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a daemon that says the task scores 88', () => withSummary()())
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says 88', says('88'))
+      And('the output says the coverage', says('70%'))
+    })
+
+    RuleScenario('A fall is shown with an arrow, not with colour alone', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a daemon that says the task scores 88', () => withSummary()())
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      // Colour is stripped by NO_COLOR in this suite, which is the point: the
+      // direction has to survive without it.
+      Then('the output shows a downward movement', says('↓ -3'))
+    })
+
+    RuleScenario('A cap is explained where it is applied', ({ Given, When, Then }) => {
+      Given('a daemon that says the task is capped', () =>
+        withSummary({
+          score: 70,
+          rawScore: 96,
+          caps: [{ type: 'criticalOpenDriver', value: 70, reason: 'A critical risk is still open.' }],
+        })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('the output says what capped it', says('A critical risk is still open.'))
+    })
+
+    RuleScenario('A stale assessment says so', ({ Given, When, Then }) => {
+      Given('a daemon that says the assessment is stale', () =>
+        withSummary({ state: 'stale', staleReason: 'One run has finished since this was assessed.' })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('the output says it is stale', says('Stale'))
+    })
+
+    RuleScenario('The drivers are listed with their owner', ({ Given, When, Then, And }) => {
+      Given('a daemon with one driver on the task', () =>
+        answering({
+          '/reliability/drivers': {
+            items: [
+              {
+                id: 'driver-1',
+                title: 'checkout regression',
+                description: '',
+                type: 'regression',
+                severity: 'high',
+                status: 'open',
+                owner: 'agent',
+                dimension: 'regressionSafety',
+                scoreImpact: -3,
+              },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 drivers"', () => invoke('reliability abc123 drivers'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output names the driver', says('checkout regression'))
+      And('the output says who should resolve it', says('agent'))
+    })
+
+    RuleScenario('A task with nothing outstanding says so', ({ Given, When, Then }) => {
+      Given('a daemon with no drivers on the task', () =>
+        answering({ '/reliability/drivers': { items: [] } })(),
+      )
+      When('I run "reliability abc123 drivers"', () => invoke('reliability abc123 drivers'))
+      Then('the output says nothing is holding it back', says('Nothing is holding this task back'))
+    })
+
+    RuleScenario('The next actions are estimates and say so', ({ Given, When, Then, And }) => {
+      Given('a daemon offering one next action', () =>
+        answering({
+          '/reliability/next-actions': {
+            currentScore: 88,
+            actions: [
+              {
+                driverId: 'driver-1',
+                title: 'checkout regression',
+                owner: 'agent',
+                severity: 'high',
+                impact: 3,
+                actionType: 'agent_investigation',
+                label: 'Investigate: checkout regression',
+              },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 next"', () => invoke('reliability abc123 next'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says they are estimates', says('Estimates'))
+    })
+
+    RuleScenario('History reads oldest first', ({ Given, When, Then, And }) => {
+      Given('a daemon with two assessments on the task', () =>
+        answering({
+          '/reliability/history': {
+            items: [
+              { sequence: 1, workflow: 'implement', score: 82, coverage: 50, delta: 82, summary: 'first', createdAt: '' },
+              { sequence: 2, workflow: 'verify', score: 88, coverage: 90, delta: 6, summary: 'second', createdAt: '' },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 history"', () => invoke('reliability abc123 history'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output reads 82 before 88', () =>
+        expect(output.indexOf('82')).toBeLessThan(output.indexOf('88')),
+      )
+    })
+
+    RuleScenario('A task nobody can find is refused clearly', ({ Given, When, Then }) => {
+      Given('a daemon with no such task', () => {
+        asked = []
+        daemon = fakeDaemon(() => ({ items: [] }))
+      })
+      When('I run "reliability nope"', () => invoke('reliability nope'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+    })
+
+    RuleScenario('There is no way to set a score', ({ When, Then }) => {
+      When('I run "reliability abc123 set 100"', () => invoke('reliability abc123 set 100'))
+      // Exit code 2, which is what this CLI uses for "that is not a command" —
+      // and the verb does not exist rather than being refused.
+      Then('it is a usage error', () => expect(result.exitCode).toBe(2))
+    })
+  })
 })

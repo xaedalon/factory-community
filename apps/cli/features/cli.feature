@@ -620,3 +620,76 @@ Feature: The factory command
     Scenario: It is in the help
       When I run "--help"
       Then the output mentions "factory mcp"
+
+  Rule: how much to trust a task, from a terminal
+
+    The same numbers the board draws, through the same API. Nothing here decides
+    anything — the score, the drivers and the next actions all arrive judged.
+
+    There is no `factory reliability set`. The score is not something a person
+    types either.
+
+    Scenario: A task nobody has judged says so, and how to fix that
+      Given a daemon that says the task is unassessed
+      When I run "reliability abc123"
+      Then it succeeds
+      And the output says it is not assessed
+      And the output names the command that would assess it
+
+    Scenario: A judged task shows the score and the coverage together
+      # Either number alone is misleading: a 93 with 20% coverage is not the
+      # same claim as a 93 with 96%.
+      Given a daemon that says the task scores 88
+      When I run "reliability abc123"
+      Then it succeeds
+      And the output says 88
+      And the output says the coverage
+
+    Scenario: A fall is shown with an arrow, not with colour alone
+      Given a daemon that says the task scores 88
+      When I run "reliability abc123"
+      Then the output shows a downward movement
+
+    Scenario: A cap is explained where it is applied
+      Given a daemon that says the task is capped
+      When I run "reliability abc123"
+      Then the output says what capped it
+
+    Scenario: A stale assessment says so
+      Given a daemon that says the assessment is stale
+      When I run "reliability abc123"
+      Then the output says it is stale
+
+    Scenario: The drivers are listed with their owner
+      Given a daemon with one driver on the task
+      When I run "reliability abc123 drivers"
+      Then it succeeds
+      And the output names the driver
+      And the output says who should resolve it
+
+    Scenario: A task with nothing outstanding says so
+      Given a daemon with no drivers on the task
+      When I run "reliability abc123 drivers"
+      Then the output says nothing is holding it back
+
+    Scenario: The next actions are estimates and say so
+      Given a daemon offering one next action
+      When I run "reliability abc123 next"
+      Then it succeeds
+      And the output says they are estimates
+
+    Scenario: History reads oldest first
+      Given a daemon with two assessments on the task
+      When I run "reliability abc123 history"
+      Then it succeeds
+      And the output reads 82 before 88
+
+    Scenario: A task nobody can find is refused clearly
+      Given a daemon with no such task
+      When I run "reliability nope"
+      Then it fails
+
+    Scenario: There is no way to set a score
+      When I run "reliability abc123 set 100"
+      Then it is a usage error
+

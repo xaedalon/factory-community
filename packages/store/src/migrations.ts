@@ -623,4 +623,123 @@ export const MIGRATIONS: readonly Migration[] = [
       db.exec('ALTER TABLE projects ADD COLUMN check_command TEXT')
     },
   },
+  {
+    version: 21,
+    describe: 'a task carries a judgement of how much to trust it',
+    up: (db) => {
+      // Three tables and two columns, and the shapes are argued rather than
+      // assumed.
+      //
+      // **Assessments are append-only.** A judgement is never edited because
+      // interpretation changed; a correction is a later assessment that
+      // supersedes. `sequence` rather than a timestamp is the ordering, because
+      // two assessments written in the same millisecond are possible and a
+      // history that cannot be ordered is not evidence of anything.
+      //
+      // **There is no `current` row.** The current state is the newest
+      // assessment plus the drivers that are still active — two indexed
+      // queries. A stored copy would be a second source of truth for something
+      // the history already says, and the two disagree the first time an
+      // assessment is replayed. `progress` on a task is derived for exactly
+      // this reason and this follows it.
+      //
+      // `considered_run_id` is what makes *staleness* derivable too: a run for
+      // this task that finished after the one an assessment took into account
+      // means the judgement is behind the work, and nothing had to be written
+      // down to know it.
+      //
+      // JSON in TEXT for `dimensions`, `caps` and `explanation`: a small set,
+      // read whole with its owner, never queried across owners — which is the
+      // line `projects.granted_directories` drew and `task_dependencies`
+      // declined to cross. Every read goes through a parser that degrades to
+      // empty rather than throwing, so a hand-edited row cannot make a task
+      // unloadable.
+      db.exec(`
+        CREATE TABLE reliability_assessments (
+          id                    TEXT PRIMARY KEY,
+          task_id               TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          sequence              INTEGER NOT NULL,
+          trigger               TEXT NOT NULL,
+          workflow              TEXT,
+          run_id                TEXT,
+          score                 REAL NOT NULL,
+          raw_score             REAL NOT NULL,
+          coverage              INTEGER NOT NULL,
+          delta                 REAL NOT NULL,
+          summary               TEXT NOT NULL DEFAULT '',
+          dimensions            TEXT NOT NULL,
+          caps                  TEXT NOT NULL,
+          explanation           TEXT NOT NULL,
+          considered_run_id     TEXT,
+          scoring_model_version TEXT NOT NULL,
+          created_at            TEXT NOT NULL,
+          UNIQUE (task_id, sequence)
+        );
+        CREATE INDEX reliability_assessments_by_task
+          ON reliability_assessments(task_id, sequence DESC);
+
+        CREATE TABLE reliability_drivers (
+          id                      TEXT PRIMARY KEY,
+          task_id                 TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          title                   TEXT NOT NULL,
+          description             TEXT NOT NULL DEFAULT '',
+          type                    TEXT NOT NULL,
+          severity                TEXT NOT NULL,
+          status                  TEXT NOT NULL,
+          owner                   TEXT NOT NULL,
+          dimension               TEXT NOT NULL,
+          score_impact            REAL NOT NULL DEFAULT 0,
+          recommended_action      TEXT,
+          evidence_refs           TEXT NOT NULL DEFAULT '[]',
+          introduced_run_id       TEXT,
+          introduced_workflow     TEXT,
+          introduced_assessment_id TEXT,
+          supersedes              TEXT,
+          resolved_at             TEXT,
+          accepted_at             TEXT,
+          accepted_by             TEXT,
+          acceptance_reason       TEXT,
+          created_at              TEXT NOT NULL,
+          updated_at              TEXT NOT NULL
+        );
+        -- The board's question is "what is still open on this task", and the
+        -- status is half of it.
+        CREATE INDEX reliability_drivers_by_task
+          ON reliability_drivers(task_id, status);
+
+        CREATE TABLE reliability_observations (
+          id            TEXT PRIMARY KEY,
+          task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          assessment_id TEXT,
+          kind          TEXT NOT NULL,
+          status        TEXT NOT NULL,
+          summary       TEXT NOT NULL DEFAULT '',
+          dimension     TEXT,
+          source        TEXT,
+          run_id        TEXT,
+          step_id       TEXT,
+          reference     TEXT,
+          satisfies     TEXT,
+          created_at    TEXT NOT NULL
+        );
+        CREATE INDEX reliability_observations_by_task
+          ON reliability_observations(task_id, id);
+      `)
+
+      // Which model judges this project's work, and whether one does at all.
+      //
+      // Nullable means "nobody has said" and falls back to the installation's
+      // choice, the way `projects.profile` does — absent is deliberately not the
+      // same as choosing the default. A role (`strong`) rather than a model id,
+      // because ids are retired and a role is not.
+      //
+      // Enabled defaults to 1 because the deterministic evaluator costs nothing
+      // and a feature nobody switches on is a feature nobody has. What the
+      // column actually gates is the *agent* evaluator, which costs tokens.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN reliability_model TEXT;
+        ALTER TABLE projects ADD COLUMN reliability_enabled INTEGER NOT NULL DEFAULT 1;
+      `)
+    },
+  },
 ]

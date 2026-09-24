@@ -10,6 +10,7 @@ What you might want, in the order most people want them.
 | [`plugins.md`](plugins.md) | Adding a capability — a step kind, a provider, a button on a task, a doctor rule. |
 | [`task-dependencies.md`](task-dependencies.md) | One task waiting for another, marking one done by hand, and the two whole-project buttons. |
 | [`mcp.md`](mcp.md) | Driving Factory from the coding agent you already have, and what it may not do. |
+| [`reliability/`](reliability/) | How much to trust a task, what is still uncertain, and who should deal with it. |
 | [`security/`](security/) | What an agent may reach, and what it may not. |
 
 ## Security

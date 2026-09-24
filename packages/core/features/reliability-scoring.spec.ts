@@ -386,6 +386,34 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
       When('the score is calculated', calculate)
       Then('no causes are given', () => expect(result.explanation.causes).toEqual([]))
     })
+
+    RuleScenario('A fall is a negative delta', ({ Given, When, Then }) => {
+      Given('a task assessed at 97 with 68% coverage', givenAssessedAt97)
+      When(
+        'validation runs, satisfies its expected evidence, and finds a regression',
+        validationFindsRegression,
+      )
+      Then('the delta is negative', () => expect(result.delta).toBeLessThan(0))
+    })
+
+    RuleScenario('A delta is a number a person can read', ({ Given, When, Then }) => {
+      // Reached through the dimensions rather than set directly, because the
+      // delta is the difference of two *rounded* scores and that is where the
+      // remainder comes from. Every dimension at 89.8 scores 89.8; at 95, 95.
+      Given('a task assessed at 89.8', () => {
+        // Everything observed, so no ceiling is in play: the two scores have to
+        // be free to be 89.8 and 95, or there is no remainder to expose.
+        observations = policy.expectedEvidence.map((expected) => satisfying(expected.key))
+        dimensions = flat(89.8)
+        calculate()
+        previous = { score: result.score, drivers: [], caps: [] }
+      })
+      When('it is assessed again at 95', () => {
+        dimensions = flat(95)
+        calculate()
+      })
+      Then('the delta reads as 5.2', () => expect(result.delta).toBe(5.2))
+    })
   })
 
   Rule('one hundred is rare', ({ RuleScenario }) => {

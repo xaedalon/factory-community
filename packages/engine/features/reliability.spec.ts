@@ -17,6 +17,7 @@ import {
   type ResolvedPlan,
   type RunFacts,
   type Task,
+  type WorkflowReliability,
 } from '@factory/core'
 import {
   MIGRATIONS,
@@ -97,7 +98,7 @@ describeFeature(feature, ({ Rule, BeforeEachScenario, AfterEachScenario }) => {
     ],
   })
 
-  const givePlan = (command: string): void => {
+  const givePlan = (command: string, reliability?: WorkflowReliability): void => {
     const plan: ResolvedPlan = {
       workflow: 'build',
       profile: 'default',
@@ -107,6 +108,7 @@ describeFeature(feature, ({ Rule, BeforeEachScenario, AfterEachScenario }) => {
       provides: [],
       clears: [],
       phases: [shellPhase(command)],
+      ...(reliability === undefined ? {} : { reliability }),
     }
     plans.set('build', { plan, problems: [] })
   }
@@ -221,6 +223,62 @@ describeFeature(feature, ({ Rule, BeforeEachScenario, AfterEachScenario }) => {
       Then('the assessment names the run', () => {
         const run = runs.forTask(task.id)[0]
         expect(reliability.newest(task.id)?.runId).toBe(run?.id)
+      })
+    })
+  })
+
+  Rule('what a workflow declares reaches the judgement it refines', ({ RuleScenario }) => {
+    const coverage = (): number | undefined => reliability.newest(task.id)?.coverage
+
+    RuleScenario('A workflow that declares its evidence earns coverage for it', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given(
+        'a workflow that succeeds declaring it collects "technical_approach" and "compatibility_considered"',
+        () => {
+          givePlan('echo building', {
+            contributes: ['design'],
+            expected_evidence: ['technical_approach', 'compatibility_considered'],
+          })
+          build()
+        },
+      )
+      When('the engine works on the task', runIt)
+      Then('the coverage is above zero', () => {
+        expect(coverage()).toBeGreaterThan(0)
+      })
+    })
+
+    RuleScenario('A workflow that declares nothing earns no coverage', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a workflow that succeeds', succeeds)
+      When('the engine works on the task', runIt)
+      Then('the coverage is zero', () => {
+        expect(coverage()).toBe(0)
+      })
+    })
+
+    RuleScenario('A workflow that says not to judge it is not judged', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a workflow that succeeds and asks not to be judged', () => {
+        givePlan('echo building', {
+          contributes: [],
+          expected_evidence: [],
+          evaluate_after_run: false,
+        })
+        build()
+      })
+      When('the engine works on the task', runIt)
+      Then('the task has not been assessed', () => {
+        expect(reliability.newest(task.id)).toBeUndefined()
       })
     })
   })

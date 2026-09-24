@@ -196,6 +196,22 @@ Feature: Turning evidence into a number that can be explained
       When the score is calculated
       Then no causes are given
 
+    Scenario: A fall is a negative delta
+      # The board writes `↓ −2` from this number's sign. Clamping the delta to
+      # 0–100 the way a score is clamped would make every fall read as no
+      # movement at all — the one thing the graph exists to show.
+      Given a task assessed at 97 with 68% coverage
+      When validation runs, satisfies its expected evidence, and finds a regression
+      Then the delta is negative
+
+    Scenario: A delta is a number a person can read
+      # Two scores rounded to one decimal, subtracted, is not a score rounded
+      # to one decimal: 95 − 89.8 is 5.200000000000003 in binary floating
+      # point, and the CLI printed exactly that beside a tidy 95.
+      Given a task assessed at 89.8
+      When it is assessed again at 95
+      Then the delta reads as 5.2
+
   Rule: one hundred is rare
 
     Do not normalise a successful task toward 100. A completed task usually

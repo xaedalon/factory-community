@@ -256,6 +256,7 @@ export async function createService(
     assess: async ({ taskId, facts }) => {
       const task = tasks.get(taskId)
       if (task === undefined) return []
+      const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
       const evaluators = runtime.host
         .list<ReliabilityEvaluatorCapability>(RELIABILITY_EVALUATOR_KIND)
         .map((entry) => entry.capability)
@@ -266,13 +267,21 @@ export async function createService(
         evaluators,
         policy: DEFAULT_RELIABILITY_POLICY,
         trigger: 'run',
-        facts,
+        // The project's own check command, added here because the engine has a
+        // run and a plan and no idea which project they belong to. A step
+        // running exactly this command and exiting zero *is* the project's
+        // checks passing — the one expectation Factory can satisfy without
+        // being told. It was declared on `RunFacts` and never supplied, so the
+        // credit existed only where a test passed it in by hand.
+        facts: {
+          ...facts,
+          ...(project?.check === undefined ? {} : { checkCommand: project.check }),
+        },
         workflows: workflowNamesFor(task.projectId),
         // Absent unless this project chose a model and a CLI is installed to
         // run it. That is the whole of the cost control: the free evaluator
         // always runs, and the one that spends money runs when somebody said so.
         ...(() => {
-          const project = projects.get(task.projectId ?? '')
           const agent = agentFor({
             runtime,
             project,

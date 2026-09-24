@@ -33,8 +33,17 @@ export function clampScore(value: number): number {
 
 /** Rounded the way every score here is rounded, so two paths cannot disagree. */
 export function roundScore(value: number): number {
-  return Math.round(clampScore(value) * 10) / 10
+  return round1(clampScore(value))
 }
+
+/**
+ * One decimal place, without the clamp.
+ *
+ * A delta is signed and can exceed 100 in either direction, so it cannot go
+ * through `roundScore` — but it is read by the same people and has to be as
+ * tidy.
+ */
+export const round1 = (value: number): number => Math.round(value * 10) / 10
 
 /**
  * The weighted average, and the line-by-line sum behind it.
@@ -318,7 +327,11 @@ export function score(input: ScoreInput): ScoreResult {
     score: effective,
     rawScore: raw,
     coverage: measured.percent,
-    delta: roundScore(effective) - roundScore(input.previous?.score ?? 0),
+    // Rounded again after the subtraction, not only before it. Two scores each
+    // rounded to one decimal, subtracted, is not a number rounded to one
+    // decimal: 95 − 89.8 is 5.200000000000003, and the CLI printed exactly that
+    // beside a tidy 95.
+    delta: round1(roundScore(effective) - roundScore(input.previous?.score ?? 0)),
     caps,
     missingEvidence: measured.missing,
     explanation: {

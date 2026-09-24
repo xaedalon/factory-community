@@ -1001,6 +1001,11 @@ export class Engine {
     result: RunResult,
   ): Promise<readonly Problem[]> {
     if (this.#assessor === undefined) return []
+    // The one workflow-level switch: `evaluate_after_run: false` for the
+    // handful that change nothing worth judging — a worktree being created, an
+    // environment torn down. Everything else is judged whether it declared
+    // anything or not.
+    if (plan.reliability?.evaluate_after_run === false) return []
     try {
       const ran = new Map(result.steps.map((step) => [stepKey(step.phase, step.index), step]))
       const steps = plan.phases.flatMap((phase) =>
@@ -1034,7 +1039,23 @@ export class Engine {
         steps,
         denials: result.denials,
         artifacts,
-        ...(plan.reliability === undefined ? {} : { declaration: plan.reliability }),
+        // Translated, not handed through. The block is YAML and is spelled the
+        // way YAML is spelled; `ReliabilityDeclaration` is TypeScript and is
+        // spelled the way TypeScript is. Both shapes are all-optional, so
+        // passing one as the other typechecks and silently delivers `undefined`
+        // for every field whose name differs — which is exactly what happened,
+        // and a declared workflow earned the coverage of an undeclared one.
+        ...(plan.reliability === undefined
+          ? {}
+          : {
+              declaration: {
+                contributes: plan.reliability.contributes,
+                expectedEvidence: plan.reliability.expected_evidence,
+                ...(plan.reliability.evaluate_after_run === undefined
+                  ? {}
+                  : { evaluateAfterRun: plan.reliability.evaluate_after_run }),
+              },
+            }),
       }
       return await this.#assessor({ taskId, facts })
     } catch (error) {

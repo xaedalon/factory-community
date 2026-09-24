@@ -1305,6 +1305,104 @@ because the *tool call* had already written the command to the same stream one
 line earlier. Both were fixed by asserting on the thing itself: an ordinary run
 produces no refusals, and the refusal's own line reads `refused — <command>`.
 
+## After 0.1.0 — how much to trust a task, and what is still uncertain
+
+Factory could say a task was `done`. It could not say how much that was worth.
+The run record held the artifacts, the exit codes, the refused commands and the
+gate results, and all of it was discarded the moment the task transitioned.
+
+Reliability turns that record into a standing judgement: a score, the coverage
+behind it, the findings holding it down, and who should deal with each.
+
+| | |
+|---|---|
+| **Reliability** | Given the evidence available, how trustworthy does the solution appear? |
+| **Evidence coverage** | How much of the evidence a sufficiently verified solution would have has actually been collected? |
+
+Never one without the other. A 93 with 41% coverage is "nothing has gone wrong
+yet and we have barely looked"; a 93 with 96% is "we looked hard and it is
+good". Showing only the first is how a confidence number becomes flattery.
+
+**The score can go down, and that is the point.** Through the five-stage
+pipeline, measured through the real engine:
+
+```text
+analysis 68.8 → design 75.8 → implement 82.8 → validate 89.8 → verify 95.0
+coverage  25%          45%             70%            90%          100%
+```
+
+A validation that discovers a regression has *learned something*. A model that
+could only rise would hide the most valuable thing the subsystem produces.
+
+**No agent ever sets the score.** An evaluator returns dimensions and findings,
+and there is no field it could return a score in. Everything it says crosses
+`normalize()` once — out-of-range clamped, unknown vocabulary dropped, driver
+impact bounded, every correction recorded as a warning — and the arithmetic is
+Factory's. There is no route, command or MCP tool that sets a score, not even a
+refusing one, and a scenario asserts the tool does not exist.
+
+**An agent may resolve a critical finding. Only a person may accept one.**
+Resolving is a claim about the world that the next assessment will check;
+accepting is a decision to ship with it. The same separation `approve` already
+had, for the same reason: an acceptance an agent can grant itself is not a gate.
+
+**Every run is judged**, including from workflows written this morning that told
+Factory nothing. Any workflow can change the project, so judgement follows what
+a run *did* rather than whether its workflow opted in. The `reliability:` block
+refines — it attributes findings and earns coverage — and its absence never
+means invisible. **A judgement that cannot be made never fails the run**: that
+is a warning and a retry offer, because turning "the evaluator crashed" into
+"your work failed" is how a feature gets switched off.
+
+**Which model reads the work is the project's choice.** The deterministic
+evaluator is free and always runs; the agent evaluator costs tokens on every run
+that produced something, and a weekend project and a payments service do not
+want the same model. Two columns rather than a nullable one, because "nobody has
+said" and "switched off" are different positions and only one of them starts
+working the moment a model is named.
+
+**Nothing is stored that can be derived.** There is no `current` projection —
+it is the newest assessment row plus the open drivers, two indexed queries — and
+staleness is derived too: an assessment records the newest run it considered, and
+a later finished run makes it stale with no write. A stored copy would be the
+second source of truth this codebase keeps paying for.
+
+The five lifecycle workflows ship as an importable bundle rather than as
+built-ins, with one click on the project page: a pipeline that runs `npm test`
+has no business resolving for a Rust repository, and a bundle reachable only by
+typing a path inside `node_modules` is one nobody uses.
+
+**What the mutations taught this time.** Three lessons, each a scenario that
+could not tell two things apart:
+
+- **A field declared and inert.** Drivers carried a `scoreImpact` that produced
+  ceilings but never moved the number — every scenario passed because the caps
+  did the visible work. Making it move the dimension then required *removing*
+  the failure penalty from the evidence model, or one problem was charged twice
+  and resolving it gave back half.
+- **A 400 is not a refusal.** "A judging model that is not text is refused"
+  survived the type check being deleted, because the store then threw on
+  `7.trim()` and the route returned 400 anyway. The scenario now asserts the
+  refusal names the field, which is the difference between a validated refusal
+  and an incidental crash.
+- **Two all-optional shapes pass for each other.** The engine handed the plan's
+  `reliability:` block straight through as the declaration the judgement reads.
+  One is YAML-spelled (`expected_evidence`), the other TypeScript-spelled
+  (`expectedEvidence`); both are entirely optional, so it typechecked and
+  delivered `undefined` for every field whose name differed. A declared workflow
+  earned exactly the coverage an undeclared one did, and nothing said so until a
+  scenario asked a workflow that declares its evidence whether it got any.
+
+**What is deliberately not here.** Team dashboards, merge gates, calibrated
+probability models and telemetry — the specification's own non-goals — and no
+mandatory completion threshold. These are heuristics, not odds: nothing has been
+validated against post-merge defects, and an uncalibrated number should not
+become a gate. What they are is *explainable*, which a hidden model would not be.
+
+[`docs/reliability/`](docs/reliability/) is the whole of it, and
+[`docs/reliability/implementation-summary.md`](docs/reliability/implementation-summary.md)
+says what was built, what was left, and what is uncalibrated.
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -1325,6 +1423,10 @@ The vocabulary is deliberately small, and it is the vocabulary in the code.
 | **Bundle** | One self-contained YAML file holding a workflow plus every definition it needs. Its inner definitions are written by the same writers that produce definition files, so a bundle contains exactly what would sit on disk. |
 | **Run** | One execution attempt of a workflow. It records where it came from and how deep it is, so work that starts work can be bounded. |
 | **Initiator** | Who asked for a piece of work, when it was not a person. The run and task come from the environment Factory stamped into the agent it launched; the label the client gives for itself is read by people and by no rule. |
+| **Reliability** | How much to trust a task's current solution, given the evidence available. A number, its coverage, and the findings behind both. Never a probability — see `docs/reliability/`. |
+| **Evidence coverage** | How much of the evidence a sufficiently verified solution would have has actually been collected. Read beside reliability, never instead of it. |
+| **Driver** | A named reason reliability is lower than it might be — a regression, an ambiguity, something refused. Owned by an agent or a person, and the thing the score exists to point at. |
+| **Evaluator** | Something that classifies evidence and proposes findings. It returns dimensions and drivers and never a score; `normalize()` is where what it says stops being its own. |
 | **MCP tool** | Something an agent can ask Factory to do, over the Model Context Protocol. Not a **task tool**, which is a button on a task, and not a provider's `supports: mcp`, which means that agent CLI can *consume* MCP servers. Three meanings, one word, said apart wherever it matters. |
 
 ---
@@ -1412,6 +1514,7 @@ factory/                   a layout on a machine, not a checkout — see below
 │   │   ├── mcp/           Factory as an MCP server: one contract, a third client
 │   │   └── plugins/       provider-claude · provider-codex · provider-copilot
 │   │                      task-terminal · task-session · task-diffity
+│   │                      reliability-agent
 │   └── apps/              daemon (127.0.0.1:7317) · web · cli
 │
 └── factory-pro/           proprietary · separate workspace · depends one-way on the above
@@ -1491,6 +1594,13 @@ this repository does not contain.
 
 | `packages/plugins/provider-claude/features/stream.feature` | Reading a CLI's structured transcript: a refusal as an event rather than a sentence, and what is not one |
 | `packages/core/features/project-check.feature` | The one command that checks a project's work, and what a repository has to say before Factory guesses it |
+| `packages/core/features/reliability-scoring.feature` | Weights, ceilings, coverage, deltas, and why a validation that finds something lowers the score and raises coverage at once |
+| `packages/core/features/reliability-drivers.feature` | Findings: the one table of moves, who owns each, what may be resolved and what only a person may accept |
+| `packages/core/features/reliability-evaluator.feature` | The authority boundary: what an evaluator may say, what `normalize` refuses, and the score field that does not exist |
+| `packages/plugins/reliability-agent/features/reliability-agent.feature` | The agent evaluator: when it declines, what it is asked, how an answer is read, and that a score cannot be smuggled through it |
+| `packages/store/features/reliability.feature` | The three tables: append-only history, driver lifecycle, and a hand-edited row that degrades rather than making a task unloadable |
+| `packages/engine/features/reliability.feature` | Judging after a run: every verdict judged, a failed assessment that does not fail the run, what a declaration refines, and staleness derived rather than stored |
+| `packages/store/features/projects.feature` (extended) | Which model judges a project's work, and the difference between naming none and switching judging off |
 
 **Verifying everything** (from `factory-community`, then `factory-pro`):
 

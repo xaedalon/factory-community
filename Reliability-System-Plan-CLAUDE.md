@@ -8,6 +8,11 @@ Where the two disagree, this one wins and says why. §76 of the source asks for 
 first, adapt, do not duplicate existing concepts. The audit is
 [`docs/reliability/current-state.md`](docs/reliability/current-state.md).
 
+**Status: built.** Everything below exists, on `feature/reliability`. What came out — including the
+measurements, the three defects found while building it and what remains uncalibrated — is
+[`docs/reliability/implementation-summary.md`](docs/reliability/implementation-summary.md). The
+user-facing documentation is [`docs/reliability/`](docs/reliability/).
+
 ---
 
 ## What the feature is
@@ -143,7 +148,7 @@ erases history.
 | 24 | Workflows declare `reliability:` to contribute | Assessment runs after **every** run that reaches a verdict | Owner's correction: any workflow can change the project, including ones a developer writes. The block refines; its absence never means invisible. |
 | 41 | `reliability_target` with policy modes | Informational only | An uncalibrated heuristic must not become a mandatory gate. §41 says so itself. |
 | 81 | A five-workflow lifecycle | An importable bundle, plus a one-click import on the project page | Factory ships no opinion about your pipeline. A bundle nobody can find is a bundle nobody uses, hence the button. |
-| 9, 81 | `verification_not_performed` caps at 92; analysis lands at 93 | The verification cap waits until everything else is evidenced, and an early assessment lands far below 93 | Two things the specification's own numbers cannot both have. Applied from the moment implementation lands, a 92 ceiling binds through validation and the score **stops moving** — the dimensions and drivers become invisible exactly where the work is. And an analysis-only task reading 93 is the over-confidence §6 says the two numbers exist to prevent. Measured through the five phases: **68 → 75 → 83 → 88 → 97**, coverage **25 → 45 → 70 → 90 → 100**. The shape §5 asks for is intact and the pair reads honestly at every step. |
+| 9, 81 | `verification_not_performed` caps at 92; analysis lands at 93 | The verification cap waits until everything else is evidenced, and an early assessment lands far below 93 | Two things the specification's own numbers cannot both have. Applied from the moment implementation lands, a 92 ceiling binds through validation and the score **stops moving** — the dimensions and drivers become invisible exactly where the work is. And an analysis-only task reading 93 is the over-confidence §6 says the two numbers exist to prevent. Measured through the five phases against a real repository: **68.8 → 75.8 → 82.8 → 89.8 → 95.0**, coverage **25 → 45 → 70 → 90 → 100**. The shape §5 asks for is intact and the pair reads honestly at every step. |
 
 ---
 

@@ -8,6 +8,30 @@ plugin SDK, the scope layout, the HTTP API — may still move, and a minor bump 
 
 ## Unreleased
 
+**A task now says how much to trust it.** Factory could tell you a task was `done`. It could not
+tell you what that was worth. Every run is judged from what Factory observed — exit codes, refused
+commands, artifacts promised and delivered or not — and the task carries a score, the evidence
+coverage behind it, the findings holding it down and who should deal with each.
+
+Two numbers, never one. A 93 with 41% coverage is "nothing has gone wrong yet and we have barely
+looked"; a 93 with 96% is "we looked hard and it is good". The score can go *down*: a validation
+that finds a regression has learned something, and hiding that would remove the most useful thing
+here.
+
+*No agent ever sets the score.* An evaluator returns dimension assessments and findings — there is
+no field for a score, and none of the six MCP tools can set one. An agent may **resolve** a critical
+finding; only a person may **accept** one, the same separation `approve` already had.
+
+*What it costs:* nothing by default. The evaluator that always runs is deterministic and free. A
+second one that reads the work with an agent runs only where a project has named a model on its
+page, and only on runs that produced something worth reading.
+
+*Where to look:* the card, the graph and the drivers list on a task; `factory reliability <task>`,
+with `history`, `drivers`, `next` and `assess`; `GET /api/tasks/:id/reliability` and five more. The
+five-stage pipeline it was designed around ships as a bundle with one click on the project page.
+[`docs/reliability/`](docs/reliability/) is the whole of it, and says plainly that these are
+heuristics rather than calibrated odds.
+
 **Factory stops reporting success for work that did not happen.** A supervised run of ten tasks
 found the same shape four times: not a crash and not a wrong answer, but a tick beside work that
 never ran. Each of these was silent before, and each is loud now.

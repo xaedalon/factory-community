@@ -51,6 +51,36 @@ Feature: Judging a task after something happened to it
       When the engine works on the task
       Then the assessment names the run
 
+  Rule: what a workflow declares reaches the judgement it refines
+
+    The block is YAML, so it is written the way YAML is written —
+    `expected_evidence`, not `expectedEvidence`. The engine is the one place
+    that crosses from one spelling to the other, and it was handing the plan's
+    object straight through: every field whose name differs arrived undefined,
+    which meant a declared workflow earned exactly the coverage an undeclared
+    one does. Both shapes are all-optional, so nothing said so.
+
+    Scenario: A workflow that declares its evidence earns coverage for it
+      # Two keys, because the first is credited against an artifact actually
+      # arriving and this plan is one shell step. What is being read here is the
+      # declaration reaching the judgement at all — with the spellings crossed,
+      # neither key was credited and a declared workflow scored 0% coverage.
+      Given a workflow that succeeds declaring it collects "technical_approach" and "compatibility_considered"
+      When the engine works on the task
+      Then the coverage is above zero
+
+    Scenario: A workflow that declares nothing earns no coverage
+      Given a workflow that succeeds
+      When the engine works on the task
+      Then the coverage is zero
+
+    Scenario: A workflow that says not to judge it is not judged
+      # For the handful that change nothing worth judging — a worktree being
+      # created, an environment torn down.
+      Given a workflow that succeeds and asks not to be judged
+      When the engine works on the task
+      Then the task has not been assessed
+
   Rule: what the run did reaches the judgement
 
     Scenario: A failed step becomes a finding

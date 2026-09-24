@@ -1302,6 +1302,32 @@ Feature: Tasks, runs and live updates over HTTP
       When I set that project's check command to the number 7
       Then the response is 400
 
+  Rule: a green project check is evidence, and Factory knows which command it was
+
+    The one expectation Factory can satisfy without being told: a step running
+    exactly the project's own check command and exiting zero *is* the project's
+    checks passing. Everything else waits for a workflow to declare it.
+
+    Knowing which command that was is the daemon's job — the engine has a run
+    and a plan and no idea which project they belong to. It was never handed
+    over, so the credit was reachable only from a unit test that passed the
+    fact in by hand, and no real run ever earned it.
+
+    Scenario: A run of the project's check command earns regression coverage
+      Given the project checks itself with "echo checks passed"
+      And the workflow "check" runs that command
+      And the task "Add due dates" exists with the workflow "check"
+      When I queue the task
+      And the work finishes
+      Then the assessment counts "regression_checks" as collected
+
+    Scenario: A run of some other command earns none
+      Given the project checks itself with "echo checks passed"
+      And the task "Add due dates" exists with the workflow "hello"
+      When I queue the task
+      And the work finishes
+      Then the assessment counts no evidence at all
+
   Rule: a project says which model judges its work, and whether one does
 
     The free evaluator always runs. An agent evaluator costs tokens on every run

@@ -3293,6 +3293,64 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a green project check is evidence, and Factory knows which command it was', ({
+    RuleScenario,
+  }) => {
+    const CHECK = 'echo checks passed'
+
+    const checksItself = async (): Promise<void> => {
+      await call('PATCH', `/api/projects/${projectId}`, { check: CHECK })
+    }
+    const checkWorkflow = (): void => {
+      file(join(scope, 'workflows', 'check.workflow.yaml'), 'name: check\nphases: [verify]\n')
+      file(
+        join(scope, 'phases', 'verify.phase.yaml'),
+        `name: verify\nsteps: [{run: ${CHECK}}]\n`,
+      )
+    }
+    RuleScenario('A run of the project\'s check command earns regression coverage', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(`the project checks itself with "${CHECK}"`, checksItself)
+      And('the workflow "check" runs that command', checkWorkflow)
+      And('the task "Add due dates" exists with the workflow "check"', () =>
+        create('Add due dates', ['check']),
+      )
+      When('I queue the task', () => call('POST', `/api/tasks/${taskId}/actions/queue`))
+      And('the work finishes', () =>
+        until(async () => {
+          await reload()
+          return stateOf() === 'done'
+        }, 'the task to finish'),
+      )
+      Then('the assessment counts "regression_checks" as collected', async () => {
+        await call('GET', `/api/tasks/${taskId}/reliability`)
+        expect((response.body.reliability as { coverage: number }).coverage).toBeGreaterThan(0)
+      })
+    })
+
+    RuleScenario('A run of some other command earns none', ({ Given, And, When, Then }) => {
+      Given(`the project checks itself with "${CHECK}"`, checksItself)
+      And('the task "Add due dates" exists with the workflow "hello"', () =>
+        create('Add due dates', ['hello']),
+      )
+      When('I queue the task', () => call('POST', `/api/tasks/${taskId}/actions/queue`))
+      And('the work finishes', () =>
+        until(async () => {
+          await reload()
+          return stateOf() === 'done'
+        }, 'the task to finish'),
+      )
+      Then('the assessment counts no evidence at all', async () => {
+        await call('GET', `/api/tasks/${taskId}/reliability`)
+        expect((response.body.reliability as { coverage: number }).coverage).toBe(0)
+      })
+    })
+  })
+
   Rule('a project says which model judges its work, and whether one does', ({
     RuleScenario,
   }) => {

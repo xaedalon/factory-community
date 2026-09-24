@@ -1,9 +1,16 @@
-import { parseAgentFile, parsePhaseFile, parseWorkflowFile, type Problem } from '@factory/core'
+import {
+  parseAgentFile,
+  parsePhaseFile,
+  parseProfileFile,
+  parseWorkflowFile,
+  type Problem,
+} from '@factory/core'
 import {
   explain,
   listDefinitions,
   resolveAgent,
   resolvePhase,
+  resolveProfileDefinition,
   resolveWorkflow,
   type DefinitionKind,
 } from '@factory/config'
@@ -29,6 +36,10 @@ const parserFor = (kind: DefinitionKind, context: CliContext) => {
     },
     agent: (text, file) => {
       const r = parseAgentFile(text, file)
+      return { value: r.value, problems: r.problems }
+    },
+    profile: (text, file) => {
+      const r = parseProfileFile(text, file)
       return { value: r.value, problems: r.problems }
     },
   }
@@ -67,6 +78,8 @@ export function show(
     workflow: () => resolveWorkflow(context.chain, name),
     phase: () => resolvePhase(context.chain, context.host, name) as ReturnType<typeof resolveWorkflow>,
     agent: () => resolveAgent(context.chain, name) as ReturnType<typeof resolveWorkflow>,
+    profile: () =>
+      resolveProfileDefinition(context.chain, name) as ReturnType<typeof resolveWorkflow>,
   }
   const resolved = lookups[kind]()
 

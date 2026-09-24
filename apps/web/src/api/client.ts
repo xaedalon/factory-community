@@ -33,7 +33,7 @@ export type ScopeKind = 'project' | 'user' | 'builtin'
  * declaration of the same union — as it already was, spelled out inline at
  * eight call sites. One named type at least makes the duplication visible.
  */
-export type DefinitionKind = 'workflow' | 'phase' | 'agent'
+export type DefinitionKind = 'workflow' | 'phase' | 'agent' | 'profile'
 
 /** What turning a project setting on copied into the repository. */
 /** Whether adding a project had to create its `.xaedalon/.factory` directory. */

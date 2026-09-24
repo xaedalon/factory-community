@@ -108,7 +108,7 @@ export interface FactoryEvents {
  * dependency on that one. The two are structurally independent: nothing checks
  * them against each other, so a new kind must be added in both.
  */
-export type DefinitionKind = 'workflow' | 'phase' | 'agent'
+export type DefinitionKind = 'workflow' | 'phase' | 'agent' | 'profile'
 export type FactoryEventName = keyof FactoryEvents
 
 /** An event as delivered to a subscriber. */

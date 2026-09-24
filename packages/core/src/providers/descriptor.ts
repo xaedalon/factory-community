@@ -367,6 +367,52 @@ export function commandArgsFor(
   return [...args, ...grants.args]
 }
 
+/**
+ * The tokens that separate Full Access from Default, for this provider.
+ *
+ * What a **profile** may not pass, and deliberately *not* the same set a step
+ * may not pass: `forbiddenArgs` forbids `--allowedTools` and `--tools` to a
+ * step, and a profile's whole job is to set them. The two surfaces are
+ * different, so they are derived differently.
+ *
+ * Derived rather than listed, so it stays true as a descriptor changes, and
+ * always against Default — the subtraction filters out what the confined
+ * profile already passes, so deriving it against the profile being checked
+ * would let that profile remove the very token that would have caught it.
+ *
+ * Empty for a provider that cannot tell the profiles apart. There is nothing to
+ * derive, and saying "this is fine" would be a claim rather than the truth.
+ */
+export function fullAccessOnlyArgs(descriptor: ProviderDescriptor): readonly string[] {
+  const confined = new Set(permissionArgsFor(descriptor, DEFAULT_PROFILE))
+  return permissionArgsFor(descriptor, 'full-access').filter(
+    (argument) => !confined.has(argument),
+  )
+}
+
+/**
+ * Which of these arguments would reach Full Access.
+ *
+ * Tokens, not flags. Claude's Full Access is `--permission-mode
+ * bypassPermissions` and Default passes `--permission-mode` too, so the
+ * subtraction above leaves the bare *value* — and a check that only looked at
+ * flags would miss it entirely. `--flag=value` is split and both halves are
+ * checked, because a CLI that accepts one accepts the other.
+ */
+export function reachesFullAccess(
+  descriptor: ProviderDescriptor,
+  args: readonly string[],
+): readonly string[] {
+  const separating = new Set(fullAccessOnlyArgs(descriptor))
+  if (separating.size === 0) return []
+  return args.filter((argument) => {
+    if (separating.has(argument)) return true
+    const equals = argument.indexOf('=')
+    if (equals <= 0) return false
+    return separating.has(argument.slice(0, equals)) || separating.has(argument.slice(equals + 1))
+  })
+}
+
 /** One thing a provider was asked for and cannot do. */
 export interface UnsupportedGrant {
   readonly provider: string

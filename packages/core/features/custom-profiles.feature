@@ -251,3 +251,90 @@ Feature: A profile somebody wrote themselves
       Given a provider with no way to allow commands
       And a profile passing "--disallow-temp-dir" to that provider
       Then it reports nothing it cannot honour
+
+  Rule: a profile cannot reach Full Access, whatever it writes
+
+    Full Access is marked on screen the whole time it is on, and that mark is
+    the only thing standing between a person and an agent with no boundary. A
+    profile that passed the same flags would reach it with no mark at all — so
+    the flags that separate the two are refused here, derived from the provider
+    rather than listed, so it stays true as descriptors change.
+
+    Derived against **Default**, never against the profile being checked: the
+    subtraction that computes the set filters out what the profile itself
+    passes, so checking a profile against its own arguments would let it remove
+    the very token that would have caught it.
+
+    Scenario: A profile passing the Full Access flag is refused
+      Given a provider whose Full Access passes "--yolo"
+      And a profile passing "--yolo" to that provider
+      Then the profile is refused
+      And the refusal names "--yolo"
+      And the refusal names the provider
+
+    Scenario: The same flag written with an equals sign is refused too
+      Given a provider whose Full Access passes "--mode=bypass"
+      And a profile passing "--mode=bypass" to that provider
+      Then the profile is refused
+
+    Scenario: A value Full Access passes is refused even without its flag
+      # Claude's Full Access is `--permission-mode bypassPermissions`, and
+      # Default passes `--permission-mode` too — so the subtraction leaves the
+      # bare value. Checking tokens rather than flags is what catches it.
+      Given a provider whose Default passes "--mode" and whose Full Access passes "--mode" and "bypass"
+      And a profile passing "--mode" and "bypass" to that provider
+      Then the profile is refused
+      And the refusal names "bypass"
+
+    Scenario: A flag and value joined by an equals sign is refused by its value
+      # The shape that gets past a flag-only check. Claude's Full Access is
+      # `--permission-mode bypassPermissions` and Default passes
+      # `--permission-mode` too, so the separating token is the bare *value* —
+      # and `--permission-mode=bypassPermissions` contains neither the token nor
+      # a flag in the set. Only splitting on the equals sign and checking both
+      # halves catches it.
+      Given a provider whose Default passes "--mode" and whose Full Access passes "--mode" and "bypass"
+      And a profile passing "--mode=bypass" to that provider
+      Then the profile is refused
+      And the refusal names "--mode=bypass"
+
+    Scenario: An ordinary argument is not refused
+      Given a provider whose Full Access passes "--yolo"
+      And a profile passing "--add-dir" to that provider
+      Then the profile is allowed
+
+    Scenario: A profile is checked against every installed provider
+      Given a provider whose Full Access passes "--yolo"
+      And another provider whose Full Access passes "--anything-goes"
+      And a profile passing "--anything-goes" to the second provider
+      Then the profile is refused
+
+    Scenario: A provider that cannot tell the profiles apart forbids nothing
+      # An unmeasured descriptor with one list for both profiles has no
+      # separating flags, so there is nothing to derive and nothing to refuse.
+      # Saying "this is fine" would be a claim; saying nothing is the truth.
+      Given a provider that passes "--same" whatever the profile
+      And a profile passing "--same" to that provider
+      Then the profile is allowed
+
+  Rule: a command that hands over the filesystem is worth saying out loud
+
+    An interpreter runs whatever it is given, with its own syscalls, which
+    `--restricted` cannot confine — `Bash(node *)` was measured writing outside
+    the workspace on the first attempt. A profile may still allow one: the whole
+    point is that the risk is the author's to take. What it may not do is let
+    them take it without noticing.
+
+    Scenario: Allowing an interpreter warns, and still saves
+      Given a profile allowing "node"
+      Then the profile is allowed
+      And it warns that "node" runs whatever it is given
+
+    Scenario: The warning names the measurement
+      Given a profile allowing "python3"
+      Then it warns that "python3" runs whatever it is given
+
+    Scenario: An ordinary build tool does not warn
+      Given a profile allowing "cargo"
+      Then the profile is allowed
+      And it warns about nothing

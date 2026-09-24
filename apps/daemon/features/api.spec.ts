@@ -617,6 +617,70 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   const switchTo = (id: string, enabled: unknown) => () =>
     call('POST', `/api/plugins/${encodeURIComponent(id)}`, { enabled })
 
+  Rule('a profile goes in and out through the same routes as everything else', ({
+    RuleScenario,
+  }) => {
+    const profile = (over: Record<string, unknown> = {}) => ({
+      name: 'development',
+      description: 'Build tools this repository uses.',
+      extends: 'default',
+      commands: ['cargo'],
+      denyCommands: [],
+      providers: {},
+      extensions: {},
+      ...over,
+    })
+
+    RuleScenario('A profile can be written and read back', ({ When, Then, And }) => {
+      When('I POST a profile named "development"', () =>
+        call('POST', '/api/profiles', { definition: profile() }),
+      )
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('reading it back returns what was written', async () => {
+        await call('GET', '/api/profiles/development')
+        expect(response.statusCode).toBe(200)
+        expect((response.body.definition as { commands: string[] }).commands).toEqual(['cargo'])
+      })
+      And('the file was written as a profile', () => {
+        expect(existsSync(join(projectScope, 'profiles', 'development.profile.yaml'))).toBe(true)
+      })
+    })
+
+    RuleScenario('Previewing a profile shows the YAML it would write', ({ When, Then, And }) => {
+      When('I preview a profile named "development"', () =>
+        call('POST', '/api/definitions/preview', { kind: 'profile', definition: profile() }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the preview reads as a profile', () => {
+        expect(response.body.text as string).toContain('name: development')
+        expect(response.body.text as string).toContain('cargo')
+      })
+    })
+
+    RuleScenario('A profile that would reach Full Access is refused', ({ When, Then, And }) => {
+      When('I POST a profile that passes "bypassPermissions" to claude', () =>
+        call('POST', '/api/profiles', {
+          definition: profile({
+            name: 'reckless',
+            providers: { claude: { args: ['--permission-mode', 'bypassPermissions'] } },
+          }),
+        }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the refusal names Full Access', () => {
+        const said = JSON.stringify(response.body)
+        expect(said).toContain('Full Access')
+      })
+    })
+
+    RuleScenario('A profile that allows an ordinary build tool is written', ({ When, Then }) => {
+      When('I POST a profile allowing "cargo"', () =>
+        call('POST', '/api/profiles', { definition: profile({ name: 'buildtools' }) }),
+      )
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    })
+  })
+
   Rule('plugins can be listed and switched', ({ RuleScenario }) => {
     RuleScenario('The list names every plugin and what it contributes', ({
       When,

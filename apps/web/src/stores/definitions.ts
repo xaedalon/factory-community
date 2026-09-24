@@ -21,10 +21,12 @@ export const useDefinitions = defineStore('definitions', () => {
     workflow: [],
     phase: [],
     agent: [],
+    profile: [],
   })
   const workflows = computed(() => byKind.workflow)
   const phases = computed(() => byKind.phase)
   const agents = computed(() => byKind.agent)
+  const profiles = computed(() => byKind.profile)
   const loading = ref(false)
   const error = ref<string | undefined>(undefined)
 
@@ -48,5 +50,5 @@ export const useDefinitions = defineStore('definitions', () => {
     }
   }
 
-  return { byKind, workflows, phases, agents, loading, error, load }
+  return { byKind, workflows, phases, agents, profiles, loading, error, load }
 })

@@ -249,6 +249,37 @@ Feature: The definitions API
     And the response is JSON
 
 
+  Rule: a profile goes in and out through the same routes as everything else
+
+    A profile is a definition, so it gets the six routes every kind gets from one
+    row in the layout table. Worth asserting rather than assuming: the row is the
+    only thing that makes it true, and a kind that half-arrived would fail
+    somewhere nobody was looking.
+
+    Scenario: A profile can be written and read back
+      When I POST a profile named "development"
+      Then the response is 201
+      And reading it back returns what was written
+      And the file was written as a profile
+
+    Scenario: Previewing a profile shows the YAML it would write
+      When I preview a profile named "development"
+      Then the response is 200
+      And the preview reads as a profile
+
+    Scenario: A profile that would reach Full Access is refused
+      # The upper bound, enforced where every write passes through rather than
+      # in one client. `--permission-mode bypassPermissions` is what Claude's
+      # Full Access passes, so a profile passing it is Full Access with a
+      # friendlier name and no warning banner.
+      When I POST a profile that passes "bypassPermissions" to claude
+      Then the response is 400
+      And the refusal names Full Access
+
+    Scenario: A profile that allows an ordinary build tool is written
+      When I POST a profile allowing "cargo"
+      Then the response is 201
+
   Rule: plugins can be listed and switched
 
     `GET /api/capabilities` grouped what was installed by *kind*, which was the

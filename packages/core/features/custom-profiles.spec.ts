@@ -2,10 +2,11 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import { parse as parseYaml } from 'yaml'
-import { parseProfile, type Profile } from '../src/schema/profile.js'
+import { parseProfile, profileProblems, type Profile } from '../src/schema/profile.js'
 import type { Problem } from '../src/problems.js'
 import {
   NO_GRANTS,
+  fullAccessOnlyArgs,
   parseProviderDescriptor,
   permissionArgsFor,
   unsupportedBy,
@@ -478,6 +479,186 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
         grant({ args: ['--disallow-temp-dir'] }),
       )
       Then('it reports nothing it cannot honour', () => expect(reported()).toEqual([]))
+    })
+  })
+
+  Rule('a profile cannot reach Full Access, whatever it writes', ({ RuleScenario }) => {
+    let providers: ProviderDescriptor[] = []
+    let profile: Profile
+    let problems: readonly Problem[] = []
+
+    const describe = (id: string, permissionArgs: unknown): ProviderDescriptor => {
+      const parsed = parseProviderDescriptor({
+        id,
+        displayName: id,
+        command: id,
+        promptFlag: '-p',
+        models: { strong: 'a', balanced: 'b', fast: 'c' },
+        permissionArgs,
+      })
+      expect(parsed.error, JSON.stringify(parsed.error?.issues)).toBeUndefined()
+      return parsed.descriptor as ProviderDescriptor
+    }
+    const withProvider = (id: string, dflt: string[], full: string[]) => (): void => {
+      providers = [...providers, describe(id, { default: dflt, 'full-access': full })]
+    }
+    const passing = (id: string, args: string[]) => (): void => {
+      profile = {
+        name: 'development',
+        description: '',
+        extends: 'default',
+        commands: [],
+        denyCommands: [],
+        providers: { [id]: { args } },
+        extensions: {},
+      }
+      problems = profileProblems(profile, providers)
+    }
+    const errors = (): readonly Problem[] => problems.filter((p) => p.severity === 'error')
+    const refused = (): void => expect(errors(), JSON.stringify(problems)).not.toHaveLength(0)
+    const allowed = (): void => expect(errors(), JSON.stringify(problems)).toHaveLength(0)
+    const names = (text: string) => (): void =>
+      expect(errors().map((p) => p.message).join(' ')).toContain(text)
+
+    RuleScenario('A profile passing the Full Access flag is refused', ({ Given, And, Then }) => {
+      Given('a provider whose Full Access passes "--yolo"', withProvider('probe', [], ['--yolo']))
+      And('a profile passing "--yolo" to that provider', passing('probe', ['--yolo']))
+      Then('the profile is refused', refused)
+      And('the refusal names "--yolo"', names('--yolo'))
+      And('the refusal names the provider', names('probe'))
+    })
+
+    RuleScenario('The same flag written with an equals sign is refused too', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a provider whose Full Access passes "--mode=bypass"', () => {
+        providers = []
+        withProvider('probe', [], ['--mode=bypass'])()
+      })
+      And('a profile passing "--mode=bypass" to that provider', passing('probe', ['--mode=bypass']))
+      Then('the profile is refused', refused)
+    })
+
+    RuleScenario('A value Full Access passes is refused even without its flag', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given(
+        'a provider whose Default passes "--mode" and whose Full Access passes "--mode" and "bypass"',
+        () => {
+          providers = []
+          withProvider('probe', ['--mode', 'ask'], ['--mode', 'bypass'])()
+        },
+      )
+      And('a profile passing "--mode" and "bypass" to that provider', () =>
+        passing('probe', ['--mode', 'bypass'])(),
+      )
+      Then('the profile is refused', refused)
+      And('the refusal names "bypass"', names('bypass'))
+    })
+
+    RuleScenario('A flag and value joined by an equals sign is refused by its value', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given(
+        'a provider whose Default passes "--mode" and whose Full Access passes "--mode" and "bypass"',
+        () => {
+          providers = []
+          withProvider('probe', ['--mode', 'ask'], ['--mode', 'bypass'])()
+        },
+      )
+      And('a profile passing "--mode=bypass" to that provider', passing('probe', ['--mode=bypass']))
+      Then('the profile is refused', refused)
+      And('the refusal names "--mode=bypass"', names('--mode=bypass'))
+    })
+
+    RuleScenario('An ordinary argument is not refused', ({ Given, And, Then }) => {
+      Given('a provider whose Full Access passes "--yolo"', () => {
+        providers = []
+        withProvider('probe', [], ['--yolo'])()
+      })
+      And('a profile passing "--add-dir" to that provider', passing('probe', ['--add-dir']))
+      Then('the profile is allowed', allowed)
+    })
+
+    RuleScenario('A profile is checked against every installed provider', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a provider whose Full Access passes "--yolo"', () => {
+        providers = []
+        withProvider('one', [], ['--yolo'])()
+      })
+      And('another provider whose Full Access passes "--anything-goes"', () =>
+        withProvider('two', [], ['--anything-goes'])(),
+      )
+      And('a profile passing "--anything-goes" to the second provider', () =>
+        passing('two', ['--anything-goes'])(),
+      )
+      Then('the profile is refused', refused)
+    })
+
+    RuleScenario('A provider that cannot tell the profiles apart forbids nothing', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a provider that passes "--same" whatever the profile', () => {
+        providers = [describe('probe', ['--same'])]
+        expect(fullAccessOnlyArgs(providers[0] as ProviderDescriptor)).toEqual([])
+      })
+      And('a profile passing "--same" to that provider', passing('probe', ['--same']))
+      Then('the profile is allowed', allowed)
+    })
+  })
+
+  Rule('a command that hands over the filesystem is worth saying out loud', ({ RuleScenario }) => {
+    let problems: readonly Problem[] = []
+
+    const allowing = (command: string) => (): void => {
+      problems = profileProblems(
+        {
+          name: 'development',
+          description: '',
+          extends: 'default',
+          commands: [command],
+          denyCommands: [],
+          providers: {},
+          extensions: {},
+        },
+        [],
+      )
+    }
+    const warnsAbout = (command: string) => (): void => {
+      const warned = problems.filter((p) => p.rule === 'profile.interpreterAllowed')
+      expect(warned.map((p) => p.message).join(' ')).toContain(command)
+    }
+
+    RuleScenario('Allowing an interpreter warns, and still saves', ({ Given, Then, And }) => {
+      Given('a profile allowing "node"', allowing('node'))
+      Then('the profile is allowed', () =>
+        expect(problems.filter((p) => p.severity === 'error')).toEqual([]),
+      )
+      And('it warns that "node" runs whatever it is given', warnsAbout('node'))
+    })
+
+    RuleScenario('The warning names the measurement', ({ Given, Then }) => {
+      Given('a profile allowing "python3"', allowing('python3'))
+      Then('it warns that "python3" runs whatever it is given', warnsAbout('python3'))
+    })
+
+    RuleScenario('An ordinary build tool does not warn', ({ Given, Then, And }) => {
+      Given('a profile allowing "cargo"', allowing('cargo'))
+      Then('the profile is allowed', () =>
+        expect(problems.filter((p) => p.severity === 'error')).toEqual([]),
+      )
+      And('it warns about nothing', () => expect(problems).toEqual([]))
     })
   })
 })

@@ -2,6 +2,13 @@ import { z } from 'zod'
 import type { Problem } from '../problems.js'
 import { closedWithExtensions, extensionsOf, problemsFromZod, slug } from './common.js'
 import { BUILT_IN_PROFILES, DEFAULT_PROFILE } from '../security/profile.js'
+import {
+  NO_GRANTS,
+  reachesFullAccess,
+  unsupportedBy,
+  type ProfileGrants,
+  type ProviderDescriptor,
+} from '../providers/descriptor.js'
 
 /**
  * A profile somebody wrote: which commands an agent may run here, and nothing else.
@@ -175,4 +182,118 @@ export function parseProfile(input: unknown, options: { file?: string } = {}): P
   }
 
   return { profile, problems }
+}
+
+/**
+ * What this profile grants one provider.
+ *
+ * The portable half is the same for everyone; `args` is that provider's own
+ * share of the `providers:` map, and absent means it contributes none.
+ */
+export function grantsFor(profile: Profile, provider: string): ProfileGrants {
+  return {
+    commands: profile.commands,
+    denyCommands: profile.denyCommands,
+    args: profile.providers[provider]?.args ?? NO_GRANTS.args,
+  }
+}
+
+/**
+ * Commands that run whatever they are given.
+ *
+ * `--restricted` confines Factory's own file tools and the shell's redirection.
+ * It cannot confine what a *child process* does with its own syscalls, so an
+ * entry that ends in an interpreter hands that entry the whole filesystem —
+ * `Bash(node *)` was measured writing outside the workspace on the first
+ * attempt, and is why the shipped Default list is package managers only.
+ *
+ * Warned about rather than refused, deliberately. A profile exists so the
+ * person who owns the repository can take a risk they understand; refusing
+ * would decide for them. What it must not be is a risk taken without noticing.
+ */
+const INTERPRETERS = [
+  'sh',
+  'bash',
+  'zsh',
+  'fish',
+  'env',
+  'node',
+  'deno',
+  'python',
+  'python3',
+  'ruby',
+  'perl',
+  'php',
+  'osascript',
+  'xargs',
+  'eval',
+] as const
+
+/** The tool a command line starts with, which is the part an allow-list matches. */
+const leadingTool = (command: string): string => (command.trim().split(/\s+/)[0] ?? '').trim()
+
+/**
+ * Everything about a profile that needs a provider to know.
+ *
+ * Separate from `parseProfile` because that has no host on purpose — a profile
+ * names providers and none of them has to be installed for it to be written
+ * down. This is asked where the installed set is known, which is the write path.
+ */
+export function profileProblems(
+  profile: Profile,
+  providers: readonly ProviderDescriptor[],
+  options: { file?: string } = {},
+): readonly Problem[] {
+  const problems: Problem[] = []
+  const at = options.file === undefined ? {} : { file: options.file }
+
+  for (const descriptor of providers) {
+    const grants = grantsFor(profile, descriptor.id)
+
+    // The upper bound. Only the profile's *own* arguments are checked: the
+    // flags it emits for `commands` are the ones a step may not pass, and a
+    // profile setting them is the whole point.
+    const reaching = reachesFullAccess(descriptor, grants.args)
+    if (reaching.length > 0) {
+      problems.push({
+        severity: 'error',
+        message:
+          `This profile passes ${reaching.map((a) => `"${a}"`).join(', ')} to ${descriptor.id}, ` +
+          `which is what Full Access grants. Choose Full Access on the project instead, where it ` +
+          `is marked on screen the whole time it is on.`,
+        field: 'providers',
+        ...at,
+        rule: 'profile.reachesFullAccess',
+      })
+    }
+
+    // What this provider cannot honour. A warning rather than an error: the
+    // profile is still correct, and the other providers still get it.
+    for (const gap of unsupportedBy(descriptor, grants)) {
+      problems.push({
+        severity: 'warning',
+        message: gap.message,
+        ...at,
+        rule: 'profile.unsupportedByProvider',
+      })
+    }
+  }
+
+  for (const command of profile.commands) {
+    const tool = leadingTool(command)
+    if (!(INTERPRETERS as readonly string[]).includes(tool)) continue
+    problems.push({
+      severity: 'warning',
+      message:
+        `"${command}" runs whatever it is given. Confinement stops Factory's own file tools ` +
+        `leaving the workspace; it cannot stop a child process doing it with its own syscalls, ` +
+        `and \`Bash(node *)\` was measured writing outside the workspace on the first attempt. ` +
+        `Allow it if that is the trade you mean to make.`,
+      field: 'commands',
+      ...at,
+      rule: 'profile.interpreterAllowed',
+    })
+  }
+
+  return problems
 }

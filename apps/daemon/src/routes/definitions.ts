@@ -2,13 +2,16 @@ import type { FastifyInstance } from 'fastify'
 import {
   parseAgentFile,
   parsePhaseFile,
+  parseProfileFile,
   parseWorkflowFile,
   writeNewAgent,
   writeNewPhase,
+  writeNewProfile,
   writeNewWorkflow,
   type Agent,
   type Phase,
   type Problem,
+  type Profile,
   type Workflow,
   resolveNeeds,
   unavailableFor,
@@ -23,6 +26,7 @@ import {
   listDefinitions,
   resolveAgent,
   resolvePhase,
+  resolveProfileDefinition,
   resolveWorkflow,
   writeDefinition,
   type DefinitionKind,
@@ -315,6 +319,10 @@ const parserFor = (kind: DefinitionKind, runtime: Runtime) => {
       const r = parseAgentFile(text, file)
       return { value: r.value, problems: r.problems }
     },
+    profile: (text, file) => {
+      const r = parseProfileFile(text, file)
+      return { value: r.value, problems: r.problems }
+    },
   }
   return parsers[kind]
 }
@@ -329,6 +337,7 @@ const resolveOne = (kind: DefinitionKind, chain: ScopeChain, runtime: Runtime, n
     workflow: () => resolveWorkflow(chain, name),
     phase: () => resolvePhase(chain, runtime.host, name),
     agent: () => resolveAgent(chain, name),
+    profile: () => resolveProfileDefinition(chain, name),
   }
   return lookups[kind]() as ReturnType<typeof resolveWorkflow>
 }
@@ -338,6 +347,7 @@ const renderOne = (kind: DefinitionKind, definition: unknown, runtime: Runtime):
     workflow: () => writeNewWorkflow(definition as Workflow),
     phase: () => writeNewPhase(definition as Phase, runtime.host),
     agent: () => writeNewAgent(definition as Agent),
+    profile: () => writeNewProfile(definition as Profile),
   }
   return writers[kind]()
 }

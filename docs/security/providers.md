@@ -62,6 +62,31 @@ code and `pnpm exec` runs anything. The trade is deliberate and
 [`default-profile.md`](default-profile.md) states it. The difference is that
 running the project's tests is the thing the profile is *for*.
 
+### The allow-list is not the whole story
+
+Measured 2026-09-24, with the Default flags above, in a throwaway repository:
+
+| command | |
+|---|---|
+| `git status --short`, `git log`, `git diff` | **allowed** |
+| `cat README.md` | **allowed** |
+| `find . -type f -name '*.md'` | **allowed** |
+| `cat X; echo ---; which git; git status` (one compound command) | **allowed** |
+| `git -C <path> status` — and `git -C .` | **refused** |
+| `lsof -iTCP:5180` | **refused** |
+| `echo … > <outside the workspace>` | **refused** — the boundary holds |
+
+**Claude Code auto-approves read-only commands whatever `--allowedTools` says.** The list governs
+commands with *side effects*. So an agent under the Default profile can already read the repository
+it is working in, run `git status`, and look around — none of which needs a flag.
+
+`-C` is refused as a flag, wherever it points, including at the working directory itself:
+`--restricted` reads it as an attempt to leave the confined directory. An agent that wants
+`git status` should ask for `git status`, standing where it already is.
+
+This matters when reading a refusal. "The agent could not run `git -C … status`" is the boundary
+working, not a missing allow-list entry, and adding `git` to a list will not change it.
+
 `--allowedTools` is variadic (`<tools...>` in `--help`), and a repeated
 variadic option **replaces** rather than appends. Four flags would leave only
 the last in force — which looks like it works. Factory passes one flag with a

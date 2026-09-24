@@ -4,6 +4,7 @@ import type { Problem } from '../problems.js'
 import { parseWorkflow, type Workflow } from '../schema/workflow.js'
 import { parsePhase, type Phase } from '../schema/phase.js'
 import { parseAgent, type Agent } from '../schema/agent.js'
+import { parseProfile, type Profile } from '../schema/profile.js'
 
 /**
  * The file layer: YAML text in, a definition and located problems out.
@@ -44,6 +45,14 @@ export function parseAgentFile(text: string, file?: string): FileParseResult<Age
   return parseFile(text, file, (data) => {
     const result = parseAgent(data, file === undefined ? {} : { file })
     return { value: result.agent, problems: result.problems }
+  })
+}
+
+/** A profile, from a file. */
+export function parseProfileFile(text: string, file?: string): FileParseResult<Profile> {
+  return parseFile(text, file, (data) => {
+    const result = parseProfile(data, file === undefined ? {} : { file })
+    return { value: result.profile, problems: result.problems }
   })
 }
 

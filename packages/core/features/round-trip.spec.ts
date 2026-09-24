@@ -5,15 +5,22 @@ import { fileURLToPath } from 'node:url'
 import { EventBus } from '@factory/events'
 import { CapabilityHost } from '../src/host.js'
 import { builtinStepsPlugin } from '../src/builtins/steps.js'
-import { parseAgentFile, parsePhaseFile, parseWorkflowFile } from '../src/yaml/parse.js'
+import {
+  parseAgentFile,
+  parsePhaseFile,
+  parseProfileFile,
+  parseWorkflowFile,
+} from '../src/yaml/parse.js'
 import {
   updateExistingAgent,
   updateExistingPhase,
+  updateExistingProfile,
   updateExistingWorkflow,
   writeNewWorkflow,
 } from '../src/yaml/serialize.js'
 import type { Workflow } from '../src/schema/workflow.js'
 import type { Agent } from '../src/schema/agent.js'
+import type { Profile } from '../src/schema/profile.js'
 
 const feature = await loadFeature(fileURLToPath(new URL('./round-trip.feature', import.meta.url)))
 
@@ -205,6 +212,19 @@ describeFeature(feature, ({ Scenario, ScenarioOutline, BeforeEachScenario }) => 
     Then('the file is byte-for-byte unchanged', () => {
       expect(output).toBe(source)
     })
+  })
+
+  Scenario('A profile round-trips everything it carries', ({ Given, When, Then }) => {
+    Given('the fixture "full-featured.profile.yaml"', () => {
+      source = fixture('full-featured.profile.yaml')
+    })
+    When('it is parsed and written back with no changes', () => {
+      const result = parseProfileFile(source, 'fixture.yaml')
+      expect(result.problems.filter((p) => p.severity === 'error')).toEqual([])
+      expect(result.value).toBeDefined()
+      output = updateExistingProfile(source, result.value as Profile)
+    })
+    Then('the file is byte-for-byte unchanged', () => expect(output).toBe(source))
   })
 
   Scenario('Updating refuses to touch a file that does not parse', ({ Given, When, Then }) => {

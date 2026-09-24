@@ -1,6 +1,7 @@
 import { Document, Scalar, isMap, parse, parseDocument, type YAMLMap } from 'yaml'
 import {
   AGENT_FIELDS,
+  PROFILE_FIELDS,
   PHASE_FIELDS,
   WORKFLOW_FIELDS,
   shouldEmit,
@@ -11,6 +12,7 @@ import { STEP_KIND, type Step, type StepKindCapability } from '../schema/step.js
 import type { Workflow } from '../schema/workflow.js'
 import type { Phase } from '../schema/phase.js'
 import type { Agent } from '../schema/agent.js'
+import type { Profile } from '../schema/profile.js'
 
 /**
  * Two write paths, and the distinction is the whole point.
@@ -68,6 +70,21 @@ export function writeNewAgent(agent: Agent): string {
 
 export function updateExistingAgent(raw: string, agent: Agent): string {
   return updateExisting(raw, agent, AGENT_FIELDS, identity)
+}
+
+/**
+ * A profile, written the same way.
+ *
+ * The second kind whose writer is the generic one with nothing added — a
+ * profile is data all the way down, and `providers` is a plain map that
+ * `toPlain` handles like any other.
+ */
+export function writeNewProfile(profile: Profile): string {
+  return writeNew(profile, PROFILE_FIELDS, identity)
+}
+
+export function updateExistingProfile(raw: string, profile: Profile): string {
+  return updateExisting(raw, profile, PROFILE_FIELDS, identity)
 }
 
 /** How a domain value is projected into the shape that appears in the file. */

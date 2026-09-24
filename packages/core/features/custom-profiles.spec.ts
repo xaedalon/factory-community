@@ -1,6 +1,9 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
+import { parse as parseYaml } from 'yaml'
+import { parseProfile, type Profile } from '../src/schema/profile.js'
+import type { Problem } from '../src/problems.js'
 import { parseProviderDescriptor, permissionArgsFor } from '../src/providers/descriptor.js'
 import type { ProviderDescriptor } from '../src/providers/descriptor.js'
 import {
@@ -175,6 +178,61 @@ describeFeature(feature, ({ Rule, BeforeEachScenario }) => {
       Given('the profile "development" is defined', () => define('development'))
       Then('"development" reads as "development"', () =>
         expect(profileLabel('development', defined)).toBe('development'),
+      )
+    })
+  })
+
+  Rule('a profile is a definition, and says what it is', ({ RuleScenario }) => {
+    let profile: Profile | undefined
+    let problems: readonly Problem[] = []
+
+    const given = (_ctx: unknown, text: string): void => {
+      const result = parseProfile(parseYaml(text))
+      profile = result.profile
+      problems = result.problems
+    }
+    const errors = (): readonly Problem[] => problems.filter((p) => p.severity === 'error')
+
+    RuleScenario('A profile carries what it widens', ({ Given, Then, And }) => {
+      Given('the profile file:', given)
+      Then('it parses', () => {
+        expect(errors(), JSON.stringify(problems)).toEqual([])
+        expect(profile).toBeDefined()
+      })
+      And('it allows "cargo"', () => expect(profile?.commands).toContain('cargo'))
+      And('it extends "default"', () => expect(profile?.extends).toBe('default'))
+    })
+
+    RuleScenario('A profile cannot take a name Factory ships', ({ Given, Then, And }) => {
+      Given('the profile file:', given)
+      Then('it is refused', () => expect(errors()).not.toHaveLength(0))
+      And('the refusal names the field "name"', () =>
+        expect(errors().map((p) => p.field)).toContain('name'),
+      )
+    })
+
+    RuleScenario('A profile cannot extend Full Access', ({ Given, Then }) => {
+      Given('the profile file:', given)
+      Then('it is refused', () => expect(errors()).not.toHaveLength(0))
+    })
+
+    RuleScenario('A profile that widens nothing says so', ({ Given, Then, And }) => {
+      Given('the profile file:', given)
+      Then('it parses', () => expect(profile).toBeDefined())
+      And('it warns that it allows nothing', () =>
+        expect(problems.map((p) => p.rule)).toContain('profile.allowsNothing'),
+      )
+    })
+
+    RuleScenario('A key Factory does not know is refused, with a suggestion', ({
+      Given,
+      Then,
+      And,
+    }) => {
+      Given('the profile file:', given)
+      Then('it is refused', () => expect(errors()).not.toHaveLength(0))
+      And('the refusal suggests "commands"', () =>
+        expect(errors().map((p) => p.message).join(' ')).toContain('commands'),
       )
     })
   })

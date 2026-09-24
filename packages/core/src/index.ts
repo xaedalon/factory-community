@@ -21,6 +21,7 @@ export * from './schema/step.js'
 export * from './schema/workflow.js'
 export * from './schema/phase.js'
 export * from './schema/agent.js'
+export * from './schema/profile.js'
 
 export * from './builtins/steps.js'
 export * from './builtins/worktree.js'

@@ -1,0 +1,14 @@
+# The profile this repository's agents run under.
+kind: factory.profile/v1
+name: development
+description: Default, plus the build tools this repository actually uses.
+extends: default
+commands:
+  - cargo
+  - make
+  - git push
+deny_commands:
+  - git push --force
+providers:
+  claude:
+    args: ['--add-dir', '/opt/toolchains']

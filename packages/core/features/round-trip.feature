@@ -76,6 +76,11 @@ Feature: Definitions survive a read-modify-write untouched
     When it is parsed and written back with no changes
     Then the file is byte-for-byte unchanged
 
+  Scenario: A profile round-trips everything it carries
+    Given the fixture "full-featured.profile.yaml"
+    When it is parsed and written back with no changes
+    Then the file is byte-for-byte unchanged
+
   Scenario: Updating refuses to touch a file that does not parse
     Given a file that is not valid YAML
     When an update is attempted

@@ -103,3 +103,61 @@ Feature: A profile somebody wrote themselves
     Scenario: A descriptor that predates profiles answers the same for a custom one
       Given a provider that passes "--same" whatever the profile
       Then the profile "development" is given "--same"
+
+  Rule: a profile is a definition, and says what it is
+
+    Scenario: A profile carries what it widens
+      Given the profile file:
+        """
+        kind: factory.profile/v1
+        name: development
+        commands: [cargo, make]
+        """
+      Then it parses
+      And it allows "cargo"
+      And it extends "default"
+
+    Scenario: A profile cannot take a name Factory ships
+      # The name is what a project stores and what resolution returns, so a
+      # custom "default" would be a definition shadowing a concept — and which
+      # one won would depend on a lookup order nobody wrote down.
+      Given the profile file:
+        """
+        kind: factory.profile/v1
+        name: default
+        commands: [cargo]
+        """
+      Then it is refused
+      And the refusal names the field "name"
+
+    Scenario: A profile cannot extend Full Access
+      # That is Full Access with a friendlier name and no warning banner.
+      Given the profile file:
+        """
+        kind: factory.profile/v1
+        name: development
+        extends: full-access
+        commands: [cargo]
+        """
+      Then it is refused
+
+    Scenario: A profile that widens nothing says so
+      Given the profile file:
+        """
+        kind: factory.profile/v1
+        name: development
+        """
+      Then it parses
+      And it warns that it allows nothing
+
+    Scenario: A key Factory does not know is refused, with a suggestion
+      # `network:` is in the proposal and Factory mediates none of it. A key
+      # that reads correctly and does nothing is the mistake already made once.
+      Given the profile file:
+        """
+        kind: factory.profile/v1
+        name: development
+        command: [cargo]
+        """
+      Then it is refused
+      And the refusal suggests "commands"

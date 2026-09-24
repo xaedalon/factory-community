@@ -293,6 +293,29 @@ Feature: The factory command
       And the first phase starts a session
       And the second phase resumes the same one
 
+  Rule: a foreground run says what the agent was refused, and does not call it success
+
+    The engine parks a task whose agent was refused a command. `factory run` has
+    nowhere to park, so its exit code is the whole of what it can say — and it
+    was saying "Completed" in green on a run where the install did not happen.
+    It collected the refusals and printed none of them, which made the one
+    surface somebody watches the quietest one.
+
+    Scenario: A refused command is named, and the run does not succeed
+      Given an agent whose transcript reports "pnpm install" denied
+      And the project defines a workflow with one agent phase
+      When I run "run probe --yes"
+      Then it fails
+      And one line says that command did not run, and names it
+      And the output does not say the run completed
+
+    Scenario: A run with nothing refused still succeeds
+      Given an agent whose transcript reports no refusal
+      And the project defines a workflow with one agent phase
+      When I run "run probe --yes"
+      Then it succeeds
+      And the output says the run completed
+
   Rule: the plugin switches are reachable when the board is not
 
     The board can switch a plugin off, and the one time you most need to is

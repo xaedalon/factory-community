@@ -1,6 +1,7 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -757,6 +758,106 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         expect(started).toBeDefined()
         expect(output).toContain(`--resume ${started as string}`)
       })
+    })
+  })
+
+  Rule('a foreground run says what the agent was refused, and does not call it success', ({
+    RuleScenario,
+  }) => {
+    /**
+     * A stand-in for the agent CLI that speaks its transcript format.
+     *
+     * Pointed at through `providers.claude.command`, which is the documented
+     * way to tell Factory where an agent is — so everything downstream is the
+     * real thing: the real descriptor, the real reader, the real runner and
+     * the real command. Only the binary is a stub, because a scenario that
+     * needed a logged-in Claude Code would run nowhere.
+     *
+     * The shapes are the ones measured on 2.1.281, including the `result`
+     * event that says `success` on the run where the command was refused.
+     */
+    const stubAgent = (denied?: string): string => {
+      const path = join(root, 'stub-agent')
+      const events = [
+        JSON.stringify({ type: 'system', subtype: 'init' }),
+        ...(denied === undefined
+          ? []
+          : [
+              JSON.stringify({
+                type: 'assistant',
+                message: {
+                  content: [
+                    { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: denied } },
+                  ],
+                },
+              }),
+              JSON.stringify({
+                type: 'system',
+                subtype: 'permission_denied',
+                tool_use_id: 'toolu_1',
+                message: 'Permission for this tool use was denied.',
+              }),
+            ]),
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'All done.' }] },
+        }),
+        JSON.stringify({ type: 'result', subtype: 'success', is_error: false }),
+      ]
+      // Exits 0, like the real thing on a run whose command was refused. That
+      // is the entire point of the scenario.
+      file(path, `#!/bin/sh\n${events.map((line) => `echo '${line}'`).join('\n')}\nexit 0\n`)
+      chmodSync(path, 0o755)
+      file(
+        join(projectScope, 'config.yaml'),
+        `kind: factory.scope/v1\nscope: project\nproviders:\n  claude:\n    command: ${path}\n`,
+      )
+      return path
+    }
+    const agentPhase = (): void => {
+      workflow(projectScope, 'probe', 'name: probe\nphases: [work]\n')
+      phase(
+        projectScope,
+        'work',
+        'name: work\nsteps: [{uses: agent, provider: claude, prompt: go}]\n',
+      )
+    }
+
+    RuleScenario('A refused command is named, and the run does not succeed', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('an agent whose transcript reports "pnpm install" denied', () => {
+        stubAgent('pnpm install')
+      })
+      And('the project defines a workflow with one agent phase', agentPhase)
+      When('I run "run probe --yes"', () => invoke('run probe --yes'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+      // On one line, and the refusal's own. `toContain('pnpm install')` alone
+      // passes on the trace line the tool call already wrote, and kept passing
+      // with the refusal report deleted entirely.
+      And('one line says that command did not run, and names it', () => {
+        const line = output.split('\n').find((text) => text.includes('did not run'))
+        expect(line, output).toBeDefined()
+        expect(line).toContain('pnpm install')
+      })
+      // The summary line itself, not the absence of the word anywhere: the
+      // agent's own prose is in this output too.
+      And('the output does not say the run completed', () =>
+        expect(output).not.toContain('Completed.'),
+      )
+    })
+
+    RuleScenario('A run with nothing refused still succeeds', ({ Given, And, When, Then }) => {
+      Given('an agent whose transcript reports no refusal', () => {
+        stubAgent()
+      })
+      And('the project defines a workflow with one agent phase', agentPhase)
+      When('I run "run probe --yes"', () => invoke('run probe --yes'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says the run completed', () => expect(output).toContain('Completed.'))
     })
   })
 

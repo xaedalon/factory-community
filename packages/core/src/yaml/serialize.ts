@@ -174,7 +174,25 @@ function updateExisting<D extends { extensions: Readonly<Record<string, unknown>
     const wanted = shouldEmit(spec as FieldSpec<never>, next)
 
     if (!wanted) {
-      if (next === undefined && doc.has(spec.yaml)) {
+      // A field the writer will not emit has to stop being on disk — but only
+      // when it actually *changed*. The two cases look identical from the value
+      // alone and mean opposite things:
+      //
+      //   the author wrote `mode: once`, which equals the default   keep it
+      //   the author cleared `args` to []                           delete it
+      //
+      // So the question is not "is it worth emitting" but "does the file still
+      // say what the value says". Unchanged means the author wrote it on purpose
+      // and a round-trip must not quietly take it away; changed means they
+      // cleared it, and leaving the old line is how clearing a field on the
+      // board silently did nothing at all.
+      //
+      // `undefined` falls out of the same comparison: absent here, present on
+      // disk, therefore changed, therefore deleted — which is what it already
+      // did. `omit` is the exception, because a field the table says never to
+      // write is not one to delete either; it is somebody else's key.
+      const unchanged = deepEqual(onDisk[spec.yaml], project(spec.yaml, next))
+      if (spec.emit !== 'omit' && !unchanged && doc.has(spec.yaml)) {
         doc.delete(spec.yaml)
         touched = true
       }

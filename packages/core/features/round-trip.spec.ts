@@ -5,13 +5,15 @@ import { fileURLToPath } from 'node:url'
 import { EventBus } from '@factory/events'
 import { CapabilityHost } from '../src/host.js'
 import { builtinStepsPlugin } from '../src/builtins/steps.js'
-import { parsePhaseFile, parseWorkflowFile } from '../src/yaml/parse.js'
+import { parseAgentFile, parsePhaseFile, parseWorkflowFile } from '../src/yaml/parse.js'
 import {
+  updateExistingAgent,
   updateExistingPhase,
   updateExistingWorkflow,
   writeNewWorkflow,
 } from '../src/yaml/serialize.js'
 import type { Workflow } from '../src/schema/workflow.js'
+import type { Agent } from '../src/schema/agent.js'
 
 const feature = await loadFeature(fileURLToPath(new URL('./round-trip.feature', import.meta.url)))
 
@@ -147,6 +149,48 @@ describeFeature(feature, ({ Scenario, ScenarioOutline, BeforeEachScenario }) => 
     And('the comment "# The development pipeline." is still present', () => {
       expect(output).toContain('# The development pipeline.')
     })
+  })
+
+  /** The agent fixture, parsed, for the scenarios about clearing a field. */
+  const parseAgentSource = (): Agent => {
+    const result = parseAgentFile(source, 'fixture.yaml')
+    expect(result.problems.filter((p) => p.severity === 'error')).toEqual([])
+    expect(result.value).toBeDefined()
+    return result.value as Agent
+  }
+
+  Scenario('Emptying a list deletes its key, rather than leaving the old one', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    Given('the fixture "full-featured.agent.yaml"', () => {
+      source = fixture('full-featured.agent.yaml')
+    })
+    When('its arguments are emptied', () => {
+      output = updateExistingAgent(source, { ...parseAgentSource(), args: [] })
+    })
+    Then('the file no longer contains "args"', () => expect(output).not.toContain('args'))
+    And('the comment at the top is still present', () =>
+      expect(output).toContain('# The agent the implementation phases name.'),
+    )
+  })
+
+  Scenario('Clearing a field back to its default deletes its key too', ({
+    Given,
+    When,
+    Then,
+  }) => {
+    Given('the fixture "full-featured.agent.yaml"', () => {
+      source = fixture('full-featured.agent.yaml')
+    })
+    When('its description is cleared', () => {
+      output = updateExistingAgent(source, { ...parseAgentSource(), description: '' })
+    })
+    Then('the file no longer contains "description"', () =>
+      expect(output).not.toContain('description'),
+    )
   })
 
   Scenario('A phase round-trips its steps, including the agent step', ({ Given, When, Then }) => {

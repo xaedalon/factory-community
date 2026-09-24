@@ -40,6 +40,13 @@ and a newer board is the ordinary way to be in that position. The board and the 
 a non-JSON success outright rather than handing their callers nothing — naming the request and
 saying the daemon may be older than they are.
 
+**Clearing a field on the board now actually clears it.** Emptying a list — an agent's `args`, a
+phase's `variables`, a workflow's `needs` — or clearing a field back to its default looked like it
+saved and changed nothing: the writer does not emit an empty list, and the delete beside it was
+guarded on the value being absent, which an emptied list is not. So the key was neither written nor
+removed and the file kept its old line. The writer now asks whether the file still says what the
+value says, which keeps a default somebody wrote on purpose and removes what they actually cleared.
+
 **A refused argument says what you already have.** `args:` on a step is appended after the flags
 that confine the agent, so it is refused at plan time — but the common case is not somebody reaching
 for authority. It is somebody told that a step needs `args: ['--allowedTools', 'Bash(pnpm *)']` to

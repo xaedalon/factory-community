@@ -15,14 +15,28 @@ run your tests is an agent you will switch the profile off for.
 ## What it allows, without asking
 
 Inside the task's workspace — its own git worktree where the project uses them,
-the checkout otherwise — an agent may read, create, edit, move and delete files,
-and run development commands. No approval, no prompts, no interruptions. That
-includes installing the project's dependencies, running its tests, starting its
-containers and making local commits.
+the checkout otherwise — an agent may read, create, edit, move and delete files.
+No approval, no prompts, no interruptions.
 
-There is no allow-list of tools. Factory does not know what your project needs,
-and a profile that broke `npm test` on an unfamiliar repository would be turned
-off by everyone on their first afternoon.
+**Which commands it may run is a short allow-list, and which one depends on the
+CLI.** [`providers.md`](providers.md) has it per provider. Under Claude Code it
+is the package managers — `npm`, `pnpm`, `yarn`, `bun` — and nothing else, so
+installing dependencies and running the project's tests work, and `git`,
+`docker` and `curl` do not.
+
+The list exists because Claude Code auto-approves *edits* but not *commands*.
+Without it, an agent under this profile could not run `pnpm install` at all:
+measured against 2.1.281, it was refused, carried on, exited 0 and wrote a
+report full of ticks for work it had not done. A profile that breaks `npm test`
+on an unfamiliar repository is a profile everyone turns off on their first
+afternoon.
+
+It is worth being exact about what the list costs. `pnpm test` runs your
+project's own code and `pnpm exec` runs anything, so **inside those commands the
+workspace boundary does not hold.** That is why the list is package managers and
+nothing else: an interpreter would be the same hole with none of the reason.
+`Bash(node *)` was measured writing outside the workspace on the first
+attempt — it is not on the list and will not be.
 
 ## What it does not allow
 
@@ -38,7 +52,7 @@ off by everyone on their first afternoon.
 
 When something is withheld, the run says so against the step that lost it —
 names only, never values. When an agent is refused something, the refusal is
-recorded on the run, with the path if the refusal named one.
+recorded on the run, with the path or the command the refusal named.
 
 ## What it is not
 

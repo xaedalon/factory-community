@@ -62,12 +62,41 @@ session:
 #   --permission-mode dontAsk  means "do not ask, and deny" — Write was refused
 #                              session-wide.
 #
+# Re-measured against 2.1.281 on 2026-09-24, after a supervised run found that
+# an agent could no longer install dependencies or run tests. `--tools` still
+# grants Bash — that part never changed — but `acceptEdits` auto-approves
+# *edits* and not arbitrary commands, so a command needs approval, and
+# `--permission-prompts none` turns needing approval into being denied. The
+# agent then exits 0 and writes a report full of ticks for work it never did.
+#
+#   node --version      allowed      read-only commands were always fine
+#   pnpm --version      DENIED       "…this session has no approval surface…"
+#
+# Hence `--allowedTools`, and hence the shape of it. Each entry was measured:
+#
+#   --allowedTools "Bash(pnpm *)"   pnpm runs; a write outside is still REFUSED
+#   --allowedTools Bash             pnpm runs; a write outside SUCCEEDS
+#   --allowedTools "Bash(node *)"   node runs; node -e writeFileSync ESCAPES
+#
+# So: prefix rules, never a bare tool name, and **no interpreters**.
+# `--restricted` confines Factory's file tools and the shell's own redirection;
+# it cannot confine what a child process does with its own syscalls, so any
+# entry that runs arbitrary code hands that entry the whole filesystem.
+#
+# Package managers are on the list with open eyes. `pnpm test` runs the
+# project's own code, and `pnpm exec` runs anything at all — so this widens the
+# Default profile, and `docs/security/default-profile.md` says so rather than
+# implying a boundary that is not there. The alternative was an agent that
+# cannot run your tests, which is an agent nobody keeps confined for long.
+#
 # What the flags below were measured to do, in a neutral directory:
 #   write a file in the workspace      OK
 #   run a shell command                OK
+#   install dependencies, run tests    OK   (2.1.281, via --allowedTools)
 #   write a file outside the workspace REFUSED ("--restricted confines the file
 #                                      tools to the working directory")
 #   shell redirection outside it       REFUSED
+#   node -e "…writeFileSync('/tmp/x')" REFUSED (node is not on the list)
 # and the run never hung, which is what `--permission-prompts none` buys:
 # anything that would prompt is denied instead of waiting for a person who
 # is not there.
@@ -85,6 +114,15 @@ permissionArgs:
     - 'acceptEdits'
     - '--permission-prompts'
     - 'none'
+    # Package managers only — see the measurements above. A bare `Bash` or any
+    # interpreter here removes the workspace boundary entirely.
+    #
+    # One flag with a comma-separated value, not four flags: `--help` declares
+    # it `<tools...>`, and a repeated variadic option replaces rather than
+    # appends — four flags would leave only the last one in force, which is the
+    # kind of mistake that looks like it works.
+    - '--allowedTools'
+    - 'Bash(npm *),Bash(pnpm *),Bash(yarn *),Bash(bun *)'
   full-access: ['--permission-mode', 'bypassPermissions']
 
 # Measured to extend the confinement: a file in the added directory was written

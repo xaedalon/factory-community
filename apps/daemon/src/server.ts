@@ -6,6 +6,7 @@ import { registerBundleRoutes } from './routes/bundles.js'
 import { registerInspectionRoutes } from './routes/inspection.js'
 import { registerInstallationRoutes } from './routes/installation.js'
 import { registerTaskRoutes } from './routes/tasks.js'
+import { registerReliabilityRoutes } from './routes/reliability.js'
 import { registerProjectRoutes } from './routes/projects.js'
 import { registerEventRoutes } from './routes/events.js'
 import { registerMissingBoardRoute, registerWebRoutes } from './routes/web.js'
@@ -69,6 +70,7 @@ export function buildServer(
       ...(options.launch === undefined ? {} : { launch: options.launch }),
     })
     registerProjectRoutes(app, service, runtime)
+    registerReliabilityRoutes(app, service, runtime)
   }
 
   // Last, so neither catch-all ever shadows an API route.

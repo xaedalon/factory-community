@@ -445,6 +445,11 @@ export function registerTaskRoutes(
       progress: progressOf(task),
       blockers: dependencyView(tasks.dependencies())(task),
       artifacts: artifactsOf(task.id),
+      // Carried on the detail rather than fetched separately: the board draws
+      // the card, the drivers and the graph on this page, and a second request
+      // for something assembled from rows already read is a round trip for
+      // nothing. `unassessed` is a state here, never a zero.
+      reliability: service.reliabilitySummary(task.id),
       // Only on the detail: one string per task that no list view draws, and
       // resolving it reads the project row.
       workspace: workspaceOf(task),

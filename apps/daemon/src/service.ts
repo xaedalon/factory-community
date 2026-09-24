@@ -4,6 +4,7 @@ import {
   assessReliability,
   reconcile,
   runningInstallationPlugin,
+  stalenessOf,
   type FailureContext,
   type ProjectFacts,
   type ReconcileReport,
@@ -13,7 +14,11 @@ import { definitionPath, namesIn, planWorkflow, resolveWorkflow } from '@factory
 import {
   DEFAULT_RELIABILITY_POLICY,
   RELIABILITY_EVALUATOR_KIND,
+  attentionSummary,
+  capsFor,
+  type ReliabilityDriver,
   type ReliabilityEvaluatorCapability,
+  type ReliabilitySummary,
   artifactsRoot,
   resolveProfile,
   systemCanonical,
@@ -53,6 +58,17 @@ export interface Service {
   readonly tasks: TaskRepository
   readonly runs: RunRepository
   readonly projects: ProjectRepository
+  readonly reliability: ReliabilityRepository
+  /**
+   * What a task's reliability is right now, assembled from the history.
+   *
+   * On the service rather than in a route because two surfaces need it — the
+   * task detail payload and the reliability routes — and two assemblies of the
+   * same question is how they come to disagree.
+   */
+  readonly reliabilitySummary: (taskId: string) => ReliabilitySummary
+  /** The workflows a project can run, so a recommendation can name a real one. */
+  readonly workflowNames: (projectId?: string) => readonly string[]
   /** Which definitions each project can see. Served by the definition routes. */
   readonly chains: Chains
   /**
@@ -278,6 +294,45 @@ export async function createService(
     return [...new Set(chain.scopes.flatMap((scope) => namesIn(scope, 'workflow')))]
   }
 
+  /**
+   * What a task's reliability is right now.
+   *
+   * Assembled rather than stored — the newest assessment plus the drivers still
+   * active — and assembled *here*, so the task detail payload and the
+   * reliability routes cannot describe the same task differently. A stored
+   * column would be a third answer.
+   */
+  const reliabilitySummary = (taskId: string): ReliabilitySummary => {
+    const newest = reliability.newest(taskId)
+    const drivers = reliability.drivers(taskId)
+    const caps = (list: readonly ReliabilityDriver[]) =>
+      capsFor(list, DEFAULT_RELIABILITY_POLICY, [], [])
+    const attention = attentionSummary(drivers, newest?.score ?? 0, caps)
+    if (newest === undefined) return { taskId, state: 'unassessed', attention }
+
+    // Finished runs oldest first, which is the order staleness compares in.
+    const finished = [...runs.forTask(taskId)]
+      .reverse()
+      .filter((run) => run.state !== 'running')
+      .map((run) => run.id)
+    const stale = stalenessOf(newest, finished)
+
+    return {
+      taskId,
+      state: stale === undefined ? 'assessed' : 'stale',
+      score: newest.score,
+      rawScore: newest.rawScore,
+      coverage: newest.coverage,
+      delta: newest.delta,
+      dimensions: newest.dimensions,
+      caps: newest.caps,
+      assessedAt: newest.createdAt,
+      assessmentId: newest.id,
+      ...(stale === undefined ? {} : { staleReason: stale }),
+      attention,
+    }
+  }
+
   const workflow = (name: string, projectId?: string): WorkflowFacts | undefined => {
     const chain = chains.for(projectId) ?? runtime.chain
     const found = resolveWorkflow(chain, name)
@@ -366,6 +421,9 @@ export async function createService(
     tasks,
     runs,
     projects,
+    reliability,
+    reliabilitySummary,
+    workflowNames: workflowNamesFor,
     chains,
     workspace,
     engine,

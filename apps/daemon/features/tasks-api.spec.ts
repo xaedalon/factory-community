@@ -3292,4 +3292,191 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('the response is 400', () => expect(response.statusCode).toBe(400))
     })
   })
+
+  Rule('a task carries how much to trust it, and no surface can simply say', ({
+    RuleScenario,
+  }) => {
+    let detail: Record<string, unknown>
+
+    const exists = async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+      taskId = (response.body.task as { id: string }).id
+    }
+    const readTask = async (): Promise<void> => {
+      await call('GET', `/api/tasks/${taskId}`)
+      detail = response.body
+    }
+    const reliabilityOf = (body: Record<string, unknown>): Record<string, unknown> =>
+      body['reliability'] as Record<string, unknown>
+
+    RuleScenario('A task nobody has judged says so rather than scoring zero', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read the task', readTask)
+      Then('its reliability is "unassessed"', () =>
+        expect(reliabilityOf(detail)['state']).toBe('unassessed'),
+      )
+      // Not `toBe(0)` — a task nobody looked at is not a task that failed.
+      And('it carries no score', () => expect(reliabilityOf(detail)['score']).toBeUndefined())
+    })
+
+    RuleScenario('The reliability route agrees with the task payload', ({
+      Given,
+      When,
+      And,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read the task', readTask)
+      And('I read its reliability', () => call('GET', `/api/tasks/${taskId}/reliability`))
+      Then('both say the same state', () =>
+        expect(reliabilityOf(response.body)['state']).toBe(reliabilityOf(detail)['state']),
+      )
+    })
+
+    RuleScenario('An assessment can be asked for', ({ Given, When, Then, And }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I ask for an assessment', () =>
+        call('POST', `/api/tasks/${taskId}/reliability/assess`, {}),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('its reliability is "assessed"', () =>
+        expect(reliabilityOf(response.body)['state']).toBe('assessed'),
+      )
+      And('it carries a score', () =>
+        expect(typeof reliabilityOf(response.body)['score']).toBe('number'),
+      )
+    })
+
+    RuleScenario('History starts empty and grows', ({ Given, When, Then, And }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read its reliability history', () =>
+        call('GET', `/api/tasks/${taskId}/reliability/history`),
+      )
+      Then('0 assessments are listed', () =>
+        expect((response.body.items as unknown[]).length).toBe(0),
+      )
+      When('I ask for an assessment', () =>
+        call('POST', `/api/tasks/${taskId}/reliability/assess`, {}),
+      )
+      And('I read its reliability history', () =>
+        call('GET', `/api/tasks/${taskId}/reliability/history`),
+      )
+      Then('1 assessment is listed', () =>
+        expect((response.body.items as unknown[]).length).toBe(1),
+      )
+    })
+
+    RuleScenario('Next actions are offered for a task with nothing to do', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read its next actions', () =>
+        call('GET', `/api/tasks/${taskId}/reliability/next-actions`),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('no actions are offered', () => expect(response.body.actions).toEqual([]))
+    })
+
+    RuleScenario('There is no route that sets a score', ({ Given, When, Then }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I try to set its score to 100', () =>
+        call('POST', `/api/tasks/${taskId}/reliability/score`, { score: 100 }),
+      )
+      // Not "it is refused" — the route does not exist, which is a stronger
+      // guarantee than one that refuses.
+      Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    })
+  })
+
+  Rule('accepting a serious risk is a person\'s, and the daemon is what knows', ({
+    RuleScenario,
+  }) => {
+    let driverId = ''
+
+    const withDriver = async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+      taskId = (response.body.task as { id: string }).id
+      service.reliability.addDriver({
+        taskId,
+        title: 'checkout regression',
+        type: 'regression',
+        severity: 'high',
+        owner: 'agent',
+        dimension: 'regressionSafety',
+        scoreImpact: -4,
+      })
+      driverId = service.reliability.drivers(taskId)[0]?.id ?? ''
+    }
+    const act = (action: string, body: Record<string, unknown> = {}) =>
+      call('POST', `/api/tasks/${taskId}/reliability/drivers/${driverId}/${action}`, body)
+    /** A run Factory stamped, which is what makes a caller an agent. */
+    const asAgent = { initiator: { label: 'claude', runId: 'run-1', taskId: 'task-1' } }
+
+    RuleScenario('An agent cannot accept a high risk', ({ Given, When, Then, And }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('an agent tries to accept that driver', () => act('accept', asAgent))
+      Then('the response is 409', () => expect(response.statusCode).toBe(409))
+      And('the refusal says a person is required', () =>
+        expect(response.body.code).toBe('HUMAN_REQUIRED'),
+      )
+    })
+
+    RuleScenario('A person can accept a high risk', ({ Given, When, Then, And }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('a person accepts that driver', () => act('accept', { by: 'alex', reason: 'known' }))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the driver is "accepted"', () =>
+        expect((response.body.driver as { status: string }).status).toBe('accepted'),
+      )
+      And('it records who accepted it', () =>
+        expect((response.body.driver as { acceptedBy?: string }).acceptedBy).toBe('alex'),
+      )
+    })
+
+    RuleScenario('An agent can resolve a high risk', ({ Given, When, Then, And }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('an agent resolves that driver', () => act('resolve', asAgent))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the driver is "resolved"', () =>
+        expect((response.body.driver as { status: string }).status).toBe('resolved'),
+      )
+    })
+
+    RuleScenario('Accepting re-judges the task immediately', ({ Given, When, Then }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('a person accepts that driver', () => act('accept', { by: 'alex' }))
+      Then('the reliability comes back with the reply', () =>
+        expect((response.body.reliability as { state: string }).state).toBe('assessed'),
+      )
+    })
+
+    RuleScenario('A move the driver does not offer is refused with the ones it does', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      And('that driver has been resolved', () => act('resolve', { by: 'alex' }))
+      When('a person tries to resolve it again', () => act('resolve', { by: 'alex' }))
+      Then('the response is 409', () => expect(response.statusCode).toBe(409))
+      And('the refusal lists what it would accept', () =>
+        expect(response.body.actions).toContain('reopen'),
+      )
+    })
+
+    RuleScenario('Something that is not a driver action is refused', ({ Given, When, Then }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('a person tries to "obliterate" that driver', () => act('obliterate'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+  })
 })

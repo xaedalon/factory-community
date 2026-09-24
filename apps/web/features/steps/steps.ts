@@ -2593,3 +2593,59 @@ When('I try to create the task', async ({ page }) => {
 Then('the form says the task was refused', async ({ page }) => {
   await expect(page.getByTestId('error')).toContainText('could not make that task')
 })
+
+/* ---- profiles ------------------------------------------------------- */
+
+Given('the project defines the profile {string}', async ({ world }, name: string) => {
+  world.profile(
+    world.projectScope,
+    name,
+    `kind: factory.profile/v1\nname: ${name}\ncommands: [cargo]\n`,
+  )
+})
+
+When('I open the profiles page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/profiles')
+})
+
+Then('the profile {string} is listed', async ({ page }, name: string) => {
+  await expect(page.getByTestId(`row-${name}`)).toBeVisible()
+})
+
+When('I open the new profile page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/profiles/new')
+})
+
+When('I name it {string}', async ({ page }, name: string) => {
+  await page.locator('#pr-name').fill(name)
+})
+
+When('I allow the command {string}', async ({ page }, command: string) => {
+  // Typed into the draft box, then added — the list editor keeps the two apart
+  // so an unfinished entry is never part of the value.
+  await page.getByTestId('profile-commands-input').fill(command)
+  await page.getByTestId('profile-commands-add').click()
+})
+
+When('I save it', async ({ page }) => {
+  await page.getByTestId('save').click()
+  await expect(page).toHaveURL(/\/profiles$/)
+})
+
+When('I look at the YAML', async ({ page }) => {
+  await page.getByTestId('view-yaml').click()
+})
+
+Then('the preview says {string}', async ({ page }, text: string) => {
+  await expect(page.getByTestId('yaml-preview')).toContainText(text)
+})
+
+Then('it warns that the command runs whatever it is given', async ({ page }) => {
+  await expect(page.getByTestId('profile-interpreter-warning')).toBeVisible()
+})
+
+Then('it does not warn', async ({ page }) => {
+  await expect(page.getByTestId('profile-interpreter-warning')).toHaveCount(0)
+})

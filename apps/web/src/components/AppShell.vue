@@ -32,6 +32,9 @@ const nav: { heading?: string; items: { to: string; label: string; icon: IconNam
       { to: '/workflows', label: 'Workflows', icon: 'play' },
       { to: '/phases', label: 'Phases', icon: 'settings' },
       { to: '/agents', label: 'Agents', icon: 'profile' },
+      // `system` rather than `profile`: that icon is already the agents', and a
+      // profile is about what a run may reach rather than who does the work.
+      { to: '/profiles', label: 'Profiles', icon: 'system' },
       { to: '/bundles/import', label: 'Import', icon: 'import' },
     ],
   },

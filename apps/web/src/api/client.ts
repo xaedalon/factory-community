@@ -184,6 +184,14 @@ export interface ProviderEntry {
   effortValues: string[]
   provisional: boolean
   available: boolean
+  /**
+   * The flag that allows one command rather than all of them, if this CLI has one.
+   *
+   * Absent means a custom profile's command list cannot reach it. The profile
+   * editor says so while the list is being written, because it is true and
+   * there is nothing in the YAML that would reveal it.
+   */
+  commandAllowFlag?: string
 }
 
 export type TaskState =

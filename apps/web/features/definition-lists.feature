@@ -59,3 +59,44 @@ Feature: Seeing what is installed
     Given the daemon is not running
     When I open the workflows page
     Then the page says it cannot reach the daemon
+
+  Rule: a profile is edited like anything else, and says what it cannot do
+
+    A profile is a definition, so it gets the same list, the same editor and the
+    same YAML preview. What it needs beyond that is honesty about two things the
+    file cannot say for itself: that a command may already be allowed, and that a
+    provider may be unable to honour the list at all.
+
+    Scenario: Profiles are listed
+      Given the project defines the profile "development"
+      When I open the profiles page
+      Then the profile "development" is listed
+
+    Scenario: A profile can be written from the page
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      And I save it
+      Then the profile "buildtools" is listed
+
+    Scenario: The YAML preview shows what would be written
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      And I look at the YAML
+      Then the preview says "name: buildtools"
+      And the preview says "cargo"
+
+    Scenario: Allowing an interpreter warns before it is saved
+      # The parser warns too, but by then the decision is made. This is said
+      # while it is being typed.
+      When I open the new profile page
+      And I name it "risky"
+      And I allow the command "node"
+      Then it warns that the command runs whatever it is given
+
+    Scenario: An ordinary build tool does not warn
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      Then it does not warn

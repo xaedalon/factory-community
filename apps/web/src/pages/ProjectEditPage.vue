@@ -52,6 +52,17 @@ const check = ref('')
  * — not a default chosen here. Spending somebody's tokens on a model they never
  * named is the one thing this field exists to prevent.
  */
+/**
+ * The profiles this project could run under.
+ *
+ * The two Factory ships plus whatever the chain defines, read from the daemon
+ * rather than written here: a list in the page would go stale the moment
+ * somebody wrote a profile, and offering a name the daemon would refuse is
+ * worse than not offering it.
+ */
+const definedProfiles = ref<string[]>([])
+const profileOptions = computed(() => ['default', 'full-access', ...definedProfiles.value])
+
 const judgeModel = ref('')
 const judged = ref(true)
 const usesWorktrees = ref(true)
@@ -259,7 +270,17 @@ const canSave = computed(
   () => name.value.trim() !== '' && (isNew.value ? path.value.trim() !== '' : true),
 )
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // Never fatal: the picker still offers the two built-ins, which is what every
+  // installation has. A profile list that could not be read is a smaller
+  // problem than a page that will not open.
+  try {
+    definedProfiles.value = (await api.list('profile')).items.map((item) => item.name)
+  } catch {
+    definedProfiles.value = []
+  }
+})
 </script>
 
 <template>
@@ -497,7 +518,7 @@ onMounted(load)
             data-testid="project-profile"
             allow-empty
             empty-label="Follows the installation"
-            :options="['default', 'full-access']"
+            :options="profileOptions"
           />
           <p
             v-if="profile === 'full-access'"

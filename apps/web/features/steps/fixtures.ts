@@ -158,6 +158,10 @@ export class World {
     this.write(join(scope, 'phases', `${name}.phase.yaml`), body)
   }
 
+  profile(scope: string, name: string, body: string): void {
+    this.write(join(scope, 'profiles', `${name}.profile.yaml`), body)
+  }
+
   /**
    * A third-party plugin, on disk, loaded the way a real one would be.
    *

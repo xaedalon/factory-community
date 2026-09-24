@@ -88,6 +88,13 @@ export function registerInspectionRoutes(
       effortValues: entry.capability.descriptor.effortValues,
       provisional: entry.capability.descriptor.provisional,
       available: entry.capability.availability(runtime.env).available,
+      // Whether this CLI can be told that one command is allowed rather than
+      // all of them. Absent means a custom profile's command list does not
+      // reach it — which the profile editor says out loud, because it is true
+      // and invisible in the YAML.
+      ...(entry.capability.descriptor.commandAllowFlag === undefined
+        ? {}
+        : { commandAllowFlag: entry.capability.descriptor.commandAllowFlag }),
     })),
   }))
 

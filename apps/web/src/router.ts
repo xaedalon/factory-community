@@ -10,6 +10,8 @@ import WorkflowListPage from './pages/WorkflowListPage.vue'
 import PhaseListPage from './pages/PhaseListPage.vue'
 import EnvironmentsPage from './pages/EnvironmentsPage.vue'
 import AgentListPage from './pages/AgentListPage.vue'
+import ProfileListPage from './pages/ProfileListPage.vue'
+import ProfileEditPage from './pages/ProfileEditPage.vue'
 import AgentEditPage from './pages/AgentEditPage.vue'
 import PluginsPage from './pages/PluginsPage.vue'
 import SettingsPage from './pages/SettingsPage.vue'
@@ -46,6 +48,10 @@ export default createRouter({
     { path: '/agents', name: 'agents', component: AgentListPage },
     { path: '/agents/new', name: 'agent-new', component: AgentEditPage },
     { path: '/agents/:name', name: 'agent-edit', component: AgentEditPage },
+    { path: '/profiles', name: 'profiles', component: ProfileListPage },
+    // '/new' before '/:name', the same ordering every other kind needs.
+    { path: '/profiles/new', name: 'profile-new', component: ProfileEditPage },
+    { path: '/profiles/:name', name: 'profile-edit', component: ProfileEditPage },
     { path: '/phases', name: 'phases', component: PhaseListPage },
     { path: '/phases/new', name: 'phase-new', component: PhaseEditPage },
     { path: '/phases/:name', name: 'phase-edit', component: PhaseEditPage },

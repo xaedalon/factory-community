@@ -1,6 +1,7 @@
 import {
   CapabilityHost,
   builtinStepsPlugin,
+  reliabilityEvaluatorPlugin,
   type FactoryPlugin,
   type Problem,
 } from '@factory/core'
@@ -97,6 +98,7 @@ export interface Runtime {
 export const BUILTIN_PLUGINS = [
   builtinStepsPlugin,
   builtinDoctorPlugin,
+  reliabilityEvaluatorPlugin,
   claudeProvider,
   codexProvider,
   copilotProvider,

@@ -191,6 +191,21 @@ export function parseWorkflow(
     })
   }
 
+  // A warning rather than an error, deliberately. The builder writes a workflow
+  // before its phases are chosen, so refusing the file would make it impossible
+  // to create one in the browser at all. What must not happen is *running* it,
+  // and `resolvePlan` refuses that — this is the earlier, gentler notice, at the
+  // point somebody can still see it in the editor.
+  if (value.phases.length === 0) {
+    problems.push({
+      severity: 'warning',
+      message: 'Workflow lists no phases, so it will do nothing',
+      ...(options.file === undefined ? {} : { file: options.file }),
+      field: 'phases',
+      rule: 'workflow.noPhases',
+    })
+  }
+
   const duplicates = value.phases.filter((name, index) => value.phases.indexOf(name) !== index)
   for (const name of new Set(duplicates)) {
     problems.push({

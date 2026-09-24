@@ -349,3 +349,40 @@ Feature: Definitions become a runnable plan
       Then planning succeeds
       And a warning names the phase's working directory
       And phase "escape" runs in "/tmp"
+
+  Rule: a workflow that would run nothing is refused rather than run
+
+    This looked exactly like success. `runPlan` walks zero phases, returns
+    completed, and the run lands three milliseconds later with no steps and no
+    artifact — so the board draws a tick beside work that never happened. A
+    supervised run of ten tasks had a workflow shaped like this on every one of
+    them, and nobody could tell from the outside.
+
+    Counted in steps rather than phases, because "lists no phases" and "lists
+    only empty phases" are the same claim: there is nothing here to run.
+
+    Refused at plan time rather than reported at run time, so it takes the path
+    a missing phase already takes — no plan, a run recorded as refused, and the
+    task blocked with a reason.
+
+    Scenario: A workflow with no phases at all
+      Given the project scope defines a workflow "design" with no phases
+      When the workflow "design" is planned
+      Then planning fails
+      And a problem says the workflow has nothing to run
+
+    Scenario: A workflow whose only phase has no steps
+      Given the project scope defines a phase "think" with no steps
+      And the project scope defines a workflow "design" with the phase "think"
+      When the workflow "design" is planned
+      Then planning fails
+      And a problem says the workflow has nothing to run
+
+    Scenario: One empty phase beside a real one is not refused
+      # The workflow still runs something, and an empty phase is the author's
+      # business — the parser already warns about it.
+      Given the project scope defines a phase "think" with no steps
+      And the project scope defines a phase "work" that prints "building"
+      And the project scope defines a workflow "design" with the phases "think, work"
+      When the workflow "design" is planned
+      Then planning succeeds

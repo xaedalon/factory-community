@@ -1,8 +1,9 @@
 Feature: Doctor answers for the installation itself
 
-  Three rules about the files that decide what Factory loads. Two are new
-  because a page can now switch a plugin off, and one is a promise the code had
-  been making and not keeping.
+  Rules about the files Factory reads before it runs anything. Two came from a
+  page that can now switch a plugin off, one was a promise the code had been
+  making and not keeping, and one is a workflow that would do nothing — which
+  every other rule passed over in silence.
 
   Background:
     Given the built-in doctor rules are registered
@@ -99,3 +100,25 @@ Feature: Doctor answers for the installation itself
       Given a provider with different arguments per profile
       When doctor runs
       Then nothing is said about profiles
+
+  Rule: a workflow that lists no phases is reported
+
+    Every other rule passed it. `phase-references` iterates the phases a
+    workflow names, so a workflow naming none has nothing to check and is
+    called fine. The parser warns, but a warning lives in that file's own
+    problems and nobody opens a file they believe is healthy.
+
+    Planning refuses to run one. This is how somebody finds out before a task
+    blocks — a supervised run had a workflow shaped like this on ten tasks, and
+    the first notice anybody got was a run that finished in three milliseconds.
+
+    Scenario: A workflow with no phases is a warning naming it
+      Given the user scope has a workflow "design" with no phases
+      When doctor runs
+      Then a warning says "design" will do nothing
+      And it says a task that runs it is refused
+
+    Scenario: A workflow with a phase is not reported
+      Given the user scope has a workflow "design" with a phase
+      When doctor runs
+      Then nothing is reported about empty workflows

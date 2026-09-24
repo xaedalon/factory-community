@@ -1040,4 +1040,48 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
       And('phase "escape" runs in "/tmp"', () => expect(phase('escape')?.cwd).toBe('/tmp'))
     })
   })
+  Rule('a workflow that would run nothing is refused rather than run', ({ RuleScenario }) => {
+    const nothingToRun = () =>
+      expect(anyMessage('nothing to run')).toBe(true)
+
+    RuleScenario('A workflow with no phases at all', ({ Given, When, Then, And }) => {
+      Given('the project scope defines a workflow "design" with no phases', () => {
+        box.workflow(project, 'design', 'name: design\nphases: []\n')
+      })
+      When('the workflow "design" is planned', () => plan('design'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the workflow has nothing to run', nothingToRun)
+    })
+
+    RuleScenario('A workflow whose only phase has no steps', ({ Given, And, When, Then }) => {
+      Given('the project scope defines a phase "think" with no steps', () => {
+        box.phase(project, 'think', 'name: think\nsteps: []\n')
+      })
+      And('the project scope defines a workflow "design" with the phase "think"', () =>
+        workflow('design', 'think'),
+      )
+      When('the workflow "design" is planned', () => plan('design'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the workflow has nothing to run', nothingToRun)
+    })
+
+    RuleScenario('One empty phase beside a real one is not refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines a phase "think" with no steps', () => {
+        box.phase(project, 'think', 'name: think\nsteps: []\n')
+      })
+      And('the project scope defines a phase "work" that prints "building"', () => {
+        box.phase(project, 'work', 'name: work\nsteps: [{run: echo building}]\n')
+      })
+      And('the project scope defines a workflow "design" with the phases "think, work"', () => {
+        box.workflow(project, 'design', 'name: design\nphases: [think, work]\n')
+      })
+      When('the workflow "design" is planned', () => plan('design'))
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+    })
+  })
 })

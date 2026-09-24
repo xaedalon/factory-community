@@ -23,6 +23,8 @@ import type {
   StopReport,
   Run,
   Scheduling,
+  StreamEvent,
+  StreamReader,
   Task,
 } from '@factory/core'
 import {
@@ -1470,6 +1472,114 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('the task is blocked', () => expect(task.state).toBe('blocked'))
     })
   })
+  Rule('a refused command parks the run, whatever its exit code said', ({ RuleScenario }) => {
+    const COMMAND = 'pnpm install'
+    /** The CLI's own sentence, abbreviated. */
+    const WORDS = 'Permission for this tool use was denied.'
+
+    /**
+     * A provider that reports a refusal as a fact.
+     *
+     * Written here rather than borrowed from the Claude plugin on purpose: the
+     * engine consumes a *contract*, and a scenario that imported the one real
+     * implementation would stop being able to tell "the engine reads the
+     * contract" from "the engine reads Claude".
+     */
+    const refusingStream = (): StreamReader => {
+      let reported = false
+      const once = (): readonly StreamEvent[] => {
+        if (reported) return []
+        reported = true
+        return [{ refused: { tool: 'Bash', command: COMMAND, evidence: WORDS } }]
+      }
+      return { push: once, end: once }
+    }
+
+    /**
+     * Two phases, and the refusal is in the second.
+     *
+     * The count matters: it is what tells "resumed into the refused phase"
+     * apart from "resumed from the beginning", which a one-phase plan cannot.
+     */
+    const refusedInSecondPhase = (provides: string[] = []): void => {
+      const phases: ResolvedPhase[] = [
+        shellPhase('prepare', 'echo prepared'),
+        {
+          name: 'install',
+          approval: 'none',
+          cwd: process.cwd(),
+          steps: [
+            {
+              index: 0,
+              uses: 'agent',
+              // Exits 0, like the real thing. That is the entire point.
+              planned: {
+                describe: 'agent',
+                command: 'bash',
+                args: ['-c', 'echo "I could not install the dependencies."'],
+                stream: refusingStream,
+              },
+              raw: { uses: 'shell', run: 'echo' },
+            },
+          ],
+        },
+      ]
+      plans.set('build', {
+        plan: { ...planOf('build', phases), provides },
+        problems: [],
+      })
+    }
+
+    const givenRefused = (): void => refusedInSecondPhase()
+
+    RuleScenario('A run that succeeded with a refused command is parked, not finished', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the workflow "build" whose second phase is refused "pnpm install"', givenRefused)
+      And("it is the task's only workflow", () => assign('build'))
+      And('the task is queued', queue)
+      When('the engine works on it', runEngine)
+      Then('the task is awaiting approval', () => expect(task.state).toBe('awaiting_approval'))
+      And('the run is paused', () => expect(newest().state).toBe('paused'))
+      And('the task is not done', () => expect(task.state).not.toBe('done'))
+      And('a problem names the command "pnpm install"', () => {
+        const problem = problems.find((entry) => entry.rule === 'run.permissionRefused')
+        expect(problem, JSON.stringify(problems)).toBeDefined()
+        expect(problem?.message).toContain(COMMAND)
+      })
+    })
+
+    RuleScenario('Approving resumes the phase the command was refused in', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the workflow "build" whose second phase is refused "pnpm install"', givenRefused)
+      And("it is the task's only workflow", () => assign('build'))
+      And('the task is queued', queue)
+      When('the engine works on it', runEngine)
+      Then('the run continues from phase 1', () => expect(newest().resumePhase).toBe(1))
+    })
+
+    RuleScenario('A workflow\'s flags are not earned by a run that was refused a command', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the workflow "build" whose second phase is refused "pnpm install"', givenRefused)
+      And('it provides "installed"', () => refusedInSecondPhase(['installed']))
+      And("it is the task's only workflow", () => assign('build'))
+      And('the task is queued', queue)
+      When('the engine works on it', runEngine)
+      Then('the task does not have the flag "installed"', () => expect(task.flags).toEqual([]))
+    })
+  })
+
   Rule('a sequential workflow runs alone, wherever it is in the task\'s list', ({
     RuleScenario,
   }) => {

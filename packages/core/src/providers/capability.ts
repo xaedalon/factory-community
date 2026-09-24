@@ -6,6 +6,7 @@ import { MODEL_ROLES } from '../model-roles.js'
 import { permissionArgsFor, type ProviderDescriptor, type ProviderFeature } from './descriptor.js'
 import { DEFAULT_PROFILE, isConfined, type ExecutionProfile } from '../security/profile.js'
 import type { DenialPattern } from '../security/denials.js'
+import type { StreamReaderFactory } from './stream.js'
 
 export const PROVIDER_KIND = 'provider'
 
@@ -99,6 +100,19 @@ export interface ProviderCapability extends Capability {
     env: Readonly<Record<string, string | undefined>>,
     options?: { extraDirectories?: readonly string[]; configFile?: string },
   ) => Availability
+  /**
+   * How to read this CLI's structured output, if it emits any.
+   *
+   * Code rather than data, and on the capability rather than the descriptor,
+   * because a transcript format is a parser and a parser is not expressible in
+   * YAML. It sits here rather than in its own capability kind for one reason: a
+   * reader without the provider whose output it reads is meaningless, and a
+   * separate kind would make that pairing something to get wrong.
+   *
+   * Absent means "read the output as text", which is every provider that has
+   * not been measured. Degrading by absence, as everywhere else here.
+   */
+  readonly stream?: StreamReaderFactory
 }
 
 /**

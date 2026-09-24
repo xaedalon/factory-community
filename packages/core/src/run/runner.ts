@@ -5,7 +5,8 @@ import type { Problem } from '../problems.js'
 import type { ResolvedPhase, ResolvedPlan, ResolvedStep } from '../plan/resolve.js'
 import { retryPolicy } from '../schema/step.js'
 import { agentEnvironment, withheldMessage } from '../security/environment.js'
-import { DenialScanner, type Denial } from '../security/denials.js'
+import { DenialScanner, refusalDenial, type Denial } from '../security/denials.js'
+import type { StreamEvent } from '../providers/stream.js'
 import {
   processGroup,
   type ProcessRegistry,
@@ -465,7 +466,36 @@ function runStep(
     // Watched for refusals as it goes, because a confined agent reports being
     // refused and then exits 0 — there is no failure to inspect afterwards.
     const scanner = new DenialScanner(step.planned.denialPatterns ?? [])
+    // A refusal the provider stated outright, rather than one read out of its
+    // prose. Kept separate from the scanner's findings until they are joined at
+    // the end, because they are found by different means and only one of them
+    // can name a command.
+    const stated = new Map<string, Denial>()
+
+    // One reader per step, never shared: it remembers tool-use ids so that a
+    // denial arriving three events later can still say which command it was.
+    const reader = step.planned.stream?.()
+    const consume = (events: readonly StreamEvent[]): void => {
+      for (const event of events) {
+        if (event.scan !== undefined) scanner.push(event.scan)
+        if (event.refused !== undefined) {
+          const denial = refusalDenial(event.refused)
+          if (!stated.has(denial.id)) stated.set(denial.id, denial)
+        }
+        if (event.log !== undefined) {
+          options.onOutput?.(event.log.text, event.log.stream, step, phase)
+        }
+      }
+    }
+
     const observe = (text: string, stream: 'stdout' | 'stderr'): void => {
+      // stderr is not the transcript. A CLI writes its warnings and its crash
+      // there, and feeding those to a JSON reader would swallow exactly the
+      // output somebody debugging a failed run needs.
+      if (reader !== undefined && stream === 'stdout') {
+        consume(reader.push(text))
+        return
+      }
       scanner.push(text)
       options.onOutput?.(text, stream, step, phase)
     }
@@ -476,7 +506,10 @@ function runStep(
     const done = (partial: StepOutcome) => {
       if (settled) return
       settled = true
-      const found = scanner.denials()
+      // Whatever never got its newline. A process that is killed mid-line still
+      // owes its last event.
+      if (reader !== undefined) consume(reader.end())
+      const found = [...stated.values(), ...scanner.denials()]
       const outcome: StepOutcome = {
         ...partial,
         ...(found.length === 0 ? {} : { denials: found }),

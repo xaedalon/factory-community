@@ -33,6 +33,7 @@ export * from './yaml/serialize.js'
 export * from './providers/descriptor.js'
 export * from './providers/capability.js'
 export * from './providers/discover.js'
+export * from './providers/stream.js'
 
 export * from './plan/variables.js'
 export * from './plan/resolve.js'

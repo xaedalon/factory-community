@@ -72,6 +72,18 @@ export {
   toShellString,
 } from '@factory/core'
 
+// --- reading a provider's structured output ------------------------------
+//
+// The one part of a provider that cannot be a YAML file: a transcript format
+// is a parser. It is here rather than in core's own switch because what
+// `--output-format stream-json` means is Claude Code's business, and a third
+// party shipping a provider must be able to read its own CLI's events without
+// a core change. `LineBuffer` comes with it because every line-delimited
+// format needs the same three lines, and getting them wrong is invisible until
+// a chunk boundary lands mid-object.
+export type { RefusedAction, StreamEvent, StreamReader, StreamReaderFactory } from '@factory/core'
+export { LineBuffer } from '@factory/core'
+
 // --- contributing a setup step ------------------------------------------
 //
 // Widened for the same reason as the diagnostic below: Pro knows whether it is

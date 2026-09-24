@@ -67,17 +67,28 @@ where it stops. Use Factory on work you can review and revert.
 
 ## What happens when something is refused
 
-Two cases, because a refused agent does not always fail.
+Three cases, because a refused agent does not always fail — and because what it
+was refused matters more than whether it did.
 
-- **The run failed.** It is *paused* rather than blocked: the task moves to
-  awaiting approval, keeps its place, and approving it continues from the phase
-  that stopped rather than from the beginning.
-- **The run succeeded anyway.** It is left alone — the work that mattered may
-  well be done, and interrupting it would defeat the point — and the refusal is
-  recorded so nobody has to find out by reading a transcript.
+- **A command was refused.** The run is *paused*, whatever its exit code said.
+  A refused `pnpm install` means the install did not happen, the tests that ran
+  afterwards ran against nothing, and every tick in the report after that point
+  was written without it. The task moves to awaiting approval naming the exact
+  command, and approving continues from the phase it was refused in.
+- **A path was refused and the run failed.** Also paused: it was going to stop
+  either way, so keeping its place is strictly better than blocking it.
+- **A path was refused and the run succeeded.** Left alone. The work that
+  mattered may well be done — the agent writes somewhere else and carries on —
+  and interrupting it would defeat the point. The refusal is recorded either
+  way, so nobody has to find out by reading a transcript.
 
-Either way the remedy is the same: allow the directory for that project, or run
-that project under [Full Access](full-access.md).
+The remedy for a path is to allow the directory for that project. The remedy for
+a command is to add it to the provider's allowed tools, in its descriptor. Both
+are also answered by running that project under [Full Access](full-access.md).
+
+Factory can only park what it can see, and seeing a refused command needs the
+provider to say so as a fact rather than in prose. Claude Code does;
+[`providers.md`](providers.md) says which others have been measured.
 
 ## Where the setting lives
 

@@ -217,6 +217,11 @@ export const agentStepKind: StepKindCapability = defineStepKind({
       ...(rendered.denialPatterns === undefined
         ? {}
         : { denialPatterns: rendered.denialPatterns }),
+      // Off the capability rather than the rendered command: a reader belongs
+      // to the CLI, not to one invocation of it. The provider that has none
+      // contributes nothing and its output is read as text, which is what every
+      // provider did before this existed.
+      ...(chosen.provider.stream === undefined ? {} : { stream: chosen.provider.stream }),
       ...(rendered.stdin === undefined ? {} : { stdin: rendered.stdin }),
       ...(resuming === undefined ? {} : { retryArgs: resuming.args }),
       ...(rendered.session === undefined

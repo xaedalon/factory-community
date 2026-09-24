@@ -130,7 +130,22 @@ permissionArgs:
 # root, which lives under the project rather than the worktree.
 directoryFlag: '--add-dir'
 
-extraArgs: []
+# The transcript, as events rather than as a final paragraph.
+#
+# This is what makes a refused command visible. Measured on 2.1.281: a run whose
+# `git --version` was denied still ended
+#   {"type":"result","subtype":"success","is_error":false}
+# and exited 0. In the same stream the CLI had already said, in an event of its
+# own, exactly what happened:
+#   {"type":"system","subtype":"permission_denied","tool_use_id":"toolu_…"}
+# — a kind of event, not a sentence, which is the point. The wording changes
+# between the CLI and the agent's own summary of it; the event kind does not.
+#
+# `--verbose` is required: without it `--output-format stream-json` is refused
+# in print mode. `src/stream.ts` is the reader, and it passes anything that is
+# not JSON straight through, so removing these two flags degrades to the old
+# behaviour rather than to a wall of nothing.
+extraArgs: ['--output-format', 'stream-json', '--verbose']
 
 # How a refusal reads, taken verbatim from probes run on 2026-09-15 rather than
 # from documentation. The Default profile works by handing the CLI the flags

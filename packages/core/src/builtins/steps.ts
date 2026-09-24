@@ -23,6 +23,7 @@ import {
 import { DEFAULT_PROFILE, type ExecutionProfile } from '../security/profile.js'
 import { worktreeStepKind } from './worktree.js'
 import type { Problem } from '../problems.js'
+import { grantsFor } from '../schema/profile.js'
 import { MODEL_ROLES, type ModelRole } from '../model-roles.js'
 import { artifactFile, artifactsRoot, joinPath } from '../task/paths.js'
 
@@ -247,6 +248,11 @@ export const agentStepKind: StepKindCapability = defineStepKind({
       allowedDirectories: [
         ...new Set([artifactsRootFor(context), ...(context.allowedDirectories ?? [])]),
       ],
+      // What a custom profile adds, narrowed to the provider that is about to
+      // run. Absent under a built-in, where it is a no-op anyway.
+      ...(context.profileDefinition === undefined
+        ? {}
+        : { grants: grantsFor(context.profileDefinition, chosen.provider.id) }),
     }
     const rendered = chosen.provider.render(request)
 

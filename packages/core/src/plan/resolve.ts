@@ -12,6 +12,7 @@ import {
 import { PROVIDER_KIND, checkAgentStep, type ProviderCapability } from '../providers/capability.js'
 import { isAgentStep, type AgentStep } from '../builtins/steps.js'
 import type { Approval, Phase } from '../schema/phase.js'
+import type { Profile } from '../schema/profile.js'
 import { artifactFile, artifactsRoot, joinPath } from '../task/paths.js'
 import type {
   Scheduling,
@@ -92,6 +93,13 @@ export interface PlanRequest {
    * decision. Everything else the profile affects is decided at render time.
    */
   readonly profile?: ExecutionProfile
+  /**
+   * The profile's definition, when it is a custom one.
+   *
+   * Resolved by whoever has a scope chain — core cannot read one. Absent under a
+   * built-in profile, which is every run that has not chosen otherwise.
+   */
+  readonly profileDefinition?: Profile
   /**
    * How to resolve a path before comparing it to the workspace.
    *
@@ -311,6 +319,9 @@ export function resolvePlan(request: PlanRequest): PlanResult {
         cwd,
         artifacts,
         profile,
+        ...(request.profileDefinition === undefined
+          ? {}
+          : { profileDefinition: request.profileDefinition }),
         ...(request.allowedDirectories === undefined
           ? {}
           : { allowedDirectories: request.allowedDirectories }),

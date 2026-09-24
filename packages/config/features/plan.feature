@@ -410,6 +410,43 @@ Feature: Definitions become a runnable plan
       When the workflow "design" is planned
       Then planning succeeds
 
+  Rule: a project runs under the profile it names, or refuses to plan
+
+    A profile is a definition, so it can be missing — and a missing one must not
+    quietly become Default. A project that asked to run under `development` and
+    silently ran under something else is the failure the stored-profile guard
+    already exists to stop, one layer up.
+
+    Scenario: A named profile's commands reach the agent's command line
+      Given the project scope defines the profile "development" allowing "cargo"
+      And the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned under the profile "development"
+      Then planning succeeds
+      And the step's command allows "Bash(cargo *)"
+      And the step's command still confines it
+
+    Scenario: A profile no scope defines refuses to plan
+      Given the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned under the profile "nowhere"
+      Then planning fails
+      And a problem says no scope defines that profile
+      And the problem says Factory will not fall back
+
+    Scenario: A profile that does not parse refuses to plan, and says why
+      Given the project scope defines the profile "broken" with an unknown key
+      And the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned under the profile "broken"
+      Then planning fails
+
+    Scenario: The built-in profiles need no definition
+      Given the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned
+      Then planning succeeds
+
   Rule: a step cannot argue its way past the profile it runs under
 
     `args:` is appended to the rendered command *after* the permission

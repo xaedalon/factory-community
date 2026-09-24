@@ -319,6 +319,12 @@ importers:
         specifier: workspace:*
         version: link:../../plugin-sdk
 
+  packages/plugins/reliability-agent:
+    dependencies:
+      '@factory/plugin-sdk':
+        specifier: workspace:*
+        version: link:../../plugin-sdk
+
   packages/plugins/task-diffity:
     dependencies:
       '@factory/plugin-sdk':
@@ -370,6 +376,9 @@ importers:
       '@factory/provider-copilot':
         specifier: workspace:*
         version: link:../plugins/provider-copilot
+      '@factory/reliability-agent':
+        specifier: workspace:*
+        version: link:../plugins/reliability-agent
       '@factory/task-diffity':
         specifier: workspace:*
         version: link:../plugins/task-diffity

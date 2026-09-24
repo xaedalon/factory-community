@@ -1,0 +1,11 @@
+{
+  "name": "@factory/reliability-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Asks an agent to judge what Factory cannot observe on its own.",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist"],
+  "scripts": { "build": "tsc --build" },
+  "dependencies": { "@factory/plugin-sdk": "workspace:*" }
+}

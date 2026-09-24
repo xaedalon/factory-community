@@ -3293,6 +3293,114 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a project says which model judges its work, and whether one does', ({
+    RuleScenario,
+  }) => {
+    let directory = ''
+    let added = ''
+
+    const withNothing = (): void => {
+      directory = join(root, `judged-${String(added.length)}-${String(Date.now())}`)
+      mkdirSync(directory, { recursive: true })
+    }
+    const register = async (): Promise<void> => {
+      await call('POST', '/api/projects', { name: `judged-${String(Date.now())}`, path: directory })
+      added = (response.body.project as { id: string } | undefined)?.id ?? ''
+    }
+    /** Read back from the list: the row is the truth, not the reply that wrote it. */
+    const stored = async (): Promise<
+      { reliabilityModel?: string; reliabilityEnabled?: boolean } | undefined
+    > => {
+      await call('GET', '/api/projects')
+      return (
+        response.body.items as {
+          id: string
+          reliabilityModel?: string
+          reliabilityEnabled?: boolean
+        }[]
+      ).find((item) => item.id === added)
+    }
+    const modelIs = (model: string) => async (): Promise<void> => {
+      expect((await stored())?.reliabilityModel).toBe(model)
+    }
+    const noModel = async (): Promise<void> => {
+      expect((await stored())?.reliabilityModel).toBeUndefined()
+    }
+    const setModel = (model: unknown) => (): Promise<void> =>
+      call('PATCH', `/api/projects/${added}`, { reliabilityModel: model })
+    const ok = (): void => expect(response.statusCode).toBe(200)
+    const refused = (): void => expect(response.statusCode).toBe(400)
+
+    RuleScenario('A new project names no model and is judged', ({ Given, When, Then, And }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      When('I add a project at that directory', register)
+      Then('the project names no judging model', noModel)
+      And('the project is judged', async () => {
+        expect((await stored())?.reliabilityEnabled).toBe(true)
+      })
+    })
+
+    RuleScenario('A model can be chosen', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      When('I set that project\'s judging model to "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      Then('the response is 200', ok)
+      And('the project\'s judging model is "claude-opus-5-5"', modelIs('claude-opus-5-5'))
+    })
+
+    RuleScenario('A model can be cleared', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      And('that project\'s judging model is "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      When("I clear that project's judging model", setModel(null))
+      Then('the response is 200', ok)
+      And('the project names no judging model', noModel)
+    })
+
+    RuleScenario('Judging can be switched off without losing the model', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      And('that project\'s judging model is "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      When("I stop that project's work being judged", () =>
+        call('PATCH', `/api/projects/${added}`, { reliabilityEnabled: false }),
+      )
+      Then('the response is 200', ok)
+      And('the project is not judged', async () => {
+        expect((await stored())?.reliabilityEnabled).toBe(false)
+      })
+      And('the project\'s judging model is "claude-opus-5-5"', modelIs('claude-opus-5-5'))
+    })
+
+    RuleScenario('A model that is not text is refused, and the refusal names the field', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      When("I set that project's judging model to the number 7", setModel(7))
+      Then('the response is 400', refused)
+      And('the refusal names the judging model', () => {
+        expect(response.body.error as string).toContain('reliabilityModel')
+      })
+    })
+
+    RuleScenario('Judging that is not true or false is refused', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      When('I set that project\'s judging to "maybe"', () =>
+        call('PATCH', `/api/projects/${added}`, { reliabilityEnabled: 'maybe' }),
+      )
+      Then('the response is 400', refused)
+    })
+  })
+
   Rule('a task carries how much to trust it, and no surface can simply say', ({
     RuleScenario,
   }) => {

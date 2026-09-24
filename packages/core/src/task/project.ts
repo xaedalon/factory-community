@@ -111,6 +111,32 @@ export interface Project {
    * something different depending on which task was running.
    */
   readonly grantedDirectories: readonly string[]
+  /**
+   * The model that judges this project's work, when one does.
+   *
+   * The deterministic evaluator is free and always runs. An agent evaluator
+   * costs tokens on every run that produced something, and what that is worth
+   * spending differs between a weekend project and a payments service — so the
+   * choice is the project's, and a powerful model is usually the right one.
+   *
+   * Absent means nobody has said, which is why it is not the same as
+   * `reliabilityEnabled: false`: one of them starts working the moment a model
+   * is named, and the other does not.
+   *
+   * A role (`strong`, `balanced`, `fast`) or a literal model id, because that
+   * is what `RenderRequest.model` already accepts and a second vocabulary for
+   * the same field would be one to keep in step.
+   */
+  readonly reliabilityModel?: string
+  /**
+   * Whether this project's work is judged at all.
+   *
+   * On by default: a task that says how much to trust it is the feature, and a
+   * project that has to opt in is one where the answer is missing precisely
+   * where nobody thought to look. Off keeps the model that was chosen, so
+   * turning it back on is one click rather than two decisions.
+   */
+  readonly reliabilityEnabled: boolean
   readonly createdAt: string
 }
 

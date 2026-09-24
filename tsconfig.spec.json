@@ -41,6 +41,9 @@
       ],
       "@factory/mcp": [
         "./packages/mcp/src/index.ts"
+      ],
+      "@factory/reliability-agent": [
+        "./packages/plugins/reliability-agent/src/index.ts"
       ]
     }
   },

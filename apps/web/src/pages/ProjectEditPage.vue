@@ -45,6 +45,15 @@ const branch = ref('main')
  * is added, from what is actually in the repository.
  */
 const check = ref('')
+/**
+ * The model that reads this project's work, when one does.
+ *
+ * Blank means nobody has said, and nobody having said means no agent evaluator
+ * — not a default chosen here. Spending somebody's tokens on a model they never
+ * named is the one thing this field exists to prevent.
+ */
+const judgeModel = ref('')
+const judged = ref(true)
 const usesWorktrees = ref(true)
 const usesEnvironments = ref(false)
 const profile = ref('')
@@ -99,6 +108,8 @@ async function load(): Promise<void> {
     path.value = found.path
     branch.value = found.defaultBranch
     check.value = found.check ?? ''
+    judgeModel.value = found.reliabilityModel ?? ''
+    judged.value = found.reliabilityEnabled !== false
     usesWorktrees.value = found.usesWorktrees
     usesEnvironments.value = found.usesEnvironments
     profile.value = found.profile ?? ''
@@ -122,6 +133,36 @@ const cannotUseWorktrees = computed(() => loaded.value !== undefined && !loaded.
 watch(cannotUseWorktrees, (blocked) => {
   if (blocked) usesWorktrees.value = false
 })
+
+/**
+ * Take the reliability pipeline into this project.
+ *
+ * Reads the bundle Factory ships and posts it back through the ordinary import
+ * route — the same door a person's own file goes through, so there is one
+ * implementation of importing and one set of conflict rules. Only offered for a
+ * project that exists: there is nowhere to write it until then.
+ */
+const importing = ref(false)
+const imported = ref<string[]>([])
+
+async function importReliability(): Promise<void> {
+  if (isNew.value) return
+  importing.value = true
+  error.value = undefined
+  try {
+    const bundle = await api.exampleBundle('reliability')
+    const result = await api.importBundle(bundle.text, {
+      scope: 'project',
+      dryRun: false,
+      project: id.value as string,
+    })
+    imported.value = result.written ?? []
+  } catch (caught) {
+    error.value = caught instanceof ApiError ? caught.message : String(caught)
+  } finally {
+    importing.value = false
+  }
+}
 
 async function save(): Promise<void> {
   error.value = undefined
@@ -160,6 +201,8 @@ async function save(): Promise<void> {
       tone: tone.value ?? null,
       initials: letters.value ?? null,
       check: check.value.trim() === '' ? null : check.value.trim(),
+      reliabilityModel: judgeModel.value.trim() === '' ? null : judgeModel.value.trim(),
+      reliabilityEnabled: judged.value,
     })
     // A scaffold *error* is a reason to stay: it is about this form, and the
     // person is mid-edit. A scaffold *report* is a result, and travels.
@@ -305,6 +348,39 @@ onMounted(load)
       </FieldRow>
 
       <FieldRow
+        v-if="!isNew"
+        label="Reliability"
+        icon="check"
+        hint="Factory judges every run whatever your workflows are. This adds the five-stage pipeline it was designed around — analysis, design, implementation, validation, verification — into this repository, where you can edit it."
+      >
+        <div>
+          <button
+            type="button"
+            class="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm text-[var(--color-ink)] hover:bg-[var(--color-raised)]"
+            data-testid="import-reliability"
+            :disabled="importing"
+            @click="importReliability"
+          >
+            {{ importing ? 'Importing…' : 'Add the reliability workflows' }}
+          </button>
+          <!-- The files, not a count. Factory has just written into somebody's
+               working copy, and the next thing that happens is a `git status`
+               they were not expecting — the same reason the scaffold report
+               below names every path. -->
+          <div
+            v-if="imported.length > 0"
+            class="mt-1.5 text-meta text-[var(--color-ink-muted)]"
+            data-testid="import-reliability-done"
+          >
+            <p>Written into this repository:</p>
+            <ul class="mt-0.5 space-y-0.5">
+              <li v-for="file in imported" :key="file" class="font-mono text-xs">{{ file }}</li>
+            </ul>
+          </div>
+        </div>
+      </FieldRow>
+
+      <FieldRow
         label="Checked by"
         icon="check"
         for="project-check"
@@ -316,6 +392,22 @@ onMounted(load)
           mono
           data-testid="project-check"
           placeholder="pnpm test"
+        />
+      </FieldRow>
+
+      <FieldRow
+        v-if="!isNew"
+        label="Judged by"
+        icon="check"
+        for="project-judge-model"
+        hint="The model that reads the work and says what is still uncertain. Left empty, nothing reads it — Factory still judges every run from what it observed, which costs nothing. Passed to whichever agent CLI is installed, so name a model that one understands."
+      >
+        <TextInput
+          id="project-judge-model"
+          v-model="judgeModel"
+          mono
+          data-testid="project-judge-model"
+          placeholder="claude-opus-5-5"
         />
       </FieldRow>
 
@@ -335,6 +427,15 @@ onMounted(load)
         <p class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
           How work runs here
         </p>
+
+        <ToggleField
+          v-model="judged"
+          label="Judge this project's work"
+          icon="check"
+          data-testid="project-judged-field"
+          when-on="Every run is scored on what Factory observed, and the task says how much to trust it."
+          when-off="Nothing is judged here. Existing history is kept."
+        />
 
         <ToggleField
           v-model="usesWorktrees"

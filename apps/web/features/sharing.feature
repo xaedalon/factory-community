@@ -91,3 +91,39 @@ Feature: Sharing a workflow with someone else
     And I paste a document that is not a bundle
     Then the import is refused
     And I am told it is not a bundle
+
+  Rule: the bundles Factory ships are one click, not a path in node_modules
+
+    The reliability pipeline was shipped beside the board and reachable only by
+    somebody who knew it was inside a package directory and typed the path at a
+    terminal. A bundle nobody can find is a bundle nobody uses.
+
+    It goes in through the ordinary import path, so what lands in the repository
+    is what the preview screen would have shown — one door, one set of rules.
+
+    Scenario: The project page offers the reliability workflows
+      Given a project
+      When I open that project's settings
+      Then it offers to add the reliability workflows
+
+    Scenario: Adding them writes them into the project
+      Given a project
+      When I open that project's settings
+      And I add the reliability workflows
+      Then it says what was written
+      And the workflow "analysis" is in the project
+
+  Rule: a project says which model reads its work
+
+    Scenario: A new project names none
+      Given a project
+      When I open that project's settings
+      Then no judging model is named
+
+    Scenario: A model can be named and it stays named
+      Given a project
+      When I open that project's settings
+      And I name "claude-opus-5-5" as the judging model
+      And I save the project
+      And I open that project's settings
+      Then the judging model is "claude-opus-5-5"

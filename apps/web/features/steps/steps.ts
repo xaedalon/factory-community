@@ -2446,3 +2446,54 @@ Then('it asks why', async ({ page }) => {
 Then('the drivers list is not drawn', async ({ page }) => {
   await expect(page.getByTestId('reliability-drivers')).toHaveCount(0)
 })
+
+/* ---- the bundles Factory ships, and who judges a project ------------- */
+
+/** The project these scenarios open. Registered, not the suite's default one. */
+let settingsProject = ''
+
+Given('a project', async ({ world }) => {
+  await world.startDaemon()
+  settingsProject = await world.addProject('judged', world.makeRepository('judged'))
+})
+
+When("I open that project's settings", async ({ page }) => {
+  await page.goto(`/projects/${settingsProject}`)
+  await expect(page.getByTestId('save-project')).toBeVisible()
+})
+
+Then('it offers to add the reliability workflows', async ({ page }) => {
+  await expect(page.getByTestId('import-reliability')).toBeVisible()
+})
+
+When('I add the reliability workflows', async ({ page }) => {
+  await page.getByTestId('import-reliability').click()
+})
+
+Then('it says what was written', async ({ page }) => {
+  await expect(page.getByTestId('import-reliability-done')).toBeVisible()
+})
+
+Then('the workflow {string} is in the project', async ({ page }, name: string) => {
+  // Read off what the page says was written, not off the workflows list: the
+  // list shows the daemon's own chain, and this landed in the project's scope —
+  // which is the whole point of importing it against a project.
+  await expect(page.getByTestId('import-reliability-done')).toContainText(`${name}.workflow.yaml`)
+})
+
+Then('no judging model is named', async ({ page }) => {
+  await expect(page.getByTestId('project-judge-model')).toHaveValue('')
+})
+
+When('I name {string} as the judging model', async ({ page }, model: string) => {
+  await page.getByTestId('project-judge-model').fill(model)
+})
+
+When('I save the project', async ({ page }) => {
+  await page.getByTestId('save-project').click()
+  await expect(page).toHaveURL(/\/projects$/)
+})
+
+Then('the judging model is {string}', async ({ page }, model: string) => {
+  await expect(page.getByTestId('project-judge-model')).toHaveValue(model)
+})

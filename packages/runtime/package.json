@@ -23,6 +23,7 @@
     "@factory/provider-claude": "workspace:*",
     "@factory/provider-codex": "workspace:*",
     "@factory/provider-copilot": "workspace:*",
+    "@factory/reliability-agent": "workspace:*",
     "@factory/task-diffity": "workspace:*",
     "@factory/task-session": "workspace:*",
     "@factory/task-terminal": "workspace:*"

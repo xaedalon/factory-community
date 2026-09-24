@@ -636,6 +636,16 @@ export interface Project {
    * success, which is the whole reason this is a field and not a convention.
    */
   check?: string
+  /**
+   * The model that reads this project's work, when one does.
+   *
+   * Absent means nobody has chosen, which is not the same as switching judging
+   * off: the free evaluator still runs either way, and naming a model is what
+   * adds one that can read.
+   */
+  reliabilityModel?: string
+  /** Whether this project's runs are judged at all. On until somebody says otherwise. */
+  reliabilityEnabled?: boolean
   /** Directories its agents may reach beyond the workspace, granted for good. */
   grantedDirectories: string[]
   createdAt: string
@@ -804,6 +814,17 @@ export const api = {
    * A preview produced by a different code path is a preview that can be wrong
    * about what the real one will do.
    */
+  /** The bundles Factory ships, so a project can take one without a terminal. */
+  exampleBundles: () =>
+    request<{ items: { name: string; description?: string; workflows: number; phases: number }[] }>(
+      '/api/bundles/examples',
+    ),
+
+  exampleBundle: (name: string) =>
+    request<{ name: string; text: string }>(
+      `/api/bundles/examples/${encodeURIComponent(name)}`,
+    ),
+
   importBundle: async (
     text: string,
     options: {
@@ -908,6 +929,9 @@ export const api = {
       // `null` clears the check command, which is a real answer: a project
       // whose gate should not run is better off saying so.
       check?: string | null
+      /** `null` clears the model, which means no agent reads this project's work. */
+      reliabilityModel?: string | null
+      reliabilityEnabled?: boolean
     },
   ) =>
     request<{ project: Project; scaffolded: ScaffoldReport }>(

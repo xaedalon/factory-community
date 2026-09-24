@@ -123,6 +123,34 @@ Feature: The definitions API
     Then the response is 200
     And the bundle contains the phase "analysis"
 
+  Scenario: The bundles Factory ships can be listed
+    # Findable at all, which they were not: the only way to import one was to
+    # know a path inside node_modules and type it at a terminal.
+    When I GET "/api/bundles/examples"
+    Then the response is 200
+    And the bundle "reliability" is offered
+    And it says how many workflows it carries
+
+  Scenario: A shipped bundle can be read
+    When I GET "/api/bundles/examples/reliability"
+    Then the response is 200
+    And the text is a bundle carrying the workflow "analysis"
+
+  Scenario: A bundle Factory does not ship is a 404
+    When I GET "/api/bundles/examples/nonesuch"
+    Then the response is 404
+
+  Scenario: A name that is a path is refused rather than resolved
+    # `../../etc/passwd` is a filename Factory does not ship, and the refusal
+    # has to come before the filesystem is asked anything at all.
+    When I GET a shipped bundle named "../../../etc/passwd"
+    Then the response is 400
+
+  Scenario: The shipped bundle goes in through the same door a person's file does
+    When I import the shipped bundle "reliability" into the user scope
+    Then the response is 200
+    And the workflow "analysis" is in the user scope
+
   Scenario: Importing is previewed without writing
     Given the project defines the workflow "development"
     And I have exported it

@@ -359,6 +359,63 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
+  Scenario('The bundles Factory ships can be listed', ({ When, Then, And }) => {
+    When('I GET "/api/bundles/examples"', () => call('GET', '/api/bundles/examples'))
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the bundle "reliability" is offered', () => {
+      const names = (response.body.items as { name: string }[]).map((item) => item.name)
+      expect(names).toContain('reliability')
+    })
+    And('it says how many workflows it carries', () => {
+      const found = (response.body.items as { name: string; workflows: number }[]).find(
+        (item) => item.name === 'reliability',
+      )
+      expect(found?.workflows).toBeGreaterThan(0)
+    })
+  })
+
+  Scenario('A shipped bundle can be read', ({ When, Then, And }) => {
+    When('I GET "/api/bundles/examples/reliability"', () =>
+      call('GET', '/api/bundles/examples/reliability'),
+    )
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the text is a bundle carrying the workflow "analysis"', () => {
+      expect(response.body.text as string).toContain('name: analysis')
+    })
+  })
+
+  Scenario('A bundle Factory does not ship is a 404', ({ When, Then }) => {
+    When('I GET "/api/bundles/examples/nonesuch"', () =>
+      call('GET', '/api/bundles/examples/nonesuch'),
+    )
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+  })
+
+  Scenario('A name that is a path is refused rather than resolved', ({ When, Then }) => {
+    When('I GET a shipped bundle named "../../../etc/passwd"', () =>
+      call('GET', `/api/bundles/examples/${encodeURIComponent('../../../etc/passwd')}`),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+  })
+
+  Scenario('The shipped bundle goes in through the same door a person\'s file does', ({
+    When,
+    Then,
+    And,
+  }) => {
+    When('I import the shipped bundle "reliability" into the user scope', async () => {
+      await call('GET', '/api/bundles/examples/reliability')
+      await call('POST', '/api/bundles/import', {
+        text: response.body.text as string,
+        scope: 'user',
+      })
+    })
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the workflow "analysis" is in the user scope', () => {
+      expect(existsSync(workflowFile(userScope, 'analysis'))).toBe(true)
+    })
+  })
+
   Scenario('Importing is previewed without writing', ({ Given, And, When, Then }) => {
     Given('the project defines the workflow "development"', givenProjectWorkflow)
     And('I have exported it', async () => {

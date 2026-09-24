@@ -25,6 +25,7 @@ const aProject = (name: string, id: string): Project => ({
   usesWorktrees: true,
   usesEnvironments: false,
   grantedDirectories: [],
+  reliabilityEnabled: true,
   createdAt: '2026-01-01T00:00:00Z',
 })
 

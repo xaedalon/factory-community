@@ -1302,6 +1302,62 @@ Feature: Tasks, runs and live updates over HTTP
       When I set that project's check command to the number 7
       Then the response is 400
 
+  Rule: a project says which model judges its work, and whether one does
+
+    The free evaluator always runs. An agent evaluator costs tokens on every run
+    that produced something, so what it costs and whether it is worth it are the
+    project's call — a weekend project and a payments service do not want the
+    same model, and neither wants one chosen for them in Factory's source.
+
+    Naming nothing is not the same as switching it off. One of them starts
+    working the moment a model is named.
+
+    Scenario: A new project names no model and is judged
+      Given a directory with nothing Factory recognises
+      When I add a project at that directory
+      Then the project names no judging model
+      And the project is judged
+
+    Scenario: A model can be chosen
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging model to "claude-opus-5-5"
+      Then the response is 200
+      And the project's judging model is "claude-opus-5-5"
+
+    Scenario: A model can be cleared
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      And that project's judging model is "claude-opus-5-5"
+      When I clear that project's judging model
+      Then the response is 200
+      And the project names no judging model
+
+    Scenario: Judging can be switched off without losing the model
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      And that project's judging model is "claude-opus-5-5"
+      When I stop that project's work being judged
+      Then the response is 200
+      And the project is not judged
+      And the project's judging model is "claude-opus-5-5"
+
+    Scenario: A model that is not text is refused, and the refusal names the field
+      # The status alone does not distinguish a validated refusal from the
+      # store throwing on `7.trim()` — both are 400, and only one of them puts
+      # the error against a field a form can highlight.
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging model to the number 7
+      Then the response is 400
+      And the refusal names the judging model
+
+    Scenario: Judging that is not true or false is refused
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging to "maybe"
+      Then the response is 400
+
   Rule: a task carries how much to trust it, and no surface can simply say
 
     The score is assembled from the history — the newest assessment plus the

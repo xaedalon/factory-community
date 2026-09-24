@@ -22,6 +22,7 @@ export default defineConfig({
       '@factory/task-terminal': plugin('task-terminal'),
       '@factory/task-session': plugin('task-session'),
       '@factory/task-diffity': plugin('task-diffity'),
+      '@factory/reliability-agent': plugin('reliability-agent'),
     },
   },
   test: {

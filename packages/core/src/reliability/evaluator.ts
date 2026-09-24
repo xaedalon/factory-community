@@ -30,6 +30,27 @@ import { clampScore } from './score.js'
 
 export const RELIABILITY_EVALUATOR_KIND = 'reliability-evaluator'
 
+/**
+ * A way to ask an agent, handed in rather than reached for.
+ *
+ * An evaluator that spawned its own process would need the provider registry,
+ * the execution profile, the environment filter and a path to the working
+ * copy — all of which the engine already has and none of which belongs in a
+ * plugin. So the engine renders and spawns, and what crosses this seam is a
+ * prompt going out and text coming back.
+ *
+ * Absent means there is nothing to ask: no provider installed, no model chosen,
+ * or judging switched off for this project. An evaluator that needs one says so
+ * through `wants` and is skipped, which is how the agent evaluator stays inert
+ * rather than failing on every run of an installation that never configured it.
+ */
+export interface EvaluatorAgent {
+  /** The model the project chose — a role or a literal id, as `RenderRequest` takes. */
+  readonly model?: string
+  /** Ask, and get back whatever it said. Rejects when it could not be asked at all. */
+  ask(prompt: string): Promise<string>
+}
+
 /** What an evaluator is given. Facts, and the policy it is being judged against. */
 export interface EvaluatorInput {
   readonly taskId: string
@@ -44,6 +65,8 @@ export interface EvaluatorInput {
   readonly policy: ReliabilityPolicy
   /** Workflows this project actually has, so a recommendation can name a real one. */
   readonly workflows: readonly string[]
+  /** How to ask an agent, when there is one to ask. */
+  readonly agent?: EvaluatorAgent
 }
 
 /** One dimension, judged, with the reason attached. */

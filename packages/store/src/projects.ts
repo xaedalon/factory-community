@@ -38,6 +38,8 @@ interface ProjectRow {
   tone: number | null
   initials: string | null
   check_command: string | null
+  reliability_model: string | null
+  reliability_enabled: number
   created_at: string
 }
 
@@ -436,6 +438,42 @@ export class ProjectRepository {
     return this.#changed(id)
   }
 
+  /**
+   * Say which model judges this project's work.
+   *
+   * Blank clears it, and a cleared model is a project with no agent evaluator
+   * rather than a project judged by a default nobody chose. The alternative —
+   * falling back to some model named in Factory's own source — would spend
+   * somebody's tokens on a decision they never made.
+   */
+  setReliabilityModel(id: string, model: string | undefined): Project {
+    if (this.get(id) === undefined) throw new Error(`No project ${id}.`)
+    const trimmed = model?.trim()
+    this.#db.run(
+      'UPDATE projects SET reliability_model = ? WHERE id = ?',
+      trimmed === undefined || trimmed === '' ? null : trimmed,
+      id,
+    )
+    return this.#changed(id)
+  }
+
+  /**
+   * Switch judging on or off, without forgetting the model.
+   *
+   * Two columns rather than one nullable model precisely so this is possible:
+   * "off" and "nobody has chosen" are different positions, and collapsing them
+   * would mean switching judging back on always started from nothing.
+   */
+  setReliabilityEnabled(id: string, enabled: boolean): Project {
+    if (this.get(id) === undefined) throw new Error(`No project ${id}.`)
+    this.#db.run(
+      'UPDATE projects SET reliability_enabled = ? WHERE id = ?',
+      enabled ? 1 : 0,
+      id,
+    )
+    return this.#changed(id)
+  }
+
   /** Re-read and announce. Every setter ends the same way. */
   #changed(id: string): Project {
     const updated = this.get(id) as Project
@@ -571,6 +609,15 @@ function hydrate(row: ProjectRow): Project {
     ...(row.check_command !== null && row.check_command.trim() !== ''
       ? { check: row.check_command.trim() }
       : {}),
+    // Blank reads as unset for the same reason the check command does: a
+    // column of spaces is a model nothing could render, and "nobody has said"
+    // is the reading that costs nothing.
+    ...(row.reliability_model !== null && row.reliability_model.trim() !== ''
+      ? { reliabilityModel: row.reliability_model.trim() }
+      : {}),
+    // Anything that is not an explicit 0 is on. The column defaults to 1, and a
+    // hand-edited row degrades towards judging rather than towards silence.
+    reliabilityEnabled: row.reliability_enabled !== 0,
     grantedDirectories: readDirectories(row.granted_directories),
     createdAt: row.created_at,
   }

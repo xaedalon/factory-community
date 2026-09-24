@@ -42,6 +42,7 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ExecutionProfile, Project, Task, TaskWorkspace } from '@factory/core'
 import type { Runtime } from '@factory/runtime'
+import { agentFor } from './reliability-agent.js'
 
 /**
  * The running half of a Factory installation.
@@ -267,6 +268,19 @@ export async function createService(
         trigger: 'run',
         facts,
         workflows: workflowNamesFor(task.projectId),
+        // Absent unless this project chose a model and a CLI is installed to
+        // run it. That is the whole of the cost control: the free evaluator
+        // always runs, and the one that spends money runs when somebody said so.
+        ...(() => {
+          const project = projects.get(task.projectId ?? '')
+          const agent = agentFor({
+            runtime,
+            project,
+            profile: profileFor(task),
+            cwd: project?.path,
+          })
+          return agent === undefined ? {} : { agent }
+        })(),
       })
       return outcome.problems
     },

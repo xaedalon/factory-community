@@ -1,4 +1,7 @@
 import type { FastifyInstance } from 'fastify'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { join } from 'node:path'
+import { examplesRoot } from '@factory/core'
 import {
   exportWorkflow,
   importBundle,
@@ -37,6 +40,47 @@ export function registerBundleRoutes(
       return { text: result.text, bundle: result.bundle, problems: result.problems }
     },
   )
+
+  /**
+   * The bundles Factory ships with.
+   *
+   * Findable at all, which they were not: the only way to import one was to
+   * know a path inside `node_modules` and type it at a terminal. They are
+   * served rather than imported here, so the existing import route stays the
+   * one place a bundle is written — the board reads the text and posts it back
+   * through the same door a person's own file goes through, preview and all.
+   */
+  app.get('/api/bundles/examples', async () => {
+    const root = examplesRoot()
+    const files = existsSync(root)
+      ? readdirSync(root).filter((name) => name.endsWith('.bundle.yaml'))
+      : []
+    const items = files.map((file) => {
+      const text = readFileSync(join(root, file), 'utf8')
+      const read = readBundle(text, runtime.host)
+      return {
+        name: file.replace(/\.bundle\.yaml$/, ''),
+        ...(read.bundle?.metadata?.description === undefined
+          ? {}
+          : { description: read.bundle.metadata.description }),
+        workflows: read.bundle?.workflows?.length ?? 0,
+        phases: read.bundle?.phases?.length ?? 0,
+      }
+    })
+    return { items }
+  })
+
+  app.get<{ Params: { name: string } }>('/api/bundles/examples/:name', async (request, reply) => {
+    // A name, never a path: `../../etc` is a filename Factory does not ship.
+    if (!/^[a-z][a-z0-9-]*$/.test(request.params.name)) {
+      return reply.code(400).send({ error: 'A bundle name is lower case, digits and dashes.' })
+    }
+    const file = join(examplesRoot(), `${request.params.name}.bundle.yaml`)
+    if (!existsSync(file)) {
+      return reply.code(404).send({ error: `Factory ships no bundle called "${request.params.name}".` })
+    }
+    return { name: request.params.name, text: readFileSync(file, 'utf8') }
+  })
 
   app.post<{
     Body: { text?: string; scope?: ScopeKind; policy?: ConflictPolicy; prefix?: string }

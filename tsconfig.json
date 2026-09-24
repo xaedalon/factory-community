@@ -35,6 +35,9 @@
       "path": "./packages/plugins/task-diffity"
     },
     {
+      "path": "./packages/plugins/reliability-agent"
+    },
+    {
       "path": "./packages/plugins/provider-codex"
     },
     {

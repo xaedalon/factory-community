@@ -6,6 +6,7 @@ import {
   score,
   type AssessmentTrigger,
   type DimensionScores,
+  type EvaluatorAgent,
   type EvaluatorInput,
   type ProposedFinding,
   type ReliabilityAssessment,
@@ -41,6 +42,14 @@ export interface AssessInput {
   readonly facts?: RunFacts
   /** Workflows the project has, so a recommendation can name a real one. */
   readonly workflows?: readonly string[]
+  /**
+   * How to ask an agent, when this project has one to ask.
+   *
+   * Absent is the ordinary case and costs nothing: the deterministic evaluator
+   * still runs and the task is still judged. What is absent is somebody having
+   * read the work.
+   */
+  readonly agent?: EvaluatorAgent
 }
 
 export interface AssessOutcome {
@@ -67,6 +76,7 @@ export async function assessReliability(input: AssessInput): Promise<AssessOutco
       drivers: before,
       policy: input.policy,
       workflows: input.workflows ?? [],
+      ...(input.agent === undefined ? {} : { agent: input.agent }),
     }
 
     // Every evaluator's opinion, and a note when one of them could not give it.

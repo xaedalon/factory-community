@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { closedWithExtensions, slug } from '../schema/common.js'
-import { isConfined, type ExecutionProfile } from '../security/profile.js'
+import {
+  DEFAULT_PROFILE,
+  isBuiltInProfile,
+  isConfined,
+  type ExecutionProfile,
+} from '../security/profile.js'
 import { MODEL_ROLES } from '../model-roles.js'
 
 /**
@@ -254,13 +259,21 @@ export function permissionArgsFor(
 ): readonly string[] {
   const declared = descriptor.permissionArgs
   if (Array.isArray(declared)) return declared
-  // No `?? []` here, and that is deliberate rather than an oversight: both keys
-  // carry `.default([])` in the schema, so a map naming one profile parses with
-  // the other one present and empty. A fallback would be unreachable code — and
-  // worse, the obvious fallback is "use the other profile's list", which for
-  // `default` would quietly mean Full Access. The schema is the guarantee, and
-  // it has a scenario of its own.
-  return declared[profile]
+
+  // A built-in is indexed straight, with no `?? []`, and that is deliberate
+  // rather than an oversight: both keys carry `.default([])` in the schema, so
+  // a map naming one profile parses with the other one present and empty. A
+  // fallback would be unreachable — and worse, the obvious fallback is "use the
+  // other profile's list", which for `default` would quietly mean Full Access.
+  if (isBuiltInProfile(profile)) return declared[profile]
+
+  // A custom profile is somebody's definition, and no descriptor will ever name
+  // it. It gets the **confined** list, because a custom profile extends Default
+  // and is confined by construction: whatever it adds is added on top of this,
+  // by the renderer, never instead of it. Falling back the other way — or to
+  // nothing — would be a profile that quietly ran unconfined or with no flags
+  // at all, and both are the failure this function's comment already warns of.
+  return declared[DEFAULT_PROFILE]
 }
 
 /**

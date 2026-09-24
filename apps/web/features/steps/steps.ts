@@ -2497,3 +2497,99 @@ When('I save the project', async ({ page }) => {
 Then('the judging model is {string}', async ({ page }, model: string) => {
   await expect(page.getByTestId('project-judge-model')).toHaveValue(model)
 })
+
+/* ---- what a failure looks like, and where ---------------------------- */
+
+Given('the daemon refuses to hand over the bundle', async ({ page }) => {
+  await page.route('**/api/bundles/examples/*', (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'The bundle could not be read.' }),
+    }),
+  )
+})
+
+Given('the daemon answers that request with a page instead of JSON', async ({ page }) => {
+  // Exactly what an older daemon did: its catch-all served the board's own
+  // shell for an API path it did not know, with a 200 on it.
+  await page.route('**/api/bundles/examples/*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><title>Factory</title><div id="app"></div>',
+    }),
+  )
+})
+
+Given('the daemon refuses the next save', async ({ page }) => {
+  await page.route('**/api/projects/*', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'The daemon could not write that.' }),
+        })
+      : route.continue(),
+  )
+})
+
+Then('the reliability field says what went wrong', async ({ page }) => {
+  await expect(page.getByTestId('field-error-reliability')).toContainText('could not be read')
+})
+
+Then("the form's banner says nothing", async ({ page }) => {
+  await expect(page.getByTestId('error')).toHaveCount(0)
+})
+
+Then('the reliability field says the daemon was not understood', async ({ page }) => {
+  await expect(page.getByTestId('field-error-reliability')).toContainText('not JSON')
+})
+
+Then('it names the request that failed', async ({ page }) => {
+  await expect(page.getByTestId('field-error-reliability')).toContainText('/api/bundles/examples/')
+})
+
+When('I try to save the project', async ({ page }) => {
+  // Deliberately not the step above: that one waits for the list, and a save
+  // that is refused never gets there. A scenario about a refusal must not
+  // depend on the success path's navigation.
+  await page.getByTestId('save-project').click()
+})
+
+Then('the form says what went wrong', async ({ page }) => {
+  await expect(page.getByTestId('error')).toContainText('could not write that')
+})
+
+Then('it says so above the first field', async ({ page }) => {
+  // Geometry, the way the rail is read, and against whichever form is open:
+  // the banner sits above that form's first box, so it is on the screen when
+  // the button that produced it is. Asking the page for "the first input" rather
+  // than naming one keeps this step usable by every form.
+  const banner = await page.getByTestId('error').boundingBox()
+  const first = await page.locator('form input').first().boundingBox()
+  expect(banner).not.toBeNull()
+  expect(first).not.toBeNull()
+  expect((banner as { y: number }).y).toBeLessThan((first as { y: number }).y)
+})
+
+Given('the daemon refuses the next task', async ({ page }) => {
+  await page.route('**/api/tasks', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'The daemon could not make that task.' }),
+        })
+      : route.continue(),
+  )
+})
+
+When('I try to create the task', async ({ page }) => {
+  await page.getByTestId('task-name').fill('Add due dates')
+  await page.getByTestId('create-task').click()
+})
+
+Then('the form says the task was refused', async ({ page }) => {
+  await expect(page.getByTestId('error')).toContainText('could not make that task')
+})

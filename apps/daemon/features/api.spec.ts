@@ -538,6 +538,45 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
   })
 
+  Scenario('An API path the daemon does not serve is a JSON 404, not the board', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    Given('a built board', givenBuiltBoard)
+    When('I GET "/api/bundles/examples/nothing-like-this"', () =>
+      call('GET', '/api/bundles/examples/nothing-like-this'),
+    )
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    And('the response is JSON', () => {
+      expect(() => JSON.parse(rawResponse) as unknown).not.toThrow()
+    })
+    And("the board's page is not returned", () => expect(rawResponse).not.toContain('id="app"'))
+  })
+
+  Scenario('A page whose name merely begins with those letters is still a page', ({
+    Given,
+    When,
+    Then,
+  }) => {
+    Given('a built board', givenBuiltBoard)
+    When('I GET "/apiary"', () => call('GET', '/apiary'))
+    Then("the board's page is returned", () => expect(rawResponse).toContain('id="app"'))
+  })
+
+  Scenario('An unknown API path is a 404 even where there is no board to serve', ({
+    When,
+    Then,
+    And,
+  }) => {
+    When('I GET "/api/nothing-like-this"', () => call('GET', '/api/nothing-like-this'))
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    And('the response is JSON', () => {
+      expect(() => JSON.parse(rawResponse) as unknown).not.toThrow()
+    })
+  })
+
   Scenario('Without a built board the root page says how to build it', ({
     When,
     Then,

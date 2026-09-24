@@ -119,6 +119,19 @@ async function submit(): Promise<void> {
     </div>
 
     <form v-else class="max-w-2xl" data-testid="new-task-form" @submit.prevent="submit">
+      <!-- At the top, for the reason the project form's banner is: below every
+           field and the workflow list, it is off the screen at the moment it
+           appears. Anything that belongs to one box is rendered under that box
+           by `FieldRow` instead. -->
+      <p
+        v-if="error"
+        class="mb-5 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
+        data-testid="error"
+      >
+        <AppIcon name="alert" class="mt-0.5" />
+        {{ error }}
+      </p>
+
       <FieldRow
         label="Name"
         icon="tasks"
@@ -199,15 +212,6 @@ async function submit(): Promise<void> {
           :project="projectId === '' ? undefined : projectId"
         />
       </FieldRow>
-
-      <p
-        v-if="error"
-        class="mt-4 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
-        data-testid="error"
-      >
-        <AppIcon name="alert" class="mt-0.5" />
-        {{ error }}
-      </p>
 
       <div class="mt-6 flex items-center gap-2 border-t border-[var(--color-line)] pt-5">
         <AppButton

@@ -113,6 +113,43 @@ Feature: Sharing a workflow with someone else
       Then it says what was written
       And the workflow "analysis" is in the project
 
+    Scenario: A failure adding them is shown beside the button that caused it
+      # Under the control you just pressed, which needs no hunting for. The
+      # form's own banner is for what belongs to no single box, and putting this
+      # there would make it look like the save had failed.
+      Given a project
+      And the daemon refuses to hand over the bundle
+      When I open that project's settings
+      And I add the reliability workflows
+      Then the reliability field says what went wrong
+      And the form's banner says nothing
+
+    Scenario: An answer that is not JSON says so, rather than failing on nothing
+      # A daemon older than the board answers an API path it does not know with
+      # the board's own HTML and a 200. Reading that as a result produced
+      # "Cannot read properties of undefined (reading 'text')" — a message about
+      # the line that gave up, naming neither the request nor the cause.
+      Given a project
+      And the daemon answers that request with a page instead of JSON
+      When I open that project's settings
+      And I add the reliability workflows
+      Then the reliability field says the daemon was not understood
+      And it names the request that failed
+
+  Rule: an error is shown where it was caused
+
+    A message under the box it is about needs no hunting for. One that cannot
+    belong to a box goes at the top, where the form begins — never at the foot,
+    below every field, where a long form puts it off the screen.
+
+    Scenario: A failure that belongs to no field is shown at the top
+      Given a project
+      And the daemon refuses the next save
+      When I open that project's settings
+      And I try to save the project
+      Then the form says what went wrong
+      And it says so above the first field
+
   Rule: a project says which model reads its work
 
     Scenario: A new project names none

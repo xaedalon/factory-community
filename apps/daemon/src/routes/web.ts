@@ -30,6 +30,27 @@ const TYPES: Record<string, string> = {
 }
 
 /**
+ * The API is never the catch-all's to answer.
+ *
+ * Both routes below exist so a page the app routes itself — `/tasks/abc` —
+ * resolves instead of 404ing, and both were catching `/api/…` with it. A client
+ * calling a route *this* daemon does not have got a **200** carrying HTML, its
+ * JSON parse failed, and the caller died on `undefined` somewhere else entirely,
+ * saying nothing about the request that caused it.
+ *
+ * An older daemon and a newer board is the ordinary way to be in that position,
+ * so it has to read as "no such route" rather than as a bug in whatever page
+ * happened to be open.
+ *
+ * The whole segment, not the three characters: `/apiary` is a page the app may
+ * hold, and refusing it would break a route for a reason nobody could guess.
+ */
+function apiMiss(url: string): { error: string } | undefined {
+  if (url !== 'api' && !url.startsWith('api/')) return undefined
+  return { error: `This daemon does not serve /${url}.` }
+}
+
+/**
  * What `/` says when the board was never built.
  *
  * Registered in place of the static routes, because the alternative is what a
@@ -45,6 +66,8 @@ const TYPES: Record<string, string> = {
 export function registerMissingBoardRoute(app: FastifyInstance): void {
   app.get('/*', async (request, reply) => {
     const url = (request.params as { '*'?: string })['*'] ?? ''
+    const missed = apiMiss(url)
+    if (missed !== undefined) return reply.code(404).send(missed)
     // A machine asking for an asset gets an honest 404; only a page request
     // gets the explanation.
     if (extname(url) !== '') return reply.code(404).send({ error: 'Not found.' })
@@ -75,6 +98,9 @@ export function registerWebRoutes(app: FastifyInstance, root: string): void {
 
   app.get('/*', async (request, reply) => {
     const url = (request.params as { '*'?: string })['*'] ?? ''
+
+    const missed = apiMiss(url)
+    if (missed !== undefined) return reply.code(404).send(missed)
 
     // Never serve anything outside the build directory. `normalize` collapses
     // `..` before the check, so a path that climbs out is caught here rather

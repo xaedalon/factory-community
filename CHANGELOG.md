@@ -32,6 +32,18 @@ five-stage pipeline it was designed around ships as a bundle with one click on t
 [`docs/reliability/`](docs/reliability/) is the whole of it, and says plainly that these are
 heuristics rather than calibrated odds.
 
+**An API path the daemon does not serve is a 404, not the board.** The catch-all that lets
+`/tasks/abc` resolve in the app router was catching `/api/…` with it, so a page calling a route
+*this* daemon does not have got `index.html` with a **200** — and then failed on `undefined`
+somewhere else entirely, with a message naming neither the request nor the cause. An older daemon
+and a newer board is the ordinary way to be in that position. The board and the CLI now also refuse
+a non-JSON success outright rather than handing their callers nothing — naming the request and
+saying the daemon may be older than they are.
+
+**An error is shown where it was caused.** A failure that belongs to a field is under that field;
+one that belongs to none is at the *top* of the form. It used to sit below every field, which on
+the project form is off the screen at the moment it appears.
+
 **Factory stops reporting success for work that did not happen.** A supervised run of ten tasks
 found the same shape four times: not a crash and not a wrong answer, but a tick beside work that
 never ran. Each of these was silent before, and each is loud now.

@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url'
 import { DISCLAIMER_VERSION } from '@factory/core'
 import { run } from '../src/main.js'
 import type { CommandResult } from '../src/context.js'
-import { DaemonError, type DaemonClient } from '../src/daemon.js'
+import { DaemonError, createDaemonClient, type DaemonClient } from '../src/daemon.js'
+import { createServer, type Server } from 'node:http'
 
 const feature = await loadFeature(fileURLToPath(new URL('./cli.feature', import.meta.url)))
 
@@ -127,7 +128,14 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     output = [...streamed, ...result.lines].join('\n')
   }
 
-  AfterEachScenario(() => rmSync(root, { recursive: true, force: true }))
+  /** A stub daemon for the one scenario that needs a real HTTP answer. */
+  let stubServer: Server | undefined
+
+  AfterEachScenario(() => {
+    stubServer?.close()
+    stubServer = undefined
+    rmSync(root, { recursive: true, force: true })
+  })
 
   // All setup lives in the Background step, not in BeforeEachScenario: the
   // runner executes Background steps FIRST, so anything built in
@@ -634,6 +642,34 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       expect(output).toContain('Cannot reach the Factory daemon'),
     )
     And('the output contains "factory-daemon"', () => expect(output).toContain('factory-daemon'))
+  })
+
+  Scenario('an answer that is not JSON is explained rather than failing on nothing', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    // The real client, not the stub: this is about how a response is *read*,
+    // and a stub that returns objects can never produce the failure.
+    Given('a daemon that answers with a page instead of JSON', async () => {
+      const server = createServer((_request, response) => {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        response.end('<!doctype html><title>Factory</title><div id="app"></div>')
+      })
+      stubServer = server
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const port = (server.address() as { port: number }).port
+      daemon = createDaemonClient({ FACTORY_URL: `http://127.0.0.1:${String(port)}` })
+    })
+    When('I run "task list"', () => invoke('task list'))
+    Then('the command fails', () => expect(result.exitCode).toBe(1))
+    And('the output says the answer was not JSON', () =>
+      expect(result.lines.join('\n')).toContain('not JSON'),
+    )
+    And('the output names the request', () =>
+      expect(result.lines.join('\n')).toContain('/api/tasks'),
+    )
   })
 
   Scenario('the short id the listing prints is enough to act on', ({ Given, When, Then }) => {

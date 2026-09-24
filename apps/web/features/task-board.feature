@@ -387,6 +387,16 @@ Feature: The task board
       Then the page says a task needs a project
       And it offers to add a repository
 
+    Scenario: A refusal is shown at the top, not under the buttons
+      # The same reason the project form's banner moved. On a form with five
+      # fields and a workflow list, a message below all of them is off the
+      # screen at the moment it appears.
+      Given the daemon refuses the next task
+      When I open the new task page
+      And I try to create the task
+      Then the form says the task was refused
+      And it says so above the first field
+
     Scenario: Workflows keep the order they were added in
       Given the project defines the workflow "hello" that prints "hello"
       And the project defines the workflow "development"

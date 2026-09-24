@@ -717,10 +717,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // parsing it blindly would replace a useful status with a SyntaxError.
   const text = await response.text()
   let body: unknown
+  let parsed = true
   try {
     body = text === '' ? undefined : JSON.parse(text)
   } catch {
     body = undefined
+    parsed = false
   }
 
   if (!response.ok) {
@@ -730,6 +732,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       payload.error ?? `Request failed (${response.status})`,
       payload.problems ?? [],
       body,
+    )
+  }
+
+  // A success that is not JSON is not a success. This used to return
+  // `undefined`, and every caller then failed on a property of it — somewhere
+  // else entirely, with a message naming neither the request nor the cause.
+  // ("Cannot read properties of undefined (reading 'text')" was the one that
+  // got reported, from a daemon whose catch-all answered an API path it did not
+  // know with the board's own HTML and a 200.)
+  //
+  // Thrown rather than logged, because a caller that carries on without the
+  // thing it asked for is the tick-beside-nothing this project keeps finding.
+  if (!parsed) {
+    throw new ApiError(
+      response.status,
+      `The daemon's answer to ${path} was not JSON. It may be an older version ` +
+        `than this page, or something else is answering on its port.`,
     )
   }
   return body as T

@@ -149,6 +149,7 @@ async function importReliability(): Promise<void> {
   if (isNew.value) return
   importing.value = true
   error.value = undefined
+  fieldErrors.value.reliability = undefined
   try {
     const bundle = await api.exampleBundle('reliability')
     const result = await api.importBundle(bundle.text, {
@@ -158,7 +159,10 @@ async function importReliability(): Promise<void> {
     })
     imported.value = result.written ?? []
   } catch (caught) {
-    error.value = caught instanceof ApiError ? caught.message : String(caught)
+    // Against the control that caused it, not in the form's banner: this
+    // failure is about one button, and a message at the other end of a long
+    // form reads as unrelated to it.
+    fieldErrors.value.reliability = caught instanceof ApiError ? caught.message : String(caught)
   } finally {
     importing.value = false
   }
@@ -280,6 +284,21 @@ onMounted(load)
 
   <div class="px-8 py-6">
     <form class="max-w-2xl" data-testid="project-form" @submit.prevent="save">
+      <!-- At the top, not at the foot. A failure that belongs to no single box
+           goes where the form begins: below every field it is off the screen on
+           a form this long, and a message nobody sees is a message that did not
+           happen. What *does* belong to a box is rendered under that box by
+           `FieldRow`, which is why this banner is the exception rather than the
+           rule. -->
+      <p
+        v-if="error"
+        class="mb-5 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
+        data-testid="error"
+      >
+        <AppIcon name="alert" class="mt-0.5" />
+        {{ error }}
+      </p>
+
       <div v-if="!isNew && loaded" class="mb-5 flex items-center gap-3">
         <span
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-medium text-white"
@@ -351,6 +370,7 @@ onMounted(load)
         v-if="!isNew"
         label="Reliability"
         icon="check"
+        :error="fieldErrors.reliability"
         hint="Factory judges every run whatever your workflows are. This adds the five-stage pipeline it was designed around — analysis, design, implementation, validation, verification — into this repository, where you can edit it."
       >
         <div>
@@ -490,15 +510,6 @@ onMounted(load)
           </p>
         </FieldRow>
       </div>
-
-      <p
-        v-if="error"
-        class="mt-5 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
-        data-testid="error"
-      >
-        <AppIcon name="alert" class="mt-0.5" />
-        {{ error }}
-      </p>
 
       <!-- Factory has just written into a working copy. Say which files,
            because the next thing that happens is a `git status` nobody was

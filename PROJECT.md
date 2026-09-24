@@ -1557,14 +1557,14 @@ this repository does not contain.
 | `packages/config/features/scope-plugins.feature` | A project ships its plugins in its own repo |
 | `packages/plugins/provider-claude/features/providers.feature` | Rendering, model roles, capability awareness, conformance |
 | `packages/config/features/plan.feature` | Definitions become runnable processes; nothing executes |
-| `apps/cli/features/cli.feature` | The command surface, exit codes and output, including `factory task`, `factory task depends` and `factory project queue|stop` |
+| `apps/cli/features/cli.feature` | The command surface, exit codes and output, including `factory task`, `factory task depends`, `factory project queue\|stop`, and what a daemon older than the CLI is told to look like |
 | `packages/config/features/bundles.feature` | Sharing a workflow as one self-contained file |
-| `apps/daemon/features/api.feature` | The definitions API: etags, scope-aware delete, registries |
+| `apps/daemon/features/api.feature` | The definitions API: etags, scope-aware delete, registries, the bundles Factory ships, and an API path this daemon does not serve answering as one rather than as the board |
 | `apps/daemon/features/tasks-api.feature` | Tasks, runs, logs and the live stream — a queued task actually running, a project's own definitions, renaming, agents over HTTP, when a plan may be changed, what a task waits for, and queueing or stopping a whole project |
 | `apps/web/features/definition-lists.feature` | What the pages render, in a real browser |
 | `apps/web/features/builder.feature` | Authoring a workflow or phase without writing YAML |
 | `apps/web/features/authoring.feature` | Delete, conflicts, phase references, and the YAML view |
-| `apps/web/features/sharing.feature` | Export a bundle, preview an import, resolve a clash |
+| `apps/web/features/sharing.feature` | Export a bundle, preview an import, resolve a clash, take one Factory ships in a click, and where an error is shown when any of it fails |
 | `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, the dependency picker, what an installation with no repository is told, and the settings page — theme, scale, and what agents may reach |
 | `packages/core/features/run.feature` | Running a plan: order, failure, deadlines, approval gates |
 | `packages/core/features/execution-profiles.feature` | Which profile applies: project over installation over `default`, and one name for each |

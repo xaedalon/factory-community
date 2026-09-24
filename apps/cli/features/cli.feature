@@ -251,6 +251,16 @@ Feature: The factory command
     And the output contains "Cannot reach the Factory daemon"
     And the output contains "factory-daemon"
 
+  Scenario: an answer that is not JSON is explained rather than failing on nothing
+    # A daemon older than this CLI answers a route it does not know with the
+    # board's own HTML and a 200. Read as a result, that produced a crash about
+    # a property of `undefined` — naming neither the request nor the cause.
+    Given a daemon that answers with a page instead of JSON
+    When I run "task list"
+    Then the command fails
+    And the output says the answer was not JSON
+    And the output names the request
+
   Scenario: the short id the listing prints is enough to act on
     Given a daemon with a task "Add due dates" that is queued
     When I run "task cancel task-1a2"

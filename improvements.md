@@ -50,7 +50,25 @@ scenario at *its* layer that asserts the field arrives — the way
 `packages/engine/features/reliability.feature` now does for the declaration.
 Cheaper than a lint rule and it reads as documentation.
 
-## 3. `needs:` describes an order nothing acts on
+## 3. Every other form still puts its banner where it was put
+
+`ProjectEditPage` and `NewTaskPage` now show a failure that belongs to no field
+at the *top* of the form, and anything that belongs to a field under that field.
+The remaining pages — settings, plugins, scopes, the task detail — put theirs
+near the top already, but by habit rather than by rule: nothing asserts it, and
+the next form added will put its banner wherever the last one did.
+
+Only one page routes a message to the field it is about (`placeError` in
+`ProjectEditPage`, by matching the daemon's sentence). That matching is a guess
+about wording, and it is the wrong shape: the daemon knows which field it
+refused and says so on `Problem.field`, which the client already carries and
+almost nothing reads.
+
+**Shape of the fix:** a `FormErrors` helper that takes an `ApiError` and routes
+by `problems[].field`, falling back to the banner; the routes that refuse a
+field send `field` with the message. Then `placeError`'s string matching goes.
+
+## 4. `needs:` describes an order nothing acts on
 
 A workflow's `needs:` is read by doctor (to report a task whose workflows are out
 of order) and by the bundle exporter (to gather the closure). Assigning `verify`
@@ -64,7 +82,7 @@ the board has the information to offer better.
 `needs` one that is not on the task, offer to add it. An offer, not an
 expansion: `verify` alone is a legitimate thing to want.
 
-## 4. Coverage credit for a declaration is asymmetric
+## 5. Coverage credit for a declaration is asymmetric
 
 `observationsFrom` credits a declaration's *first* expected-evidence key against
 an artifact actually arriving, and the rest on the run completing. A workflow

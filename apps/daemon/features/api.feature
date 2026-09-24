@@ -222,6 +222,32 @@ Feature: The definitions API
     # gets the explanation.
     Then the response is 404
 
+  Scenario: An API path the daemon does not serve is a JSON 404, not the board
+    # The board's catch-all exists so `/tasks/abc` resolves in the app router
+    # rather than 404ing. It was catching `/api/…` too, so a client calling a
+    # route this daemon does not have got `index.html` with a 200 — and every
+    # caller then failed on `undefined`, somewhere else entirely, saying
+    # nothing about the request. An older daemon and a newer board is the
+    # ordinary way to be in exactly that position.
+    Given a built board
+    When I GET "/api/bundles/examples/nothing-like-this"
+    Then the response is 404
+    And the response is JSON
+    And the board's page is not returned
+
+  Scenario: A page whose name merely begins with those letters is still a page
+    # The guard is on the path segment, not on the three characters. `/apiary`
+    # is a route the app may hold, and refusing it because it starts with "api"
+    # would break a page for a reason nobody could guess from the name.
+    Given a built board
+    When I GET "/apiary"
+    Then the board's page is returned
+
+  Scenario: An unknown API path is a 404 even where there is no board to serve
+    When I GET "/api/nothing-like-this"
+    Then the response is 404
+    And the response is JSON
+
 
   Rule: plugins can be listed and switched
 

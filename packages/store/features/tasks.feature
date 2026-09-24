@@ -583,3 +583,53 @@ Feature: A task, and the rules about how it moves
       Given the task "Add due dates" exists
       When I move it to the project it is already in
       Then the task is unchanged
+
+  Rule: which actions exist to ask for is published too
+
+    "A published list of what is currently allowed so no client has to
+    re-derive any of it" is what the top of this file promises, and it was two
+    thirds true. A task publishes the actions it offers *right now*; which
+    actions exist to ask for at all was not published, so the CLI kept its own
+    copy of the eight a person can type, with a comment saying the daemon had
+    the final say. That comment is how a list drifts — it is correct right up
+    until somebody adds a ninth move.
+
+    Scenario: The engine's own moves are not on it
+      # A client asking for one of these would put a task past the concurrency
+      # cap, or mark a run done while its agent was still writing.
+      Then a client may not ask for "start"
+      And a client may not ask for "idle"
+      And a client may not ask for "await_approval"
+      And a client may not ask for "block"
+      And a client may not ask for "complete"
+
+    Scenario: The list is exactly the moves somebody may make
+      # Named literally rather than filtered out of the table under test: an
+      # assertion that loops over the list it is checking passes whatever that
+      # list happens to say, including a new move with `internal` forgotten.
+      Then a client may ask for exactly "queue, approve, reject, mark_done, retry, cancel, archive, restore"
+
+  Rule: how many tasks a run has asked for is counted, never kept
+
+    A counter on the run would say ten after somebody tidied five away, and an
+    agent would be refused work it had every right to ask for. Counting the
+    rows is the only answer that survives a deletion.
+
+    Scenario: A run that has asked for nothing has asked for nothing
+      Then "run-1" has asked for 0 tasks
+
+    Scenario: Tasks a run asked for are counted
+      Given two tasks created by "run-1"
+      Then "run-1" has asked for 2 tasks
+
+    Scenario: A task somebody else asked for is not counted
+      Given two tasks created by "run-1"
+      And a task created by "run-2"
+      Then "run-1" has asked for 2 tasks
+
+    Scenario: An archived task still counts
+      # A task that was archived still happened. A run that could reset its own
+      # budget by archiving is not budgeted.
+      Given two tasks created by "run-1"
+      And one of them is archived
+      Then "run-1" has asked for 2 tasks

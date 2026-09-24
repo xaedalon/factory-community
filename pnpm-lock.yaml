@@ -142,6 +142,9 @@ importers:
       '@factory/events':
         specifier: workspace:*
         version: link:../../packages/events
+      '@factory/mcp':
+        specifier: workspace:*
+        version: link:../../packages/mcp
       '@factory/provider-claude':
         specifier: workspace:*
         version: link:../../packages/plugins/provider-claude
@@ -270,6 +273,15 @@ importers:
         version: link:../store
 
   packages/events: {}
+
+  packages/mcp:
+    dependencies:
+      '@factory/core':
+        specifier: workspace:*
+        version: link:../core
+      zod:
+        specifier: ^4.5.4
+        version: 4.5.4
 
   packages/plugin-sdk:
     dependencies:

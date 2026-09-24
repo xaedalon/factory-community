@@ -1,0 +1,23 @@
+{
+  "name": "@factory/mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "description": "Factory as a Model Context Protocol server, so a coding agent can drive it.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc --build"
+  },
+  "dependencies": {
+    "@factory/core": "workspace:*",
+    "zod": "^4.5.4"
+  }
+}

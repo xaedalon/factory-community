@@ -10,6 +10,9 @@ import { run as runWorkflow } from './commands/run.js'
 import * as tasks from './commands/tasks.js'
 import { setup as setupCommand } from './commands/setup.js'
 import { createDaemonClient, type DaemonClient } from './daemon.js'
+import { mcp } from './commands/mcp.js'
+import type { McpStreams } from '@factory/mcp'
+import { REQUESTABLE_ACTIONS } from '@factory/core'
 import { isDefinitionKind } from '@factory/config'
 import type { ConflictPolicy, DefinitionKind, ScopeKind } from '@factory/config'
 
@@ -45,6 +48,8 @@ Usage
   factory project add <name> <path>       a repository to work in   (--in-place)
   factory project queue <name>            queue the lot, in dependency order
   factory project stop <name>             cancel whatever is in flight there
+
+  factory mcp                             serve Factory to an MCP-capable agent
 
   factory setup                           what is still missing, and how to fix it
   factory doctor                          check the installation
@@ -93,19 +98,20 @@ Run
   --description <text>   fills {{ task.description }}
 `
 
-/** Actions a person may ask for. The daemon has the final say; this is the spelling. */
-const TASK_ACTIONS = [
-  'queue',
-  'approve',
-  'reject',
-  'retry',
-  'cancel',
-  'archive',
-  'restore',
-  // Spelled `done` here and `mark_done` on the wire. The wire name says which
-  // of two ways of reaching `done` this is; a person typing it has only one.
-  'done',
-] as const satisfies readonly string[]
+/**
+ * Actions a person may ask for, spelled the way they type them.
+ *
+ * Derived from core's own list rather than written out again. This was a
+ * hand-written copy with a comment saying the daemon had the final say, which
+ * was true and is exactly how a list drifts — core now publishes which of its
+ * moves a client may ask for, and the only thing left here is the spelling.
+ *
+ * `mark_done` is `done` on the command line: the wire name says which of two
+ * ways of reaching `done` this is, and a person typing it has only one.
+ */
+const TASK_ACTIONS: readonly string[] = REQUESTABLE_ACTIONS.map((action) =>
+  action === 'mark_done' ? 'done' : action,
+)
 
 /** Where a CLI verb and the action it performs are spelled differently. */
 const ACTION_NAMES: Record<string, string> = { done: 'mark_done' }
@@ -119,6 +125,23 @@ export interface RunOptions {
   readonly write?: (line: string) => void
   /** Injected so the task commands can be specified without a daemon running. */
   readonly daemon?: DaemonClient
+  /**
+   * Where `factory mcp` speaks, when it is what was asked for.
+   *
+   * The one command that owns its streams rather than returning lines, so the
+   * streams are handed over the way everything else here is — which is what
+   * lets the whole protocol be specified without spawning a process.
+   */
+  readonly streams?: McpStreams
+  /**
+   * Whether a person is typing, rather than a client piping.
+   *
+   * `factory mcp` is the one command that needs to know. A terminal on stdin
+   * means no client is coming and nothing will ever arrive, so waiting on it is
+   * a hang; a pipe means a client is on the other end. Reported by `bin.ts`,
+   * decided in the command, for the reason every other process fact is.
+   */
+  readonly stdinIsTty?: boolean
 }
 
 /**
@@ -151,6 +174,8 @@ export async function run(options: RunOptions): Promise<CommandResult> {
       // Streamed straight out, so a long build is watchable rather than arriving
       // in one lump when it finishes.
       write: options.write ?? (() => {}),
+      ...(options.streams === undefined ? {} : { streams: options.streams }),
+      stdinIsTty: options.stdinIsTty === true,
     },
     false,
     options.daemon,
@@ -165,7 +190,12 @@ async function dispatch(
   rest: string[],
   context: CliContext,
   style: ReturnType<typeof styleFor>,
-  io: { isTty: boolean; write: (line: string) => void },
+  io: {
+    isTty: boolean
+    write: (line: string) => void
+    streams?: McpStreams
+    stdinIsTty?: boolean
+  },
   dryRun: boolean,
   daemon?: DaemonClient,
 ): Promise<CommandResult> {
@@ -193,6 +223,12 @@ async function dispatch(
       }
       return security.stop(daemon ?? createDaemonClient(context.env), style)
     }
+
+    case 'mcp':
+      return mcp(context, daemon ?? createDaemonClient(context.env), {
+        ...(io.streams === undefined ? {} : { streams: io.streams }),
+        atATerminal: io.stdinIsTty === true,
+      })
 
     case 'init': {
       const index = rest.indexOf('--scope')
@@ -316,7 +352,7 @@ async function dispatch(
         }
         return tasks.move(client, id, project, style)
       }
-      if (action !== undefined && (TASK_ACTIONS as readonly string[]).includes(action)) {
+      if (action !== undefined && TASK_ACTIONS.includes(action)) {
         const id = args[0]
         if (id === undefined) return usage(`Which task? Try "factory task ${action} <id>".`)
         return tasks.act(client, ACTION_NAMES[action] ?? action, id, style)

@@ -377,3 +377,71 @@ Feature: Projects — the repositories Factory works in
       When the project row is deleted straight out of the database
       Then the database refuses it
       And the task still exists
+
+  Rule: a directory is asked which project it is in
+
+    Every client so far has known a project's id or its name, because a person
+    picked it from a list. An agent standing in a directory knows neither, and
+    the question it can answer — "where am I?" — had nowhere to go: projects
+    were looked up by id and by name, and nothing ever read the path column.
+
+    Longest match wins, so a project nested inside another resolves to the
+    inner one. Equal-length matches are refused by name rather than picked
+    between, because a wrong project is a task queued against somebody else's
+    repository.
+
+    Both sides are canonicalised. A macOS temporary directory is a symlink, a
+    home directory often is, and a comparison of the written strings answers
+    "no project" for a directory that plainly is one.
+
+    Scenario: A project's own directory is the project
+      Given the project "factory" exists
+      When I ask which project is at that directory
+      Then the answer is "factory"
+      And it matched the project's own directory
+
+    Scenario: A directory inside a project is the project
+      Given the project "factory" exists
+      When I ask which project is at "packages/core/src" inside it
+      Then the answer is "factory"
+      And it matched an ancestor
+
+    Scenario: A directory the project is inside is not the project
+      Given the project "factory" exists
+      When I ask which project is at the directory above it
+      Then there is no project there
+
+    Scenario: A sibling whose name starts the same way is not inside
+      Given the project "factory" exists
+      # "/repos/factory-pro" is not inside "/repos/factory", and a bare
+      # prefix test says it is.
+      When I ask which project is at the sibling "factory-pro"
+      Then there is no project there
+
+    Scenario: The innermost project wins
+      Given the project "factory" exists
+      And the project "web" exists at "apps/web" inside it
+      When I ask which project is at "apps/web/src" inside "factory"
+      Then the answer is "web"
+
+    Scenario: Two projects at one directory are refused by name
+      Given the project "factory" exists
+      And the project "factory-again" exists at the same directory
+      When I ask which project is at that directory
+      Then it is refused
+      And the refusal names "factory" and "factory-again"
+
+    Scenario: A task's worktree is the project, and says which task
+      Given the project "factory" exists
+      And a task "Add due dates" in "factory" has a worktree
+      When I ask which project is at that worktree
+      Then the answer is "factory"
+      And it matched a worktree
+      And it names the directory "add-due-dates"
+
+    Scenario: A relative path is refused
+      Given the project "factory" exists
+      # There is no current directory here to resolve it against, and guessing
+      # one is how the prototype answered questions about the wrong machine.
+      When I ask which project is at "../somewhere"
+      Then it is refused

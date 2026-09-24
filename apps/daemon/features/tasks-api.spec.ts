@@ -2949,4 +2949,261 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the findings say nothing about git', () => expect(aboutGit()).toHaveLength(0))
     })
   })
+  Rule('a directory can ask which project it is in', ({ RuleScenario }) => {
+    const status = (code: number) => (): void => expect(response.statusCode).toBe(code)
+    let repository = ''
+    const ask = (path: string) =>
+      call('GET', `/api/projects/at?path=${encodeURIComponent(path)}`)
+    const givenProject = async (): Promise<void> => {
+      repository = makeRepository(join(root, 'resolvable'))
+      await addProject('factory', repository)
+    }
+
+    RuleScenario('A directory inside a project resolves to it', ({ Given, When, Then, And }) => {
+      Given('a project "factory" at a repository', givenProject)
+      When('I ask which project is at a directory inside it', async () => {
+        const deep = join(repository, 'packages', 'core', 'src')
+        mkdirSync(deep, { recursive: true })
+        await ask(deep)
+      })
+      Then('the response is 200', status(200))
+      And('the project is "factory"', () =>
+        expect((response.body.project as { name: string }).name).toBe('factory'),
+      )
+      And('it matched an ancestor', () => expect(response.body.matchedBy).toBe('ancestor'))
+    })
+
+    RuleScenario('A directory nobody registered is not found', ({ Given, When, Then }) => {
+      Given('a project "factory" at a repository', givenProject)
+      When('I ask which project is at a directory outside every project', async () => {
+        const elsewhere = join(root, 'elsewhere')
+        mkdirSync(elsewhere, { recursive: true })
+        await ask(elsewhere)
+      })
+      Then('the response is 404', status(404))
+    })
+
+    RuleScenario('A task\'s worktree resolves to the project and the task', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      let worktree = ''
+      Given('a project "factory" at a repository', givenProject)
+      And('a task "Add due dates" in it with a worktree on disk', async () => {
+        await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+        const project = (
+          await app.inject({ method: 'GET', url: '/api/projects' })
+        ).json() as { items: { id: string; worktreesRoot: string }[] }
+        const root_ = project.items.find((item) => item.id === projectId)?.worktreesRoot ?? ''
+        worktree = join(root_, 'add-due-dates')
+        mkdirSync(worktree, { recursive: true })
+      })
+      When('I ask which project is at that worktree', () => ask(worktree))
+      Then('the response is 200', status(200))
+      And('the project is "factory"', () =>
+        expect((response.body.project as { name: string }).name).toBe('factory'),
+      )
+      And('the answer names the task "Add due dates"', () =>
+        expect((response.body.task as { name: string } | undefined)?.name).toBe('Add due dates'),
+      )
+    })
+
+    RuleScenario('Two projects at one directory are a conflict', ({ Given, And, When, Then }) => {
+      Given('a project "factory" at a repository', givenProject)
+      And('a second project "factory-again" at the same repository', () =>
+        addProject('factory-again', repository),
+      )
+      When('I ask which project is at that repository', () => ask(repository))
+      Then('the response is 409', status(409))
+      And('both project names are in the answer', () =>
+        expect(response.body.projects).toEqual(['factory', 'factory-again']),
+      )
+    })
+
+    RuleScenario('Asking without a path is a usage error', ({ When, Then, And }) => {
+      When('I ask which project is at no path at all', () => call('GET', '/api/projects/at'))
+      Then('the response is 400', status(400))
+      And('the answer says what to pass instead', () =>
+        expect(response.body.error).toContain('?path='),
+      )
+    })
+  })
+  Rule("how far work may start work is the daemon's to decide", ({ RuleScenario }) => {
+    const status = (code: number) => (): void => expect(response.statusCode).toBe(code)
+    const coded = (code: string) => (): void => expect(response.body.code).toBe(code)
+    let ids: Record<string, string> = {}
+
+    const givenProject = async (): Promise<void> => {
+      ids = {}
+      await addProject('resolvable', makeRepository(join(root, 'orchestrated')))
+    }
+    /** A finished run at a chosen depth, written through the repository. */
+    const runAt = (name: string, depth: number) => (): void => {
+      const run = service.runs.start({ workflow: 'development', depth })
+      service.runs.finish(run.id, 'completed')
+      ids[name] = run.id
+    }
+    const createFrom = (initiator: unknown) => async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId, initiator })
+    }
+    const aTask = async (name = 'Add due dates'): Promise<string> => {
+      await call('POST', '/api/tasks', {
+        name,
+        projectId,
+        workflows: ['development'],
+      })
+      return (response.body.task as { id: string }).id
+    }
+    const accept = () => call('POST', '/api/settings/accept')
+
+    RuleScenario('A request with nobody behind it is a person', ({ Given, When, Then }) => {
+      Given('a project to work in', givenProject)
+      When('I create a task with no initiator', () =>
+        call('POST', '/api/tasks', { name: 'Add due dates', projectId }),
+      )
+      Then('the response is 201', status(201))
+    })
+
+    RuleScenario('Work four levels deep is refused', ({ Given, And, When, Then }) => {
+      Given('a project to work in', givenProject)
+      And('a run "deep" at depth 3', runAt('deep', 3))
+      When('I create a task from inside "deep"', () => createFrom({ runId: ids.deep })())
+      Then('the response is 409', status(409))
+      And('the answer is coded RECURSION_LIMIT', coded('RECURSION_LIMIT'))
+      And('no task was created', () => expect(service.tasks.list()).toHaveLength(0))
+    })
+
+    RuleScenario('The eleventh task from one run is refused', ({ Given, And, When, Then }) => {
+      Given('a project to work in', givenProject)
+      And('a run "busy" at depth 0 that has already asked for 10 tasks', async () => {
+        runAt('busy', 0)()
+        for (let index = 0; index < 10; index += 1) {
+          await call('POST', '/api/tasks', {
+            name: `Task ${index}`,
+            projectId,
+            initiator: { runId: ids.busy },
+          })
+        }
+      })
+      When('I create a task from inside "busy"', () => createFrom({ runId: ids.busy })())
+      Then('the response is 409', status(409))
+      And('the answer is coded FAN_OUT_LIMIT', coded('FAN_OUT_LIMIT'))
+    })
+
+    RuleScenario('A task created from inside a run remembers which', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('a run "asker" at depth 0', runAt('asker', 0))
+      When('I create a task from inside "asker"', () =>
+        createFrom({ runId: ids.asker, label: 'mcp:a-client/1.0' })(),
+      )
+      Then('the response is 201', status(201))
+      And('the task says "asker" asked for it', () =>
+        expect((response.body.task as { createdByRunId?: string }).createdByRunId).toBe(ids.asker),
+      )
+      And('the task says who the client called itself', () =>
+        expect((response.body.task as { createdBy?: string }).createdBy).toBe('mcp:a-client/1.0'),
+      )
+    })
+
+    RuleScenario('An initiator that is not an object is refused rather than half-read', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      When('I create a task with an initiator of "yes please"', createFrom('yes please'))
+      Then('the response is 400', status(400))
+    })
+
+    RuleScenario('An agent cannot queue the task it is running inside', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('a task "Add due dates" that can be queued', async () => {
+        ids.task = await aTask()
+      })
+      And('the disclaimer has been accepted', accept)
+      When('the agent running that task tries to queue it', () =>
+        call('POST', `/api/tasks/${ids.task}/actions/queue`, {
+          initiator: { runId: 'run-x', taskId: ids.task },
+        }),
+      )
+      Then('the response is 409', status(409))
+      And('the answer is coded SELF_ORCHESTRATION_BLOCKED', coded('SELF_ORCHESTRATION_BLOCKED'))
+      And('the task was not queued', () =>
+        expect(service.tasks.get(ids.task as string)?.state).toBe('draft'),
+      )
+    })
+
+    RuleScenario("An agent cannot approve what its own run asked for", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('a run "asker" at depth 0', runAt('asker', 0))
+      And('a task "Add due dates" that "asker" asked for, waiting for approval', async () => {
+        await call('POST', '/api/tasks', {
+          name: 'Add due dates',
+          projectId,
+          workflows: ['development'],
+          initiator: { runId: ids.asker },
+        })
+        ids.task = (response.body.task as { id: string }).id
+        // Straight through the repository: reaching `awaiting_approval` is the
+        // engine's job and this scenario is about who may answer the gate.
+        service.tasks.act(ids.task, 'queue')
+        service.tasks.act(ids.task, 'start')
+        service.tasks.act(ids.task, 'await_approval')
+      })
+      When('the agent in "asker" tries to approve it', () =>
+        call('POST', `/api/tasks/${ids.task}/actions/approve`, {
+          initiator: { runId: ids.asker },
+        }),
+      )
+      Then('the response is 409', status(409))
+      And('the answer is coded APPROVAL_SEPARATION', coded('APPROVAL_SEPARATION'))
+      And('the task is still waiting for approval', () =>
+        expect(service.tasks.get(ids.task as string)?.state).toBe('awaiting_approval'),
+      )
+    })
+
+    RuleScenario("Queue all skips the agent's own task and queues the rest", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('the disclaimer has been accepted', accept)
+      And('two tasks that can be queued', async () => {
+        ids.first = await aTask('First')
+        ids.second = await aTask('Second')
+      })
+      When('the agent running the first one queues the whole project', () =>
+        call('POST', `/api/projects/${projectId}/queue`, {
+          initiator: { runId: 'run-x', taskId: ids.first },
+        }),
+      )
+      Then('the response is 200', status(200))
+      And('one task was queued', () => expect(response.body.queued).toHaveLength(1))
+      And('the one it is running inside was skipped with a reason', () => {
+        const skipped = response.body.skipped as { task: { id: string }; reason: string }[]
+        expect(skipped).toHaveLength(1)
+        expect(skipped[0]?.task.id).toBe(ids.first)
+        expect(skipped[0]?.reason).toContain('running inside')
+      })
+    })
+  })
 })

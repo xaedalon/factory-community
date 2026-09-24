@@ -19,7 +19,7 @@ This document is the source of truth, written as the project is built.
 point a task at a repository, queue it, and the daemon gives it a worktree, runs the agents, keeps
 what they printed and what they produced, stops at the gate you asked for, and continues when you
 approve. From a terminal, from the board, or from Pro's desktop app — the same API either way.
-**5,457 Gherkin steps green below the browser** across 50 feature files, 157 of them in a real
+**6,981 Gherkin steps green below the browser** across 51 feature files, 185 of them in a real
 browser, and smoke runs against the real agent CLIs. Every one of those runs in CI, on macOS and
 Linux, alongside a job that installs from a clean clone and asks the daemon for a page.
 
@@ -36,6 +36,13 @@ task when what it waits for is done. *Stop all* halts a project's work in one re
 `factory setup` is where a new machine starts: what is still missing, and the command that fixes
 each one. It is a registry, so the answer comes from whoever knows it — the provider plugins, the
 engine, and Pro.
+
+Since `factory mcp` Factory can also be **driven by an agent**: sixteen Model Context Protocol
+tools over stdio, so Claude Code, Codex or Copilot can resolve the project you are standing in,
+create a task, queue it and read what came back. It is a client of the same HTTP API the board and
+the CLI use, so it inherits the disclaimer gate, the execution profile and the workspace boundary
+rather than repeating them — and work that starts work is bounded by the daemon, because a rule
+only one client enforces is advice. [`docs/mcp.md`](docs/mcp.md) is the feature.
 
 Increment 1 — **capability core + definition layer**. Authoring, storing, resolving, validating and
 sharing workflow and phase definitions, plus a foreground runner that proves the contract is
@@ -1015,6 +1022,178 @@ two were scenarios that passed for the wrong reason — one never set up the
 condition it was about, and one could not tell "the rule said nothing" from
 "the rule threw and doctor swallowed it".
 
+## After 0.1.0 — Factory can be driven by an agent
+
+| # | What | State |
+|--:|------|-------|
+| 96 | **`packages/mcp`** — JSON-RPC over stdio, sixteen tools, no new dependency | ✅ done |
+| 97 | **`factory mcp`** — the first command that owns its streams | ✅ done |
+| 98 | **`GET /api/projects/at`** — which project a directory is in, served not re-derived | ✅ done |
+| 99 | **Run ancestry** — migration 19, and the four names stamped into an agent's environment | ✅ done |
+| 100 | **Bounded orchestration** — depth, fan-out, self-orchestration, approval separation | ✅ done |
+| 101 | **`REQUESTABLE_ACTIONS`** — core publishes which of its moves a client may ask for | ✅ done |
+| 102 | **`factory-mcp-install` and `factory-mcp-uninstall`** — runbooks that ask where before writing | ✅ done |
+
+The request was a 48-section implementation standard for adding a Model Context
+Protocol server. Most of it survives; three things in it do not fit this
+codebase and were adapted rather than followed. The standard itself is
+`docs/proposals/mcp.md`, marked a target rather than a description, with a
+header saying which sections are built.
+
+**Its §1 asks for MCP handlers over the application services directly**, and the
+application layer here is importable, so that is mechanically possible and
+operationally wrong. `createService()` unconditionally reconciles on the way in,
+which finishes every running run as failed and blocks its task — a second
+process opening the live database corrupts a running installation at startup.
+The event bus and the process registry are per-process too: that server's writes
+would never reach the board's stream, and its `stopAll` would report nothing
+signalled while the agents kept working. `apps/cli/src/daemon.ts` had already
+settled this for the CLI and said why. MCP is the third client of one contract.
+
+**Its §7 asks for `factory_run_start` and `factory_run_cancel`.** Nothing here
+starts a run directly: queueing a task is what starts work, cancelling it is
+what stops work, and `Engine.watch()` kills the process group on any transition
+to `cancelled` whoever asked for it. Both are `factory_task_act`, and a scenario
+asserts neither tool exists — "we decided not to" is the kind of decision that
+gets quietly reversed.
+
+**And it assumes nouns Factory does not have.** There is no Approval entity: a
+phase declares a gate, the engine parks the run, and `approve` is a task action.
+There is no Resource entity, and no bug-fix/feature/research strategy
+vocabulary — so `factory_delegate` would put a vocabulary in the control surface
+that the board and the CLI do not have, which its own §1 forbids. §35 of the
+proposal says what that is waiting on instead of inventing it.
+
+**No SDK.** `@modelcontextprotocol/sdk` brings express, hono, jose, ajv, cors
+and a dozen more into every install of a local-first tool, to speak a
+line-based protocol over a pipe — and this repository writes a forty-line web
+route rather than take a static-file dependency. The cost is named rather than
+hidden: we own conformance, so the supported protocol revisions are a written
+list with a scenario behind the negotiation. `zod` was already here, and
+`z.toJSONSchema()` was already how step-kind schemas reach the builder, so a
+tool's input schema is published the same way as everything else.
+
+Decisions, each with a defensible alternative:
+
+- **Path resolution is the daemon's.** The CLI resolves a project by *name*,
+  with a prefix rule; the board will want the same answer. A client that worked
+  it out for itself would disagree with this one the first time the rule
+  changed. Longest match wins, so a project inside another resolves to the
+  inner one; two with an equal claim are refused by name rather than picked
+  between, because a wrong answer here queues somebody's work against the wrong
+  repository. Both sides are canonicalised, which is load-bearing rather than
+  tidy: a macOS temporary directory is a symlink and so is many a home
+  directory.
+- **A worktree resolves to its project and names its task.** More than a
+  convenience — it is an identity Factory can check against a path, which
+  matters wherever a caller's account of itself cannot be trusted.
+- **Ancestry comes from the environment, not from the client.** Every agent
+  process is told `FACTORY_RUN_ID`, `FACTORY_TASK_ID`, `FACTORY_PROJECT_ID` and
+  `FACTORY_ORCHESTRATION_DEPTH`. A client can omit them, which makes it look
+  like a person — the direction that loses authority rather than gains it. The
+  label it gives for itself is read by people and by no rule.
+- **The limits live in the daemon.** The disclaimer gate settled that argument
+  once and its comment is still the reason: a rule only the web app enforces is
+  advice, with `curl` as the exception.
+- **`approve` and `reject` are not offered over MCP at all.** Stronger than the
+  ancestry rule, and the only form that does not depend on knowing who is
+  typing: Factory can tell an agent it launched from a person's own session, but
+  not a person's session from an agent acting unasked inside it. The daemon's
+  rule stays, because this surface is not its only client.
+- **No MCP doctor rule.** Considered and refused: a directory that resolves to
+  no project is the ordinary case in a home directory, and a check that fires on
+  normal use is a check people learn to ignore. `factory doctor` already says
+  when no daemon is answering, which is the only MCP-relevant *problem*.
+
+**Three API additions**, recorded because this API is the contract a commercial
+edition builds on: `GET /api/projects/at?path=` is new; `POST /api/tasks` and
+`POST /api/tasks/:id/actions/:action` accept an optional `initiator` and answer
+409 with a code when a limit is reached; `POST /api/projects/:id/queue` accepts
+one too and skips the task its caller is running inside rather than failing the
+batch.
+
+**One duplicate deleted on the way through.** The CLI kept its own list of the
+eight actions a person can type, with a comment saying the daemon had the final
+say — true, and exactly how a list drifts, because it is right until somebody
+adds a ninth move. Core publishes `REQUESTABLE_ACTIONS` now, derived from the
+move table, and `tasks.feature` names the eight literally rather than filtering
+the list under test.
+
+**A defect found by a scenario that ran a real command.** `factory_run_logs`
+returned an empty string for any run. A run's own log holds what the engine
+wrote; everything a command printed is attached to the step that printed it, and
+`GET /api/runs/:id/logs` without a step returns only the first. It walks the
+steps now, as `factory task logs` does for a person, and each line says which
+step it came from. Nothing below a real process would have caught it.
+
+**Verified against a real MCP client, which is the half no suite can answer.** The official
+`@modelcontextprotocol/sdk` client — installed outside the repository, so Factory still takes no
+dependency on it — drove `factory mcp` over a real pipe against a throwaway installation on its own
+port and scope. It connected, negotiated, listed the sixteen tools, resolved the project from three
+directories down as `matchedBy: "ancestor"`, created a task, queued it, and watched a real
+`hello-world` run park at its approval gate with *"A person has to approve or reject this before it
+goes any further."* An agent stamped as running inside that task was refused when it tried to cancel
+it; one stamped with a run at depth 3 was refused a new task; and asking to approve was refused by
+the schema before it reached the server. stdout carried frames and nothing else throughout.
+
+**Three defects it found that every scenario had passed over**, each because a fixture was wrong
+about the real thing rather than because a rule was:
+
+- `factory_run_logs` returned an empty string for any run. A run's own log holds what the engine
+  wrote; everything a command printed is attached to the step that printed it. It walks the steps
+  now, as `factory task logs` does for a person.
+- The disclaimer never reached the agent. `DISCLAIMER` is a document — a version, a summary, five
+  points and a caveat — and the check was for a string, so the one refusal an agent cannot act on
+  alone came back as a generic error. The scenario now uses the real constant rather than a
+  sentence somebody made up.
+- A coded refusal said the same sentence twice and named no code, because the body's own `error`
+  key won the spread that was meant to add detail to it. And `FAN_OUT_LIMIT` was missing from the
+  code list entirely — a run that had asked for eleven tasks was told `FACTORY_ERROR`. The list is
+  spread from core's now.
+
+**Two runbooks, because a config file is not a procedure.** `docs/mcp.md` gives a person the two
+lines to paste; `factory-mcp-install` and `factory-mcp-uninstall` give a coding agent the steps,
+including the question this whole pair exists to ask — everywhere on this machine, or one
+repository — asked before anything is written, defaulting to everywhere. They configure whichever
+agents Factory says can consume an MCP server, read from `factory provider list --json` rather than
+a list kept in the prose, so a provider added later is covered without an edit.
+
+The vocabulary needed guarding. Factory's scopes are `project → user → builtin` and decide which
+workflows a project gets; a coding agent's scopes decide where *it* keeps a list of servers. An
+uninstall runbook that reasoned from "installed at user level" could go looking in
+`~/.xaedalon/.factory`, which is the one directory `factory-uninstall` exists to protect. So neither
+runbook says "user level": they name the file, and each says the distinction once at the top. The
+glossary's three meanings of "tool" is the same device.
+
+**Following them found four things the writing had got wrong**, which is the argument for following
+a runbook rather than reviewing it:
+
+- The Copilot CLI does **not** read a workspace `.mcp.json`. Its own help lists one as a
+  configuration source, and `copilot mcp list` reports neither it nor `.github/mcp.json`, in either
+  that file's shape or Copilot's own. "One file, both clients" was written, measured, and deleted.
+- `claude mcp remove factory` with no scope **refuses** when two scopes hold it, naming both and
+  changing nothing. The runbook had said it takes it out of whichever one has it, which is true only
+  when one does.
+- Claude Code edits a shared `.mcp.json` itself and leaves every other server in it alone — so the
+  instruction to inspect and hand-edit was replaced by one that says to use the CLI and check the
+  result. Removing the last server leaves `{"mcpServers": {}}` behind rather than deleting the file.
+- The two clients disagree about a second removal: Claude says so and carries on, Copilot answers
+  `Error: Server "factory" not found.` An agent that treated that as a fault would go looking for
+  one.
+
+Verified end to end against both real clients in an isolated `HOME`, against a throwaway daemon on
+its own port: `claude mcp list` reported `✔ Connected` for the `node <checkout>/…/bin.js mcp` form
+carrying `FACTORY_PORT`, and `copilot mcp list` named it under *User servers*.
+
+**Forty-four mutations broken and watched to fail** across the ten commits.
+Three found scenarios that passed for the wrong reason, and all three are the
+same shape — an assertion that counted rather than identified. A frame split
+across two chunks was asserted by counting frames, and a server that threw the
+first piece away answers the second with a parse error, which is also one frame.
+`factory mcp` printing nothing was asserted the same way. And a missing `?path=`
+was asserted by its status alone, which a `TypeError` about a string also
+produces.
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -1033,7 +1212,9 @@ The vocabulary is deliberately small, and it is the vocabulary in the code.
 | **Plugin** | A package providing one or more capabilities. Pro is a plugin bundle; so is a provider. |
 | **Provider** | An agent CLI behind a uniform interface: capabilities, model roles, command rendering. A provider is a **descriptor**, not a class — adding one is a YAML file. |
 | **Bundle** | One self-contained YAML file holding a workflow plus every definition it needs. Its inner definitions are written by the same writers that produce definition files, so a bundle contains exactly what would sit on disk. |
-| **Run** | One execution attempt of a workflow. |
+| **Run** | One execution attempt of a workflow. It records where it came from and how deep it is, so work that starts work can be bounded. |
+| **Initiator** | Who asked for a piece of work, when it was not a person. The run and task come from the environment Factory stamped into the agent it launched; the label the client gives for itself is read by people and by no rule. |
+| **MCP tool** | Something an agent can ask Factory to do, over the Model Context Protocol. Not a **task tool**, which is a button on a task, and not a provider's `supports: mcp`, which means that agent CLI can *consume* MCP servers. Three meanings, one word, said apart wherever it matters. |
 
 ---
 
@@ -1117,6 +1298,7 @@ factory/                   a layout on a machine, not a checkout — see below
 │   │   ├── events/        the typed event bus
 │   │   ├── config/        scope discovery, layered resolution, settings, the plugin catalogue
 │   │   ├── plugin-sdk/    the only surface plugins — and Pro — import
+│   │   ├── mcp/           Factory as an MCP server: one contract, a third client
 │   │   └── plugins/       provider-claude · provider-codex · provider-copilot
 │   │                      task-terminal · task-session · task-diffity
 │   └── apps/              daemon (127.0.0.1:7317) · web · cli
@@ -1191,6 +1373,10 @@ this repository does not contain.
 | `packages/config/features/provider-config.feature` | `providers.<id>.command` — the way out when discovery cannot help |
 | `packages/config/features/setup.feature` | What is still missing, contributed by whoever knows |
 | `packages/store/features/projects.feature` (extended) | Whether a project gives each task a worktree, and what that costs |
+| `packages/mcp/features/mcp-protocol.feature` | Speaking MCP: the handshake, version negotiation, a bad frame answered rather than thrown, and stdout carrying the protocol and nothing else |
+| `packages/mcp/features/project-context.feature` | Which project a directory is in, including a worktree that names its task, and what is refused rather than guessed |
+| `packages/mcp/features/mcp-tools.feature` | The tool surface: actions served not guessed, bounded logs, what is waiting for a person, and the two tools that deliberately do not exist |
+| `packages/core/features/orchestration.feature` | Work that starts work: how deep, how wide, and the two things an agent may not do to its own |
 
 **Verifying everything** (from `factory-community`, then `factory-pro`):
 

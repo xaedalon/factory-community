@@ -550,3 +550,50 @@ Feature: The factory command
       Then the exit code is 2
       And the output mentions "<path>"
 
+
+  Rule: `factory mcp` serves the protocol and says nothing else
+
+    One command owns its streams rather than returning lines, because every
+    other command's lines are printed to stdout — and a printed line here lands
+    in the middle of a JSON-RPC stream and ends the session with an error the
+    person reads as "Factory is broken".
+
+    It is also the one command nobody types. A terminal on stdin means a person
+    typed it and no client is coming, so it says what it is for instead of
+    waiting on a pipe that will never speak.
+
+    That distinction used to be made in `bin.ts`, which handed the streams over
+    unconditionally — so the explanation was unreachable from the real binary
+    and a person who typed `factory mcp` got a hang. The scenario for it passed
+    because a spec can leave the streams out, which the product never did. The
+    process fact is reported now and the command decides, which is where every
+    other one of them is decided.
+
+    Scenario: It answers a client over the pipe it was given
+      Given a client that initializes and lists the tools
+      When I run "mcp"
+      Then it succeeds
+      And two frames were written to the pipe
+      And nothing was printed
+      And the tools include "factory_project_current"
+
+    Scenario: At a terminal it explains itself rather than waiting
+      Given a person typing it, with a terminal on stdin
+      When I run "mcp"
+      Then it fails
+      And the output says an MCP client starts it
+      And the output shows what to put in a client's configuration
+      # The assertion that would have caught the hang: not "it printed
+      # something" but "it never went looking for a frame".
+      And nothing was read from stdin
+
+    Scenario: Given no streams at all it says the same thing
+      # An embedder that called `run` without handing any over. Same answer,
+      # and the one the spec could already reach.
+      When I run "mcp" with no pipe at all
+      Then it fails
+      And the output says an MCP client starts it
+
+    Scenario: It is in the help
+      When I run "--help"
+      Then the output mentions "factory mcp"

@@ -38,6 +38,9 @@
       ],
       "@factory/engine": [
         "./packages/engine/src/index.ts"
+      ],
+      "@factory/mcp": [
+        "./packages/mcp/src/index.ts"
       ]
     }
   },

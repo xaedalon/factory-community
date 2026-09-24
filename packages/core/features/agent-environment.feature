@@ -139,3 +139,28 @@ Feature: What environment an agent's process gets
       And the report mentions "passEnv"
       And the report mentions "Full Access"
       And the report contains no value
+
+  Rule: what the agent is told about its own run survives the filter
+
+    Factory puts four names into the environment of every agent it launches, so
+    that an MCP server started by that agent knows where it is in the
+    orchestration tree without being asked to be honest about it. The whole
+    model rests on them arriving, and the filter here is a deny-list of
+    credential-shaped names — so this is the scenario that says out loud that
+    none of these is one.
+
+    It is not decorative. `FACTORY_API_KEY` would be withheld by the
+    `_API_KEY` suffix rule, and a name chosen without checking is a model that
+    quietly stops working while every test still passes.
+
+    Scenario: A confined step is told which run and task it is
+      Given the environment holds "FACTORY_RUN_ID" and "FACTORY_TASK_ID"
+      When the environment is built for a confined step
+      Then all of them are passed through
+      And nothing was withheld
+
+    Scenario: And which project, and how deep
+      Given the environment holds "FACTORY_PROJECT_ID" and "FACTORY_ORCHESTRATION_DEPTH"
+      When the environment is built for a confined step
+      Then all of them are passed through
+      And nothing was withheld

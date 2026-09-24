@@ -260,4 +260,41 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
       And('the scale is 2', () => expect(settings.ui.scale).toBe(2))
     })
   })
+  Rule('how far work may start work is a setting', ({ RuleScenario }) => {
+    RuleScenario('A fresh installation allows three levels and ten tasks a run', ({
+      Given,
+      Then,
+      And,
+    }) => {
+      Given('an installation with the default settings', () => {
+        givenUserScope()()
+        read()
+      })
+      Then('work may start work three levels deep', () =>
+        expect(settings.orchestration.maxDepth).toBe(3),
+      )
+      And('one run may ask for ten tasks', () =>
+        expect(settings.orchestration.maxTasksPerRun).toBe(10),
+      )
+    })
+
+    RuleScenario('The depth can be turned down to nothing', ({ Given, When, Then }) => {
+      Given('an installation with the default settings', givenUserScope())
+      When('the orchestration depth is set to 0', save({ orchestration: { maxDepth: 0 } }))
+      Then('work may start work zero levels deep', () => {
+        read()
+        expect(settings.orchestration.maxDepth).toBe(0)
+      })
+    })
+
+    RuleScenario('A depth nobody could have meant is refused', ({ Given, When, Then, And }) => {
+      Given('an installation with the default settings', givenUserScope())
+      When('the orchestration depth is set to 500', save({ orchestration: { maxDepth: 500 } }))
+      Then('the settings are refused', () => expect(problems.length).toBeGreaterThan(0))
+      And('what is saved still allows three levels', () => {
+        read()
+        expect(settings.orchestration.maxDepth).toBe(3)
+      })
+    })
+  })
 })

@@ -56,6 +56,13 @@ attempt — it is not on the list and will not be.
   argument. What counts is derived from each provider's own Full Access flags,
   so it stays true as descriptors change.
 
+  The refusal also shows **what this profile already passes for that flag**,
+  because the common case is not somebody reaching for authority. It is somebody
+  told that a step needs `args: ['--allowedTools', 'Bash(pnpm *)']` to run
+  `pnpm` — which it does not, and which would *replace* the list above rather
+  than add to it, since `--allowedTools` is variadic. Seeing the granted list
+  makes the answer obvious: delete the line.
+
 When something is withheld, the run says so against the step that lost it —
 names only, never values. When an agent is refused something, the refusal is
 recorded on the run, with the path or the command the refusal named.

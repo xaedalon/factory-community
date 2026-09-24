@@ -440,6 +440,35 @@ Feature: Definitions become a runnable plan
       Then planning fails
       And a problem says the step asks for more authority than the profile allows
 
+    Scenario: The refusal says what the profile already passes for that flag
+      # Reported from a real run: an agent told somebody the README required
+      # `args: ['--allowedTools', 'Bash(pnpm *)']` to make pnpm work. It did
+      # not — the Default profile has passed exactly that since the package
+      # managers were measured, and `--allowedTools` is variadic, so the step's
+      # copy would have *replaced* the list and dropped npm, yarn and bun.
+      #
+      # The refusal said "more authority" and pointed at Full Access, which is
+      # the most dangerous lever in the building and the wrong one here. It has
+      # to show what is already granted, because for this argument the answer is
+      # usually "delete the line".
+      Given the project scope defines a phase "eager" passing "--allowedTools Bash(pnpm *)"
+      And the project scope defines a workflow "build" with the phase "eager"
+      When the workflow "build" is planned
+      Then planning fails
+      And the problem names the flag the step passed
+      And the problem shows what the profile already passes for it
+      And the problem says a shell step is not governed by that list
+
+    Scenario: A flag the profile passes nothing for is refused without a suggestion
+      # `--dangerously-skip-permissions` is forbidden and is in none of the
+      # profile's own arguments, so there is nothing to show and nothing to
+      # delete. Inventing a line for it would be worse than saying nothing.
+      Given the project scope defines a phase "reckless" passing "--dangerously-skip-permissions"
+      And the project scope defines a workflow "review" with the phase "reckless"
+      When the workflow "review" is planned
+      Then planning fails
+      And the problem does not claim the profile already passes it
+
     Scenario: Under Full Access the same step plans
       # There is no boundary left to widen, and the profile was chosen
       # deliberately and is marked on screen the whole time it is on.

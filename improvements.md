@@ -68,7 +68,32 @@ almost nothing reads.
 by `problems[].field`, falling back to the banner; the routes that refuse a
 field send `field` with the message. Then `placeError`'s string matching goes.
 
-## 4. `needs:` describes an order nothing acts on
+## 4. `git.feature` fails under a saturated machine, and it is the deadline
+
+Seen twice on 2026-09-24, both times in a full `pnpm test` (59 workers), both
+times passing when the file is run alone:
+
+```
+FAIL  packages/core/features/git.spec.ts > A question with an answer
+        > Then the answer is yes            expected undefined to be 0
+        > And it names the committed file
+```
+
+Both assertions fail together, which is what `answer === undefined` looks like —
+and `systemGitQuery` returns `undefined` for a timeout as deliberately as it does
+for "not a repository". `GIT_DEADLINE_MS` is **2 s**, which is right in a daemon
+answering a page and tight on a machine running fifty-nine vitest workers that
+are each forking git.
+
+So: not a product defect, and not a flake to shrug at either — a production
+deadline being measured by a test that cannot control the load.
+
+**Shape of the fix:** let `systemGitQuery` take the deadline, defaulting to
+`GIT_DEADLINE_MS`, and have this spec pass a generous one. The scenario is about
+*classifying* git's answers, not about how fast git is, and the timeout path has
+a scenario of its own that sets it deliberately.
+
+## 5. `needs:` describes an order nothing acts on
 
 A workflow's `needs:` is read by doctor (to report a task whose workflows are out
 of order) and by the bundle exporter (to gather the closure). Assigning `verify`
@@ -82,7 +107,7 @@ the board has the information to offer better.
 `needs` one that is not on the task, offer to add it. An offer, not an
 expansion: `verify` alone is a legitimate thing to want.
 
-## 5. Coverage credit for a declaration is asymmetric
+## 6. Coverage credit for a declaration is asymmetric
 
 `observationsFrom` credits a declaration's *first* expected-evidence key against
 an artifact actually arriving, and the rest on the run completing. A workflow

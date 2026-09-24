@@ -40,6 +40,15 @@ and a newer board is the ordinary way to be in that position. The board and the 
 a non-JSON success outright rather than handing their callers nothing — naming the request and
 saying the daemon may be older than they are.
 
+**A refused argument says what you already have.** `args:` on a step is appended after the flags
+that confine the agent, so it is refused at plan time — but the common case is not somebody reaching
+for authority. It is somebody told that a step needs `args: ['--allowedTools', 'Bash(pnpm *)']` to
+run `pnpm`. It does not: the Default profile has passed exactly that since the package managers were
+measured, and `--allowedTools` is variadic, so the step's copy would have *replaced* the list and
+dropped `npm`, `yarn` and `bun`. The refusal now prints what the profile already passes for that
+flag, and points at a `shell` step — which an agent's allow-list does not govern — before it
+mentions Full Access.
+
 **An error is shown where it was caused.** A failure that belongs to a field is under that field;
 one that belongs to none is at the *top* of the form. It used to sit below every field, which on
 the project form is off the screen at the moment it appears.

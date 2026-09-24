@@ -1209,6 +1209,61 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
       )
     })
 
+    const refusal = (): string => {
+      const found = result.problems.find((problem) => problem.rule === 'plan.argsWidenProfile')
+      expect(found, JSON.stringify(result.problems)).toBeDefined()
+      return (found as { message: string }).message
+    }
+
+    RuleScenario('The refusal says what the profile already passes for that flag', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "eager" passing "--allowedTools Bash(pnpm *)"',
+        phasePassing('eager', "'--allowedTools', 'Bash(pnpm *)'"),
+      )
+      And('the project scope defines a workflow "build" with the phase "eager"', () =>
+        workflow('build', 'eager'),
+      )
+      When('the workflow "build" is planned', () => plan('build'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('the problem names the flag the step passed', () => {
+        expect(refusal()).toContain('--allowedTools')
+      })
+      And('the problem shows what the profile already passes for it', () => {
+        // The whole list, so a reader can see their own entry is in it and the
+        // answer is to delete their line rather than to widen the profile.
+        expect(refusal()).toContain('Bash(pnpm *)')
+        expect(refusal()).toContain('Bash(npm *)')
+      })
+      And('the problem says a shell step is not governed by that list', () => {
+        expect(refusal()).toContain('shell')
+      })
+    })
+
+    RuleScenario('A flag the profile passes nothing for is refused without a suggestion', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "reckless" passing "--dangerously-skip-permissions"',
+        phasePassing('reckless', "'--dangerously-skip-permissions'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "reckless"', () =>
+        workflow('review', 'reckless'),
+      )
+      When('the workflow "review" is planned', () => plan('review'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('the problem does not claim the profile already passes it', () => {
+        expect(refusal()).not.toContain('already passes')
+      })
+    })
+
     RuleScenario('Under Full Access the same step plans', ({ Given, And, When, Then }) => {
       Given(
         'the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"',

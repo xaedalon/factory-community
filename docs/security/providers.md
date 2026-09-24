@@ -67,6 +67,13 @@ variadic option **replaces** rather than appends. Four flags would leave only
 the last in force — which looks like it works. Factory passes one flag with a
 comma-separated value.
 
+**You do not need to pass it yourself, and a step that tries is refused.** The
+table above is what every agent step already gets. A step saying
+`args: ['--allowedTools', 'Bash(pnpm *)']` would not add `pnpm` — it already has
+`pnpm` — it would replace the list and lose `npm`, `yarn` and `bun`. If a
+command you need is genuinely not on the list, run it in a `shell` step, which
+an agent's allow-list does not govern.
+
 ### Configurations that read correctly and did not work
 
 Recorded so nobody tries them again.

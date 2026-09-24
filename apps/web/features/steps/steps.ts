@@ -2235,3 +2235,214 @@ Then('{string} cannot be chosen to wait for', async ({ page }, name: string) => 
     0,
   )
 })
+
+/** The task these scenarios judged, so the navigation steps can find it. */
+let judged = ''
+
+/* ---- reliability ---------------------------------------------------- */
+
+Given('a task nobody has judged', async ({ world }) => {
+  await world.startDaemon()
+  judged = await world.createTask('Add due dates', [])
+})
+
+Given('a task judged at 88 with 70% coverage', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: -3, workflow: 'validate' }])
+  judged = id
+})
+
+Given('a task capped at 70 by a critical risk', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [
+    {
+      score: 70,
+      coverage: 70,
+      delta: -20,
+      workflow: 'validate',
+      caps: [{ type: 'criticalOpenDriver', value: 70, reason: 'A critical risk is still open.' }],
+    },
+  ])
+  judged = id
+})
+
+Given('a task whose judgement is stale', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  // The assessment considered a run that no longer is the newest, which is what
+  // staleness means — derived, never stored. So both runs have to exist: the
+  // one it looked at, and the one that finished after it.
+  const considered = await world.finishedRun(id, 'validate')
+  await world.judge(id, [
+    { score: 88, coverage: 70, delta: 0, workflow: 'validate', consideredRunId: considered },
+  ])
+  await world.finishedRun(id, 'verify')
+  judged = id
+})
+
+Given('a task judged four times, the third lower than the second', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [
+    { score: 70, coverage: 30, delta: 70, workflow: 'analysis' },
+    { score: 84, coverage: 60, delta: 14, workflow: 'implement' },
+    { score: 76, coverage: 85, delta: -8, workflow: 'validate', causes: [{ summary: 'checkout regression', amount: -8 }] },
+    { score: 92, coverage: 100, delta: 16, workflow: 'verify' },
+  ])
+  judged = id
+})
+
+Given('a task judged once', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: 88, workflow: 'analysis' }])
+  judged = id
+})
+
+Given('a task with a high driver the agent can resolve', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: 0, workflow: 'validate' }])
+  await world.addDriver(id, { title: 'checkout regression', severity: 'high', owner: 'agent' })
+  judged = id
+})
+
+Given('a task with a critical driver and a low one', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 70, coverage: 70, delta: 0, workflow: 'validate' }])
+  await world.addDriver(id, { title: 'a low note', severity: 'low', owner: 'agent' })
+  await world.addDriver(id, { title: 'unsafe redirect', severity: 'critical', owner: 'developer' })
+  judged = id
+})
+
+When('I open that task', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await expect(page.getByTestId('reliability-card')).toBeVisible()
+})
+
+When('I show the breakdown', async ({ page }) => {
+  await page.getByTestId('reliability-breakdown-toggle').click()
+})
+
+When('I look at the third point', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-point-2').hover()
+})
+
+When('I resolve that driver', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-drivers').getByRole('button', { name: 'Resolved' }).click()
+})
+
+When('I click to accept that risk', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-drivers').getByRole('button', { name: 'Accept the risk' }).click()
+})
+
+Then('the reliability card says it is not assessed', async ({ page }) => {
+  await expect(page.getByTestId('reliability-unassessed')).toBeVisible()
+})
+
+Then('it offers to assess it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-assess')).toBeVisible()
+})
+
+Then('the reliability card shows 88', async ({ page }) => {
+  await expect(page.getByTestId('reliability-score')).toHaveText('88')
+})
+
+Then('it shows the coverage', async ({ page }) => {
+  await expect(page.getByTestId('reliability-coverage')).toContainText('70%')
+})
+
+Then('the card shows a downward arrow', async ({ page }) => {
+  // The arrow, not the colour: this has to read for somebody who cannot tell
+  // red from green.
+  await expect(page.getByTestId('reliability-delta')).toContainText('↓')
+})
+
+Then('every dimension is listed', async ({ page }) => {
+  const breakdown = page.getByTestId('reliability-breakdown')
+  await expect(breakdown).toBeVisible()
+  await expect(breakdown.locator('dt')).toHaveCount(6)
+})
+
+Then('the card says what capped it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-cap')).toContainText('critical risk is still open')
+})
+
+Then('the card says it is stale', async ({ page }) => {
+  await expect(page.getByTestId('reliability-stale')).toBeVisible()
+})
+
+Then('the reliability card is in the rail', async ({ page }) => {
+  // Geometry, the way `the facts sit beside the work` reads it: the card is to
+  // the right of the plan and roughly level with it.
+  const card = await page.getByTestId('reliability-card').boundingBox()
+  const plan = await page.getByTestId('task-plan').boundingBox()
+  expect(card).not.toBeNull()
+  expect(plan).not.toBeNull()
+  expect((card as { x: number }).x).toBeGreaterThan((plan as { x: number }).x)
+})
+
+Then('the graph is drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-graph')).toBeVisible()
+  await expect(page.getByTestId('reliability-line')).toBeVisible()
+})
+
+Then('it has {int} points', async ({ page }, count: number) => {
+  await expect(page.getByTestId('reliability-graph').locator('circle')).toHaveCount(count)
+})
+
+Then('the third point is below the second', async ({ page }) => {
+  // On screen, in pixels. A graph that normalised a fall away would pass a
+  // check that only read the numbers back.
+  const second = await page.getByTestId('reliability-point-1').boundingBox()
+  const third = await page.getByTestId('reliability-point-2').boundingBox()
+  expect(second).not.toBeNull()
+  expect(third).not.toBeNull()
+  expect((third as { y: number }).y).toBeGreaterThan((second as { y: number }).y)
+})
+
+Then('it says what changed', async ({ page }) => {
+  await expect(page.getByTestId('reliability-causes')).toContainText('checkout regression')
+})
+
+Then('no graph is drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-graph')).toHaveCount(0)
+})
+
+Then('the drivers list names it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toContainText('checkout regression')
+})
+
+Then('it says the agent can resolve it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toContainText('the agent can resolve this')
+})
+
+Then('the critical group comes before the low group', async ({ page }) => {
+  const critical = await page.getByTestId('reliability-group-critical').boundingBox()
+  const low = await page.getByTestId('reliability-group-low').boundingBox()
+  expect(critical).not.toBeNull()
+  expect(low).not.toBeNull()
+  expect((critical as { y: number }).y).toBeLessThan((low as { y: number }).y)
+})
+
+Then('it is no longer in the list', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers-empty')).toBeVisible()
+})
+
+Then('it is counted among the ones dealt with', async ({ page }) => {
+  await expect(page.getByTestId('reliability-settled')).toContainText('1 already dealt with')
+})
+
+Then('it asks why', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers').locator('input')).toBeVisible()
+})
+
+Then('the drivers list is not drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toHaveCount(0)
+})

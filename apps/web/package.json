@@ -19,6 +19,7 @@
     "vue-router": "^5.3.1"
   },
   "devDependencies": {
+    "@factory/store": "workspace:*",
     "@playwright/test": "^1.63.0",
     "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-vue": "^6.0.8",

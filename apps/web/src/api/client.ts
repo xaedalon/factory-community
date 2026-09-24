@@ -490,6 +490,14 @@ export interface TaskDetail {
   blockers: TaskBlocker[]
   artifacts: TaskArtifact[]
   /**
+   * How much to trust this task, assembled by the daemon and carried here.
+   *
+   * On the detail rather than fetched separately, because the card always
+   * draws and a second request for something assembled from rows already read
+   * is a round trip for nothing.
+   */
+  reliability: ReliabilitySummary
+  /**
    * Absent only when the task's project is missing from the database, which
    * takes a hand-edited one: every task has a project.
    */
@@ -525,6 +533,71 @@ export interface SetupReport {
   items: SetupItem[]
   ready: boolean
   remaining: number
+}
+
+/**
+ * How much to trust a task, as the daemon assembles it.
+ *
+ * `unassessed` is a state and the score is *absent* for it — not zero. A task
+ * nobody has looked at is not a task that failed, and drawing it as 0 would be
+ * the same lie the empty workflow told.
+ */
+export interface ReliabilitySummary {
+  state: 'unassessed' | 'assessed' | 'stale'
+  score?: number
+  rawScore?: number
+  coverage?: number
+  delta?: number
+  dimensions?: Record<string, number>
+  caps?: { type: string; value: number; reason: string }[]
+  assessedAt?: string
+  assessmentId?: string
+  staleReason?: string
+  attention: {
+    agent: number
+    developer: number
+    either: number
+    external: number
+    potential: Record<string, number>
+  }
+}
+
+/** One judgement, with the arithmetic that produced it. */
+export interface ReliabilityAssessment {
+  id: string
+  sequence: number
+  workflow?: string
+  runId?: string
+  score: number
+  rawScore: number
+  coverage: number
+  delta: number
+  summary: string
+  dimensions: Record<string, number>
+  caps: { type: string; value: number; reason: string }[]
+  explanation: {
+    contributions: { dimension: string; score: number; weight: number; contribution: number }[]
+    rawScore: number
+    effectiveScore: number
+    causes: { summary: string; amount: number; driverId?: string }[]
+  }
+  createdAt: string
+}
+
+/** Something that is costing trust, and who can do something about it. */
+export interface ReliabilityDriver {
+  id: string
+  title: string
+  description: string
+  type: string
+  severity: string
+  status: string
+  owner: string
+  dimension: string
+  scoreImpact: number
+  recommendedAction?: { type: string; label: string; workflow?: string }
+  acceptedBy?: string
+  acceptanceReason?: string
 }
 
 export interface Project {
@@ -785,6 +858,29 @@ export const api = {
    * the latency is not perceptible.
    */
   setup: () => request<SetupReport>('/api/setup'),
+
+  reliabilityHistory: (task: string) =>
+    request<{ items: ReliabilityAssessment[] }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/history`,
+    ),
+
+  reliabilityDrivers: (task: string) =>
+    request<{ items: ReliabilityDriver[] }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/drivers`,
+    ),
+
+  assessReliability: (task: string) =>
+    request<{ reliability: ReliabilitySummary }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/assess`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+
+  /** `action` is one the driver offers; the daemon refuses anything else. */
+  actOnDriver: (task: string, driver: string, action: string, body: Record<string, unknown> = {}) =>
+    request<{ driver: ReliabilityDriver; reliability: ReliabilitySummary }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/drivers/${encodeURIComponent(driver)}/${action}`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
 
   projects: () => request<{ items: Project[] }>('/api/projects'),
 

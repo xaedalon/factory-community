@@ -7,6 +7,8 @@ import {
   type DefinitionListing,
   type Evidence,
   type LogView,
+  type ReliabilityAssessment,
+  type ReliabilityDriver,
   type RunStep,
   type TaskDetail,
   type TaskListItem,
@@ -20,6 +22,9 @@ import TaskStateBadge from '../components/TaskStateBadge.vue'
 import TaskActions from '../components/TaskActions.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
+import ReliabilityCard from '../components/reliability/ReliabilityCard.vue'
+import ReliabilityDrivers from '../components/reliability/ReliabilityDrivers.vue'
+import ReliabilityGraph from '../components/reliability/ReliabilityGraph.vue'
 import Tooltip from '../components/Tooltip.vue'
 import { useClipboard } from '../composables/useClipboard.js'
 
@@ -45,6 +50,19 @@ const openedRun = computed(() =>
 const openStep = ref<number | undefined>(undefined)
 const log = ref<LogView | undefined>(undefined)
 const error = ref<string | undefined>(undefined)
+
+/**
+ * The judgement's own data, fetched beside the task.
+ *
+ * The *summary* rides on the task payload, because the card always draws. The
+ * history and the drivers are two more requests, made once per load — the page
+ * reloads wholesale on any event, which keeps them current without a second
+ * subscription to maintain.
+ */
+const history = ref<ReliabilityAssessment[]>([])
+const drivers = ref<ReliabilityDriver[]>([])
+const assessing = ref(false)
+const actingOn = ref<string | undefined>(undefined)
 const busy = ref(false)
 const available = ref<DefinitionListing[]>([])
 /**
@@ -266,6 +284,7 @@ async function load(): Promise<void> {
     }
     void loadWorkflows()
     void loadCandidates()
+    void loadReliability()
     error.value = undefined
     // Keep whichever run was open; otherwise show the newest, which is what
     // someone opening a task almost always wants to see.
@@ -273,6 +292,57 @@ async function load(): Promise<void> {
     if (chosen !== undefined) await openTheRun(chosen)
   } catch (caught) {
     error.value = caught instanceof ApiError ? caught.message : String(caught)
+  }
+}
+
+/**
+ * The history and the drivers.
+ *
+ * Failure is swallowed: the card still draws from the summary the task payload
+ * carried, and a page that refused to render because a graph could not be
+ * fetched would be worse than one without a graph.
+ */
+async function loadReliability(): Promise<void> {
+  try {
+    const [judged, found] = await Promise.all([
+      api.reliabilityHistory(id.value),
+      api.reliabilityDrivers(id.value),
+    ])
+    history.value = judged.items
+    drivers.value = found.items
+  } catch {
+    history.value = []
+    drivers.value = []
+  }
+}
+
+async function assess(): Promise<void> {
+  assessing.value = true
+  try {
+    await api.assessReliability(id.value)
+    await load()
+  } catch (caught) {
+    error.value = caught instanceof ApiError ? caught.message : String(caught)
+  } finally {
+    assessing.value = false
+  }
+}
+
+/**
+ * Do what a driver's row asked for.
+ *
+ * The reason for an acceptance comes from the row, and the daemon is what
+ * refuses an acceptance that is not a person's — this only asks.
+ */
+async function actOnDriver(driver: ReliabilityDriver, action: string): Promise<void> {
+  actingOn.value = driver.id
+  try {
+    await api.actOnDriver(id.value, driver.id, action)
+    await load()
+  } catch (caught) {
+    error.value = caught instanceof ApiError ? caught.message : String(caught)
+  } finally {
+    actingOn.value = undefined
   }
 }
 
@@ -896,9 +966,28 @@ const stepTone: Record<string, string> = {
               </li>
             </ul>
           </section>
+
+          <ReliabilityDrivers
+            v-if="drivers.length > 0"
+            :style="{ order: 4 }"
+            :drivers="drivers"
+            :busy="actingOn"
+            @act="actOnDriver"
+          />
+
+          <ReliabilityGraph v-if="history.length > 1" :style="{ order: 5 }" :history="history" />
         </div>
 
         <aside class="flex w-full shrink-0 flex-col gap-4 xl:w-[21rem]" data-testid="task-rail">
+          <!-- First in the rail. "Is it done" is answered by the band above;
+               "how much should I trust that" is the question this page did not
+               used to answer at all. -->
+          <ReliabilityCard
+            :reliability="detail.reliability"
+            :assessing="assessing"
+            @assess="assess"
+          />
+
           <!-- First, before the badges: where the work is happening is what
                somebody opening this page by hand came for, and the path never used
                to leave the daemon at all. -->

@@ -118,6 +118,19 @@ export interface ProfileParseResult {
  * given part of it is a question for the moment it is rendered, where the
  * answer can say which provider and why.
  */
+/**
+ * Names a profile may not take.
+ *
+ * The two Factory ships, because the name is what a project stores and what
+ * resolution returns — a custom `default` would be a definition shadowing a
+ * concept, and which one won would depend on a lookup order nobody wrote down.
+ *
+ * And the two verbs `factory profile` takes, because that one command both sets
+ * the installation's profile and lists the defined ones: a profile called
+ * `list` could never be selected from the terminal.
+ */
+const RESERVED_NAMES: readonly string[] = [...BUILT_IN_PROFILES, 'list', 'show']
+
 export function parseProfile(input: unknown, options: { file?: string } = {}): ProfileParseResult {
   const parsed = profileYaml.safeParse(input)
   if (!parsed.success) {
@@ -136,12 +149,12 @@ export function parseProfile(input: unknown, options: { file?: string } = {}): P
   // project stores and what `resolveProfile` returns, so a custom `default`
   // would be a definition shadowing a concept — and which one won would depend
   // on lookup order nobody wrote down.
-  if ((BUILT_IN_PROFILES as readonly string[]).includes(value.name)) {
+  if (RESERVED_NAMES.includes(value.name)) {
     problems.push({
       severity: 'error',
       message:
-        `"${value.name}" is a profile Factory ships, so a profile here cannot be called that. ` +
-        `Choose another name — the built-in is still available to every project.`,
+        `"${value.name}" is reserved, so a profile here cannot be called that. ` +
+        `Choose another name.`,
       field: 'name',
       ...at,
       rule: 'profile.reservedName',

@@ -10,7 +10,13 @@ import {
   type ReconcileReport,
   type WorkflowFacts,
 } from '@factory/engine'
-import { definitionPath, namesIn, planWorkflow, resolveWorkflow } from '@factory/config'
+import {
+  definitionPath,
+  namesIn,
+  planWorkflow,
+  resolveProfileDefinition,
+  resolveWorkflow,
+} from '@factory/config'
 import {
   DEFAULT_RELIABILITY_POLICY,
   RELIABILITY_EVALUATOR_KIND,
@@ -40,7 +46,13 @@ import {
 } from '@factory/store'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ExecutionProfile, Project, Task, TaskWorkspace } from '@factory/core'
+import type {
+  ExecutionProfile,
+  ProfileNames,
+  Project,
+  Task,
+  TaskWorkspace,
+} from '@factory/core'
 import type { Runtime } from '@factory/runtime'
 import { agentFor } from './reliability-agent.js'
 
@@ -70,6 +82,8 @@ export interface Service {
   readonly reliabilitySummary: (taskId: string) => ReliabilitySummary
   /** The workflows a project can run, so a recommendation can name a real one. */
   readonly workflowNames: (projectId?: string) => readonly string[]
+  /** Built-ins plus what the chain defines, for validating and offering a profile. */
+  readonly profileNames: (projectId?: string) => ProfileNames
   /** Which definitions each project can see. Served by the definition routes. */
   readonly chains: Chains
   /**
@@ -309,6 +323,23 @@ export async function createService(
    * suggestion to run something the project does not have is worse than no
    * suggestion, because the board draws a button behind it.
    */
+  /**
+   * The profiles this installation would recognise, for a given project.
+   *
+   * Built-ins plus whatever the chain defines, which is what a route needs
+   * before storing a name and what the board needs before offering one. Read
+   * per request rather than cached: a profile can be written while the daemon
+   * runs, and the next save should see it.
+   */
+  const profileNamesFor = (projectId?: string): ProfileNames => {
+    const chain = chains.for(projectId) ?? runtime.chain
+    const names = [...new Set(chain.scopes.flatMap((scope) => namesIn(scope, 'profile')))]
+    return {
+      names,
+      describe: (name) => resolveProfileDefinition(chain, name)?.value?.description || undefined,
+    }
+  }
+
   const workflowNamesFor = (projectId?: string): readonly string[] => {
     const chain = chains.for(projectId) ?? runtime.chain
     // `namesIn` per scope rather than `listDefinitions`, which wants a parser:
@@ -447,6 +478,7 @@ export async function createService(
     reliability,
     reliabilitySummary,
     workflowNames: workflowNamesFor,
+    profileNames: profileNamesFor,
     chains,
     workspace,
     engine,

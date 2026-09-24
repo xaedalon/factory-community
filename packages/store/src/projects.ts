@@ -4,7 +4,6 @@ import { isAbsolute, join, resolve } from 'node:path'
 import {
   PROJECT_TONES,
   defaultWorktreesRoot,
-  isExecutionProfile,
   lexicalCanonical,
   systemCanonical,
   withinWorkspace,
@@ -579,11 +578,21 @@ export class ProjectRepository {
 }
 
 function hydrate(row: ProjectRow): Project {
-  // Through the guard, so a value edited into the column by hand is read as
-  // "not stated" rather than resolving to neither profile — which would be
-  // read as inherit-from-the-installation and could silently loosen a project
-  // that had asked to be confined.
-  const profile = isExecutionProfile(row.profile) ? row.profile : undefined
+  // Any non-empty name, kept as written. The store cannot know which profiles
+  // are *defined* — that needs a scope chain it does not have — and discarding
+  // what it does not recognise used to mean reading it as "not stated", which
+  // is inheriting the installation's profile: a project that asked for
+  // something particular would quietly run under something else.
+  //
+  // So the name survives, and the two places that can actually answer do the
+  // guarding: the route refuses an unknown name before storing it, and planning
+  // refuses to run a profile no scope defines. A row edited by hand into
+  // nonsense stops the work loudly rather than loosening it silently.
+  //
+  // Blank is still absence, which is a real answer and where every project
+  // starts.
+  const stated = typeof row.profile === 'string' ? row.profile.trim() : ''
+  const profile = stated === '' ? undefined : (stated as ExecutionProfile)
   return {
     id: row.id,
     name: row.name,

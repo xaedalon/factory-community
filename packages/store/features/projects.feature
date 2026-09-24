@@ -351,9 +351,27 @@ Feature: Projects — the repositories Factory works in
       # a boundary, and a project nobody can load is worse than a lost grant.
       Then it has granted no directories
 
-    Scenario: A profile edited by hand into nonsense reads as unstated
+    Scenario: A profile the store does not recognise is kept, not discarded
+      # Changed when custom profiles arrived, and it is a change for the safer.
+      # The store cannot know what is defined — that needs a scope chain it does
+      # not have — so a name it does not recognise used to read as *unstated*,
+      # which means inheriting the installation's profile. A project that had
+      # asked for something particular would quietly run under something else.
+      #
+      # The name is kept now, and the guard moved to the two places that can
+      # actually answer: the route refuses an unknown name before storing it,
+      # and planning refuses to run a profile no scope defines. A row edited by
+      # hand into nonsense therefore stops the work loudly instead of loosening
+      # it silently.
       Given the project "factory" exists
       And its profile column says "sort-of-safe"
+      Then its profile is "sort-of-safe"
+
+    Scenario: A blank profile column still reads as unstated
+      # Empty is absence, which is a real answer and the one every project
+      # starts from.
+      Given the project "factory" exists
+      And its profile column says ""
       Then it states no profile
 
   Rule: the database refuses it too, not only the repository

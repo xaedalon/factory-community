@@ -11,7 +11,7 @@ import {
   PROJECT_TONES,
   detectCheckCommand,
   hasAccepted,
-  isExecutionProfile,
+  isKnownProfile,
   queueOrder,
   type ProjectFileReader,
 } from '@factory/core'
@@ -355,9 +355,15 @@ export function registerProjectRoutes(
     // `null` clears it, which is not the same as `default`: a project that
     // states nothing follows the installation's choice, and returning to that
     // has to be expressible.
-    if (settingProfile && profile !== null && !isExecutionProfile(profile)) {
+    // A built-in, or a profile this project's chain defines. An unknown name is
+    // refused rather than stored: read back later as "not stated" it would
+    // silently loosen a project that had asked to be confined.
+    if (settingProfile && profile !== null && !isKnownProfile(profile, service.profileNames(request.params.id))) {
+      const known = service.profileNames(request.params.id).names
       return reply.code(400).send({
-        error: `profile is ${EXECUTION_PROFILES.join(', ')} or null to follow the installation.`,
+        error:
+          `profile is ${[...EXECUTION_PROFILES, ...known].join(', ')} or null to follow the ` +
+          `installation.`,
       })
     }
     if (

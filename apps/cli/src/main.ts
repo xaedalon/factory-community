@@ -218,7 +218,17 @@ async function dispatch(
     }
 
     case 'profile': {
-      const [wanted] = rest
+      // One command about profiles rather than two: `factory profile` reads or
+      // writes the installation's choice, and `list`/`show` are the definition
+      // verbs every other kind has. They cannot be profile names — the schema
+      // reserves them — so there is nothing to disambiguate.
+      const [wanted, name] = rest
+      if (wanted === 'list') return definitions.list('profile', context, style)
+      if (wanted === 'show') {
+        return name === undefined
+          ? usage('Which profile? Try "factory profile show <name>".')
+          : definitions.show('profile', name, context, style)
+      }
       return security.profile(context, wanted, style)
     }
 

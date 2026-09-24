@@ -658,13 +658,19 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('it has granted no directories', noGrants)
     })
 
-    RuleScenario('A profile edited by hand into nonsense reads as unstated', ({
+    RuleScenario('A profile the store does not recognise is kept, not discarded', ({
       Given,
       And,
       Then,
     }) => {
       Given('the project "factory" exists', exists)
       And('its profile column says "sort-of-safe"', columnSays('profile', 'sort-of-safe'))
+      Then('its profile is "sort-of-safe"', () => expect(project?.profile).toBe('sort-of-safe'))
+    })
+
+    RuleScenario('A blank profile column still reads as unstated', ({ Given, And, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its profile column says ""', columnSays('profile', ''))
       Then('it states no profile', unstated)
     })
   })

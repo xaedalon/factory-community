@@ -33,6 +33,7 @@ interface ProjectRow {
   granted_directories: string | null
   tone: number | null
   initials: string | null
+  check_command: string | null
   created_at: string
 }
 
@@ -45,6 +46,14 @@ export interface AddProject {
   readonly usesWorktrees?: boolean
   /** Defaults to off: Factory cannot build an environment unaided. */
   readonly usesEnvironments?: boolean
+  /**
+   * The command that says whether this project's work is sound.
+   *
+   * Supplied by whoever adds the project — the board detects it from the
+   * repository where it can. Absent means nobody has said, and the built-in
+   * `project-check` phase then refuses to plan rather than running nothing.
+   */
+  readonly check?: string
 }
 
 export interface ProjectRepositoryOptions {
@@ -112,6 +121,7 @@ export class ProjectRepository {
       throw new Error(`There is already a project called "${name}".`)
     }
 
+    const check = input.check?.trim() ?? ''
     const id = this.#newId()
     // A worktree needs a repository; a directory without one is still a fine
     // place to run shell steps, so this is recorded rather than refused.
@@ -130,8 +140,8 @@ export class ProjectRepository {
 
     this.#db.run(
       `INSERT INTO projects (id, name, path, default_branch, worktrees_root, is_repository,
-                             uses_worktrees, uses_environments, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                             uses_worktrees, uses_environments, check_command, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       name,
       path,
@@ -140,6 +150,9 @@ export class ProjectRepository {
       isRepository ? 1 : 0,
       usesWorktrees ? 1 : 0,
       input.usesEnvironments === true ? 1 : 0,
+      // Blank is null here too, so "set" and "set to nothing" cannot be
+      // confused by anything reading the row later.
+      check === '' ? null : check,
       this.#now(),
     )
     const project = this.get(id) as Project
@@ -289,6 +302,25 @@ export class ProjectRepository {
     return this.#changed(id)
   }
 
+  /**
+   * Set, or clear, the command that checks this project's work.
+   *
+   * Blank clears it, and clearing is a real choice: a project whose gate
+   * should not run is better off saying so than carrying a command nobody
+   * meant. What it cannot become is an empty string that still looks set —
+   * `project-check` would then plan `bash -c ''` and report success.
+   */
+  setCheck(id: string, check: string | undefined): Project {
+    if (this.get(id) === undefined) throw new Error(`No project ${id}.`)
+    const trimmed = check?.trim()
+    this.#db.run(
+      'UPDATE projects SET check_command = ? WHERE id = ?',
+      trimmed === undefined || trimmed === '' ? null : trimmed,
+      id,
+    )
+    return this.#changed(id)
+  }
+
   /** Re-read and announce. Every setter ends the same way. */
   #changed(id: string): Project {
     const updated = this.get(id) as Project
@@ -417,6 +449,12 @@ function hydrate(row: ProjectRow): Project {
       : {}),
     ...(row.initials !== null && row.initials.trim() !== ''
       ? { initials: row.initials }
+      : {}),
+    // Blank reads as unset, because a column holding "   " is a project whose
+    // gate would run an empty command — the one outcome this field exists to
+    // prevent.
+    ...(row.check_command !== null && row.check_command.trim() !== ''
+      ? { check: row.check_command.trim() }
       : {}),
     grantedDirectories: readDirectories(row.granted_directories),
     createdAt: row.created_at,

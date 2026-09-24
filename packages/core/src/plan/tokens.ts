@@ -66,6 +66,7 @@ export const PROJECT_TOKENS = {
   path: "Absolute path of the project's repository.",
   branch: 'The branch work starts from.',
   worktrees: 'Directory the project’s worktrees are created under.',
+  check: 'The command that says whether this project’s work is sound. Empty if none is set.',
 } as const
 
 /**

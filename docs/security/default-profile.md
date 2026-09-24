@@ -60,6 +60,10 @@ When something is withheld, the run says so against the step that lost it —
 names only, never values. When an agent is refused something, the refusal is
 recorded on the run, with the path or the command the refusal named.
 
+**The gate is not an agent.** A workflow's check command runs as a `shell` step, started by Factory
+rather than by a coding agent, so none of this applies to it — `make check` and `cargo test` work
+there whatever the allow-list says. See [`../workflows.md`](../workflows.md).
+
 ## What it is not
 
 **Factory is not a sandbox, and the Default profile does not make it one.** It

@@ -432,3 +432,43 @@ Feature: Definitions become a runnable plan
       Then planning succeeds
       And phase "verbose" step 0 passes "--verbose"
 
+  Rule: the gate runs the project's own command, or refuses to run at all
+
+    The `validate` workflow of a supervised run passed ten times by asking an
+    agent whether the work was good. It said yes, with nothing installed and the
+    test suite never run. An agent's report is a claim; only a command is a
+    result.
+
+    The gate itself already existed — a shell step whose non-zero exit fails the
+    phase and blocks the task. What was missing was anything that knew what to
+    run. `{{ project.check }}` is that, and the built-in `project-check` phase
+    is nothing but that command.
+
+    So the empty case is the dangerous one, and it is the one this rule is
+    mostly about: `bash -c ''` exits 0, so a project with no check command would
+    have made the gate a tick beside nothing.
+
+    Scenario: The built-in gate runs the project's check command
+      Given the project's check command is "pnpm test"
+      And the project scope defines a workflow "validate" with the phase "project-check"
+      When the workflow "validate" is planned
+      Then planning succeeds
+      And phase "project-check" step 0 runs the project's check command
+
+    Scenario: A project with no check command cannot plan the gate
+      Given the project has no check command
+      And the project scope defines a workflow "validate" with the phase "project-check"
+      When the workflow "validate" is planned
+      Then planning fails
+      And a problem says the step has no command to run
+
+    Scenario: Any step whose command resolves to nothing is refused
+      # Not a special case for the gate. A variable that resolves to nothing is
+      # an empty command wherever it appears, and an empty command is a tick.
+      Given the project scope defines a phase "empty" running "{{ project.check }}"
+      And the project has no check command
+      And the project scope defines a workflow "validate" with the phase "empty"
+      When the workflow "validate" is planned
+      Then planning fails
+      And a problem says the step has no command to run
+

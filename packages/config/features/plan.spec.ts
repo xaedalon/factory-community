@@ -1188,4 +1188,92 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
       )
     })
   })
+
+  Rule("the gate runs the project's own command, or refuses to run at all", ({ RuleScenario }) => {
+    /**
+     * Planned the way the daemon plans.
+     *
+     * `check` is always present and empty when the project has never set one —
+     * that is `projectVariables`, and it is what makes "no check command" an
+     * *empty command* rather than an unknown token. A scenario that left the
+     * key out would be describing a caller Factory does not have.
+     */
+    const planWithCheck = (check: string) => (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      result = planWorkflow({
+        chain,
+        host,
+        workflow: 'validate',
+        workspace: box.dir('work'),
+        project: { check },
+      })
+    }
+    let check = ''
+    const setCheck = (value: string) => (): void => {
+      check = value
+    }
+    const planned = (): void => planWithCheck(check)()
+    const noCommand = (): void => {
+      const matching = result.problems.filter((problem) => problem.rule === 'plan.emptyCommand')
+      expect(matching, JSON.stringify(result.problems)).toHaveLength(1)
+      expect(matching[0]?.severity).toBe('error')
+    }
+
+    RuleScenario("The built-in gate runs the project's check command", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project\'s check command is "pnpm test"', setCheck('pnpm test'))
+      And(
+        'the project scope defines a workflow "validate" with the phase "project-check"',
+        () => workflow('validate', 'project-check'),
+      )
+      When('the workflow "validate" is planned', planned)
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+      // The rendered argv, not the phase file: what a step actually runs is
+      // the only thing that can disagree with what it was supposed to.
+      And("phase \"project-check\" step 0 runs the project's check command", () =>
+        expect(phase('project-check')?.steps[0]?.planned.args).toEqual(['-c', 'pnpm test']),
+      )
+    })
+
+    RuleScenario('A project with no check command cannot plan the gate', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project has no check command', setCheck(''))
+      And(
+        'the project scope defines a workflow "validate" with the phase "project-check"',
+        () => workflow('validate', 'project-check'),
+      )
+      When('the workflow "validate" is planned', planned)
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the step has no command to run', noCommand)
+    })
+
+    RuleScenario('Any step whose command resolves to nothing is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines a phase "empty" running "{{ project.check }}"', () => {
+        box.phase(project, 'empty', "name: empty\nsteps: [{run: '{{ project.check }}'}]\n")
+      })
+      And('the project has no check command', setCheck(''))
+      And('the project scope defines a workflow "validate" with the phase "empty"', () =>
+        workflow('validate', 'empty'),
+      )
+      When('the workflow "validate" is planned', planned)
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the step has no command to run', noCommand)
+    })
+  })
 })

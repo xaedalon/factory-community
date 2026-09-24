@@ -377,3 +377,58 @@ Feature: Projects — the repositories Factory works in
       When the project row is deleted straight out of the database
       Then the database refuses it
       And the task still exists
+
+  Rule: a project carries the one command that checks its own work
+
+    A supervised run's `validate` workflow passed ten times by asking an agent
+    whether the work was good. An agent's report is a claim; only a command is
+    a result. So a project carries the command, and the built-in
+    `project-check` phase is nothing but it.
+
+    Blank is stored as nothing rather than as an empty command. That is the
+    whole reason the distinction is kept here: `bash -c ''` exits 0, so a
+    project carrying "" would have made the gate a tick beside nothing.
+
+    Scenario: A new project has no check command
+      When I add the project "factory" at that directory
+      Then the project has no check command
+
+    Scenario: A check command can be given when the project is added
+      When I add the project "factory" with the check command "pnpm test"
+      Then the project's check command is "pnpm test"
+
+    Scenario: A check command can be set later
+      Given the project "factory" exists
+      When I set its check command to "make check"
+      Then the project's check command is "make check"
+
+    Scenario: Whitespace around it is not part of the command
+      Given the project "factory" exists
+      When I set its check command to "  pnpm test  "
+      Then the project's check command is "pnpm test"
+
+    Scenario: A blank check command clears it
+      Given the project "factory" exists
+      And its check command is "pnpm test"
+      When I set its check command to "   "
+      Then the project has no check command
+
+    Scenario: A check command edited to blank by hand reads as unset
+      # The gate refuses to plan on a project with no command, and reads a
+      # column of spaces the same way — otherwise editing the database by hand
+      # would produce exactly the silent success the column exists to stop.
+      Given the project "factory" exists
+      And its check command column is edited by hand to "   "
+      Then the project has no check command
+
+    Scenario: Setting it is announced
+      Given the project "factory" exists
+      When I set its check command to "pnpm test"
+      Then a "project.changed" event says so
+
+    Scenario: It survives a rename
+      Given the project "factory" exists
+      And its check command is "pnpm test"
+      When I rename it to "factory-core"
+      Then the project's check command is "pnpm test"
+

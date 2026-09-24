@@ -363,6 +363,9 @@ const projectVariables = (
   path: project.path,
   branch: project.defaultBranch,
   worktrees: project.worktreesRoot,
+  // Empty when the project has never been given one, which is what makes the
+  // built-in `project-check` phase refuse to plan rather than run nothing.
+  check: project.check ?? '',
 })
 
 const failureVariables = (

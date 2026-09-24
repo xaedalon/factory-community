@@ -66,8 +66,27 @@ export const shellStepKind: StepKindCapability = defineStepKind({
   schema: shellSchema,
   // Lets `- run: npm test` stand on its own, which is most steps.
   sugarKey: 'run',
-  plan(step): PlannedStep {
+  plan(step): PlannedStep | PlanFailure {
     const shell = step as ShellStep
+    // `bash -c ''` exits 0. A step that resolved to nothing would therefore be
+    // a tick beside work that never happened — the exact shape of every defect
+    // on this branch. The schema cannot catch it: `run` is non-empty in the
+    // file and becomes empty during substitution, which is what
+    // `{{ project.check }}` does on a project that has never set one.
+    if (shell.run.trim() === '') {
+      return {
+        problems: [
+          {
+            severity: 'error',
+            message:
+              'This step has no command to run. A `{{ … }}` in it resolved to nothing — most ' +
+              'often `{{ project.check }}` on a project that has not been given a check command.',
+            field: 'run',
+            rule: 'plan.emptyCommand',
+          } satisfies Problem,
+        ],
+      }
+    }
     // A shell step genuinely wants a shell -- pipes, globs and && are the point.
     return { describe: shell.run, command: 'bash', args: ['-c', shell.run] }
   },

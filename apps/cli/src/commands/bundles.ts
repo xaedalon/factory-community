@@ -83,10 +83,15 @@ export function importFile(
     item.shadows === undefined ? '' : style.yellow(`hides the ${item.shadows} copy`),
   ])
 
+  // A bundle carrying only a profile names no entry workflow, so there is
+  // nothing to quote — and quoting `undefined` is how a reader learns to
+  // distrust the rest of the line.
+  const what = result.plan.entry === undefined ? 'this bundle' : `"${result.plan.entry}"`
+  const where = style.bold(options.scope ?? context.chain.defaultWriteScope)
   const lines = [
     options.dryRun === true
-      ? `Would import "${result.plan.entry}" into the ${style.bold(options.scope ?? context.chain.defaultWriteScope)} scope:`
-      : `Importing "${result.plan.entry}" into the ${style.bold(options.scope ?? context.chain.defaultWriteScope)} scope:`,
+      ? `Would import ${what} into the ${where} scope:`
+      : `Importing ${what} into the ${where} scope:`,
     ...columns(rows).map((line) => '  ' + line),
   ]
 

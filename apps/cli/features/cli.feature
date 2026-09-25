@@ -251,6 +251,22 @@ Feature: The factory command
     And the output contains "Cannot reach the Factory daemon"
     And the output contains "factory-daemon"
 
+  Scenario: a run can be tried under a profile before it is chosen for a project
+    # A foreground run has no project to read a profile from, so naming one is
+    # how somebody checks what a profile they just wrote actually does — with
+    # --dry-run, before it is set on anything.
+    Given the project defines the profile "buildtools" allowing "cargo"
+    And a workflow whose step runs an agent
+    When I run "run build --dry-run --profile buildtools"
+    Then the command succeeds
+    And the printed command allows "Bash(cargo *)"
+
+  Scenario: a run under a profile nobody wrote is refused
+    Given a workflow whose step runs an agent
+    When I run "run build --dry-run --profile nowhere"
+    Then the command fails
+    And the output says no scope defines that profile
+
   Scenario: an answer that is not JSON is explained rather than failing on nothing
     # A daemon older than this CLI answers a route it does not know with the
     # board's own HTML and a 200. Read as a result, that produced a crash about

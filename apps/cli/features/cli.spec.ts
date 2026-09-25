@@ -644,6 +644,51 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the output contains "factory-daemon"', () => expect(output).toContain('factory-daemon'))
   })
 
+  Scenario('a run can be tried under a profile before it is chosen for a project', ({
+    Given,
+    And,
+    When,
+    Then,
+  }) => {
+    Given('the project defines the profile "buildtools" allowing "cargo"', () => {
+      file(
+        join(projectScope, 'profiles', 'buildtools.profile.yaml'),
+        'kind: factory.profile/v1\nname: buildtools\ncommands: [cargo]\n',
+      )
+    })
+    And('a workflow whose step runs an agent', () => {
+      file(join(projectScope, 'workflows', 'build.workflow.yaml'), 'name: build\nphases: [make]\n')
+      file(
+        join(projectScope, 'phases', 'make.phase.yaml'),
+        'name: make\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    })
+    When('I run "run build --dry-run --profile buildtools"', () =>
+      invoke('run build --dry-run --profile buildtools'),
+    )
+    Then('the command succeeds', () => expect(result.exitCode).toBe(0))
+    And('the printed command allows "Bash(cargo *)"', () =>
+      expect(streamed.join("\n")).toContain("Bash(cargo *)"),
+    )
+  })
+
+  Scenario('a run under a profile nobody wrote is refused', ({ Given, When, Then, And }) => {
+    Given('a workflow whose step runs an agent', () => {
+      file(join(projectScope, 'workflows', 'build.workflow.yaml'), 'name: build\nphases: [make]\n')
+      file(
+        join(projectScope, 'phases', 'make.phase.yaml'),
+        'name: make\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    })
+    When('I run "run build --dry-run --profile nowhere"', () =>
+      invoke('run build --dry-run --profile nowhere'),
+    )
+    Then('the command fails', () => expect(result.exitCode).toBe(1))
+    And('the output says no scope defines that profile', () =>
+      expect(result.lines.join('\n')).toContain('no scope defines one by that name'),
+    )
+  })
+
   Scenario('an answer that is not JSON is explained rather than failing on nothing', ({
     Given,
     When,

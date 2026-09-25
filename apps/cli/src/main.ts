@@ -95,6 +95,7 @@ Task
 
 Run
   --dry-run              print the commands and run nothing
+  --profile <name>       run under this profile, built-in or one you wrote
   --yes                  approve every gate without asking
   --timeout <seconds>    how long one step may take   (default 1800)
   --workspace <dir>      where steps run              (default: here)
@@ -408,6 +409,7 @@ async function dispatch(
       const timeout = value(rest, '--timeout')
       const workspace = value(rest, '--workspace')
       const provider = value(rest, '--provider')
+      const runProfile = value(rest, '--profile')
       // Built with assignments rather than conditional spreads: a spread of
       // `string | undefined` keeps the undefined in the type, which
       // exactOptionalPropertyTypes then rejects against an optional field.
@@ -433,6 +435,7 @@ async function dispatch(
           ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(provider === undefined ? {} : { provider }),
+          ...(runProfile === undefined ? {} : { profile: runProfile }),
           ...(Object.keys(task).length === 0 ? {} : { task }),
         },
         context,

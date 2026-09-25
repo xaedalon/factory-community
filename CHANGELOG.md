@@ -8,6 +8,94 @@ plugin SDK, the scope layout, the HTTP API — may still move, and a minor bump 
 
 ## Unreleased
 
+**A task now says how much to trust it.** Factory could tell you a task was `done`. It could not
+tell you what that was worth. Every run is judged from what Factory observed — exit codes, refused
+commands, artifacts promised and delivered or not — and the task carries a score, the evidence
+coverage behind it, the findings holding it down and who should deal with each.
+
+Two numbers, never one. A 93 with 41% coverage is "nothing has gone wrong yet and we have barely
+looked"; a 93 with 96% is "we looked hard and it is good". The score can go *down*: a validation
+that finds a regression has learned something, and hiding that would remove the most useful thing
+here.
+
+*No agent ever sets the score.* An evaluator returns dimension assessments and findings — there is
+no field for a score, and none of the six MCP tools can set one. An agent may **resolve** a critical
+finding; only a person may **accept** one, the same separation `approve` already had.
+
+*What it costs:* nothing by default. The evaluator that always runs is deterministic and free. A
+second one that reads the work with an agent runs only where a project has named a model on its
+page, and only on runs that produced something worth reading.
+
+*Where to look:* the card, the graph and the drivers list on a task; `factory reliability <task>`,
+with `history`, `drivers`, `next` and `assess`; `GET /api/tasks/:id/reliability` and five more. The
+five-stage pipeline it was designed around ships as a bundle with one click on the project page.
+[`docs/reliability/`](docs/reliability/) is the whole of it, and says plainly that these are
+heuristics rather than calibrated odds.
+
+**A profile of your own, between Default and Full Access.** A Rust project's agent could not run
+`cargo test`; a Makefile project's could not run `make check`. The only lever was Full Access, which
+answers a question nobody asked. Now a repository can write down which commands its agents may run:
+
+```yaml
+kind: factory.profile/v1
+name: build-tools
+extends: default
+commands: [cargo, make, go]
+```
+
+It is a definition like any other — `.xaedalon/.factory/profiles/`, layered, editable on the board
+with the YAML preview, shareable in a bundle, and `factory run --dry-run --profile <name>` shows
+the argv it produces before you commit to it. Factory ships `build-tools.bundle.yaml` as a
+worked example.
+
+*What it cannot do:* a profile **widens which commands may run and never where they may write**. It
+is confined by construction, `extends: default` is the only base, and one that passes what Full
+Access passes is refused when it is saved — derived from each provider's own flags, so it stays true
+as they change. A project naming a profile no scope defines refuses to plan rather than falling
+back.
+
+*What it is honest about:* read-only commands are already allowed, so listing `cat` buys nothing.
+Only Claude Code can honour a command list — Copilot and Codex have no per-command concept, and
+Factory says so rather than letting you assume, for allowing and forbidding separately: a CLI can
+have an allow-list and no deny-list, and then the careful half of a profile is the half that goes
+missing. An interpreter warns, names the measurement, and
+then lets you, because the risk is the repository owner's to take.
+[`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
+
+**An API path the daemon does not serve is a 404, not the board.** The catch-all that lets
+`/tasks/abc` resolve in the app router was catching `/api/…` with it, so a page calling a route
+*this* daemon does not have got `index.html` with a **200** — and then failed on `undefined`
+somewhere else entirely, with a message naming neither the request nor the cause. An older daemon
+and a newer board is the ordinary way to be in that position. The board and the CLI now also refuse
+a non-JSON success outright rather than handing their callers nothing — naming the request and
+saying the daemon may be older than they are.
+
+**A task's dimension breakdown adds up to its score.** A finding moves the dimension it names, and
+the contribution lines showed the moved value — but the dimension map recorded beside them was the
+one from *before* the findings were applied. So a task read `implementation 60` next to a score
+computed from 48, and the breakdown could not explain the number above it. Both now come from the
+same place.
+
+**Clearing a field on the board now actually clears it.** Emptying a list — an agent's `args`, a
+phase's `variables`, a workflow's `needs` — or clearing a field back to its default looked like it
+saved and changed nothing: the writer does not emit an empty list, and the delete beside it was
+guarded on the value being absent, which an emptied list is not. So the key was neither written nor
+removed and the file kept its old line. The writer now asks whether the file still says what the
+value says, which keeps a default somebody wrote on purpose and removes what they actually cleared.
+
+**A refused argument says what you already have.** `args:` on a step is appended after the flags
+that confine the agent, so it is refused at plan time — but the common case is not somebody reaching
+for authority. It is somebody told that a step needs `args: ['--allowedTools', 'Bash(pnpm *)']` to
+run `pnpm`. It does not: the Default profile has passed exactly that since the package managers were
+measured, and `--allowedTools` is variadic, so the step's copy would have *replaced* the list and
+dropped `npm`, `yarn` and `bun`. The refusal now prints what the profile already passes for that
+flag, and points at a `shell` step — which an agent's allow-list does not govern — before it
+mentions Full Access.
+
+**An error is shown where it was caused.** A failure that belongs to a field is under that field;
+one that belongs to none is at the *top* of the form. It used to sit below every field, which on
+the project form is off the screen at the moment it appears.
+
 **Factory stops reporting success for work that did not happen.** A supervised run of ten tasks
 found the same shape four times: not a crash and not a wrong answer, but a tick beside work that
 never ran. Each of these was silent before, and each is loud now.

@@ -1,6 +1,7 @@
 import {
   CapabilityHost,
   builtinStepsPlugin,
+  reliabilityEvaluatorPlugin,
   type FactoryPlugin,
   type Problem,
 } from '@factory/core'
@@ -20,6 +21,7 @@ import {
 import claudeProvider from '@factory/provider-claude'
 import codexProvider from '@factory/provider-codex'
 import copilotProvider from '@factory/provider-copilot'
+import reliabilityAgentPlugin from '@factory/reliability-agent'
 import diffityPlugin from '@factory/task-diffity'
 import openSessionPlugin from '@factory/task-session'
 import openTerminalPlugin from '@factory/task-terminal'
@@ -97,12 +99,14 @@ export interface Runtime {
 export const BUILTIN_PLUGINS = [
   builtinStepsPlugin,
   builtinDoctorPlugin,
+  reliabilityEvaluatorPlugin,
   claudeProvider,
   codexProvider,
   copilotProvider,
   openTerminalPlugin,
   openSessionPlugin,
   diffityPlugin,
+  reliabilityAgentPlugin,
 ] as const
 
 /**

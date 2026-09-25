@@ -8,6 +8,7 @@ import {
   type ResolvedPlan,
   type PlanResult,
   type Run,
+  type RunFacts,
   type RunOptions,
   type RunResult,
   type StepState,
@@ -151,7 +152,25 @@ export interface EngineOptions {
    * this directory", which is the wrong one the moment two tasks share it.
    */
   readonly newSessionId?: () => string
+  /**
+   * Judge the task's reliability, after a run has produced everything it will.
+   *
+   * A callback rather than the repository and the evaluators, so the engine
+   * depends on neither — it assembles the facts, which is the part only it can
+   * see, and hands them over. The daemon wires this to `assessReliability`; a
+   * scenario wires it to something that records what it was asked.
+   *
+   * Anything it returns is a *problem*, never a failure. A judgement that could
+   * not be made does not make the work it was judging wrong.
+   */
+  readonly assess?: (input: {
+    taskId: string
+    facts: RunFacts
+  }) => Promise<readonly Problem[]> | readonly Problem[]
 }
+
+/** One step, named the same way wherever it is looked up. */
+const stepKey = (phase: string, index: number): string => `${phase}#${String(index)}`
 
 /** How long a loop waits between iterations when the workflow does not say. */
 export const DEFAULT_LOOP_INTERVAL_SECONDS = 60
@@ -205,6 +224,8 @@ export class Engine {
   readonly #timeoutSeconds: number | undefined
   readonly #now: () => Date
   readonly #newSessionId: () => string
+  /** Whoever judges reliability, if anybody does. Absent is no work and no problems. */
+  readonly #assessor: EngineOptions['assess']
 
   constructor(options: EngineOptions) {
     this.#tasks = options.tasks
@@ -217,6 +238,7 @@ export class Engine {
     this.#timeoutSeconds = options.timeoutSeconds
     this.#now = options.now ?? (() => new Date())
     this.#newSessionId = options.newSessionId ?? (() => randomUUID())
+    this.#assessor = options.assess
   }
 
   /**
@@ -639,6 +661,18 @@ export class Engine {
     // the entire point of having it.
     const evidenceProblems = this.#collectEvidence(run.id, plan, result)
 
+    // Judged in the same breath and for the same reason: the verdict is about
+    // to be recorded, and how much to trust it should already be there when
+    // somebody opens the task. Every run that reaches a verdict is judged —
+    // completed, failed, refused or timed out — because any workflow can change
+    // the project, including one somebody wrote this morning. A workflow that
+    // declares what it contributes refines the judgement; not declaring never
+    // means invisible.
+    //
+    // Whatever comes back is a problem, never a failure. A judgement that could
+    // not be made does not make the work it was judging wrong.
+    const reliabilityProblems = await this.#assess(task.id, run.id, plan, result)
+
     // Every refusal gets said, whatever the run did. This is the only notice
     // anybody gets for the ordinary case: a confined agent that is refused
     // something exits 0 and reports it in prose, so there is no failure to
@@ -667,7 +701,12 @@ export class Engine {
       })
     }
 
-    const problems = [...result.problems, ...evidenceProblems, ...denialProblems]
+    const problems = [
+      ...result.problems,
+      ...evidenceProblems,
+      ...denialProblems,
+      ...reliabilityProblems,
+    ]
     const detail = summarise(result.problems, '')
 
     // A refused *command* is the one refusal that cannot be left alone, and it
@@ -940,6 +979,97 @@ export class Engine {
     if (step === undefined) return 0
     const at = plan.phases.findIndex((phase) => phase.name === step.phase)
     return at < 0 ? 0 : at
+  }
+
+  /**
+   * Hand a run's facts to whoever judges reliability, if anybody does.
+   *
+   * The engine assembles the facts — it is the only thing that can see the
+   * plan, the outcomes, the refusals and the artifacts together — and knows
+   * nothing else about the subsystem. No assessor configured means no work and
+   * no problems, which is what an installation that has never looked at this
+   * should experience.
+   *
+   * The try/catch is the promise this makes: a judgement that throws is a
+   * warning on the run, not a failed run. Turning "the evaluator crashed" into
+   * "your work failed" is how a feature gets switched off.
+   */
+  async #assess(
+    taskId: string,
+    runId: string,
+    plan: ResolvedPlan,
+    result: RunResult,
+  ): Promise<readonly Problem[]> {
+    if (this.#assessor === undefined) return []
+    // The one workflow-level switch: `evaluate_after_run: false` for the
+    // handful that change nothing worth judging — a worktree being created, an
+    // environment torn down. Everything else is judged whether it declared
+    // anything or not.
+    if (plan.reliability?.evaluate_after_run === false) return []
+    try {
+      const ran = new Map(result.steps.map((step) => [stepKey(step.phase, step.index), step]))
+      const steps = plan.phases.flatMap((phase) =>
+        phase.steps.map((step) => {
+          const outcome = ran.get(stepKey(phase.name, step.index))
+          return {
+            phase: phase.name,
+            index: step.index,
+            uses: step.uses,
+            ...(outcome === undefined ? {} : { exitCode: outcome.exitCode }),
+            timedOut: outcome?.timedOut ?? false,
+            command: toShellString(step.planned),
+          }
+        }),
+      )
+
+      // Read back rather than recomputed: `#collectEvidence` has just written
+      // what actually arrived, including what was promised and is missing, and
+      // a second derivation here would be the copy that drifts.
+      const collected = this.#runs.evidence(runId)
+      const artifacts = collected.map((evidence) => ({
+        name: evidence.name,
+        bytes: evidence.bytes,
+        missing: evidence.missing === true,
+      }))
+
+      const facts: RunFacts = {
+        runId,
+        workflow: plan.workflow,
+        status: result.status,
+        steps,
+        denials: result.denials,
+        artifacts,
+        // Translated, not handed through. The block is YAML and is spelled the
+        // way YAML is spelled; `ReliabilityDeclaration` is TypeScript and is
+        // spelled the way TypeScript is. Both shapes are all-optional, so
+        // passing one as the other typechecks and silently delivers `undefined`
+        // for every field whose name differs — which is exactly what happened,
+        // and a declared workflow earned the coverage of an undeclared one.
+        ...(plan.reliability === undefined
+          ? {}
+          : {
+              declaration: {
+                contributes: plan.reliability.contributes,
+                expectedEvidence: plan.reliability.expected_evidence,
+                ...(plan.reliability.evaluate_after_run === undefined
+                  ? {}
+                  : { evaluateAfterRun: plan.reliability.evaluate_after_run }),
+              },
+            }),
+      }
+      return await this.#assessor({ taskId, facts })
+    } catch (error) {
+      return [
+        {
+          severity: 'warning',
+          message:
+            'Reliability could not be recalculated: ' +
+            `${error instanceof Error ? error.message : String(error)}. ` +
+            'The workflow itself is unaffected.',
+          rule: 'reliability.assessmentFailed',
+        },
+      ]
+    }
   }
 
   #recordSkipped(runId: string, plan: ResolvedPlan, result: RunResult): void {

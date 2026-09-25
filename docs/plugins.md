@@ -230,6 +230,42 @@ context.provide('doctor-rule', {
 A rule that throws is reported and the other rules still run. Losing every check because one plugin
 misbehaved is the opposite of what `doctor` is for.
 
+## A reliability evaluator
+
+An evaluator classifies what Factory observed and proposes findings. It **cannot** return a score —
+there is no field for one, and everything it returns crosses `normalize()` before anything else sees
+it. That is deliberate: an agent asked how good its own work is answers 98, every time.
+
+```js
+context.provide('reliability-evaluator', {
+  id: 'acme-lint-history',
+  summary: 'Checks whether this task touched files that keep coming back.',
+  // Optional. Absent means always. The agent evaluator uses it to decline a
+  // run that produced nothing worth paying to read.
+  wants: ({ latest }) => latest.some((o) => o.kind === 'artifact'),
+  evaluate: ({ observations, drivers }) => ({
+    dimensions: { regressionSafety: { score: 70, rationale: 'three of these files churn weekly' } },
+    drivers: [{
+      title: 'checkout.ts has changed in five of the last six tasks',
+      type: 'regression', severity: 'medium', owner: 'developer',
+      dimension: 'regressionSafety', scoreImpact: -4,
+    }],
+    // Ids of existing drivers this evaluator believes are no longer true.
+    resolves: [],
+    summary: 'Churn is the weak part.',
+  }),
+})
+```
+
+Every evaluator registered runs, and one that throws is a warning on the run rather than a failed
+run — the deterministic one's judgement still stands. What `normalize()` refuses, and why the bound
+on `scoreImpact` is the important one, is in
+[`reliability/evaluators.md`](reliability/evaluators.md).
+
+To ask an agent, use `input.agent` rather than spawning anything: the host renders the command,
+filters the environment and enforces the deadline, and hands you back text. It is absent when there
+is nothing to ask — say so through `wants` and be skipped.
+
 ## A task tool
 
 A tool is a button on a task. It answers with a directory and, optionally, argv — and performs

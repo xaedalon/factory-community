@@ -15,7 +15,8 @@ import { fileURLToPath } from 'node:url'
 import { DISCLAIMER_VERSION } from '@factory/core'
 import { run } from '../src/main.js'
 import type { CommandResult } from '../src/context.js'
-import { DaemonError, type DaemonClient } from '../src/daemon.js'
+import { DaemonError, createDaemonClient, type DaemonClient } from '../src/daemon.js'
+import { createServer, type Server } from 'node:http'
 
 const feature = await loadFeature(fileURLToPath(new URL('./cli.feature', import.meta.url)))
 
@@ -127,7 +128,14 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     output = [...streamed, ...result.lines].join('\n')
   }
 
-  AfterEachScenario(() => rmSync(root, { recursive: true, force: true }))
+  /** A stub daemon for the one scenario that needs a real HTTP answer. */
+  let stubServer: Server | undefined
+
+  AfterEachScenario(() => {
+    stubServer?.close()
+    stubServer = undefined
+    rmSync(root, { recursive: true, force: true })
+  })
 
   // All setup lives in the Background step, not in BeforeEachScenario: the
   // runner executes Background steps FIRST, so anything built in
@@ -634,6 +642,79 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       expect(output).toContain('Cannot reach the Factory daemon'),
     )
     And('the output contains "factory-daemon"', () => expect(output).toContain('factory-daemon'))
+  })
+
+  Scenario('a run can be tried under a profile before it is chosen for a project', ({
+    Given,
+    And,
+    When,
+    Then,
+  }) => {
+    Given('the project defines the profile "buildtools" allowing "cargo"', () => {
+      file(
+        join(projectScope, 'profiles', 'buildtools.profile.yaml'),
+        'kind: factory.profile/v1\nname: buildtools\ncommands: [cargo]\n',
+      )
+    })
+    And('a workflow whose step runs an agent', () => {
+      file(join(projectScope, 'workflows', 'build.workflow.yaml'), 'name: build\nphases: [make]\n')
+      file(
+        join(projectScope, 'phases', 'make.phase.yaml'),
+        'name: make\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    })
+    When('I run "run build --dry-run --profile buildtools"', () =>
+      invoke('run build --dry-run --profile buildtools'),
+    )
+    Then('the command succeeds', () => expect(result.exitCode).toBe(0))
+    And('the printed command allows "Bash(cargo *)"', () =>
+      expect(streamed.join("\n")).toContain("Bash(cargo *)"),
+    )
+  })
+
+  Scenario('a run under a profile nobody wrote is refused', ({ Given, When, Then, And }) => {
+    Given('a workflow whose step runs an agent', () => {
+      file(join(projectScope, 'workflows', 'build.workflow.yaml'), 'name: build\nphases: [make]\n')
+      file(
+        join(projectScope, 'phases', 'make.phase.yaml'),
+        'name: make\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    })
+    When('I run "run build --dry-run --profile nowhere"', () =>
+      invoke('run build --dry-run --profile nowhere'),
+    )
+    Then('the command fails', () => expect(result.exitCode).toBe(1))
+    And('the output says no scope defines that profile', () =>
+      expect(result.lines.join('\n')).toContain('no scope defines one by that name'),
+    )
+  })
+
+  Scenario('an answer that is not JSON is explained rather than failing on nothing', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    // The real client, not the stub: this is about how a response is *read*,
+    // and a stub that returns objects can never produce the failure.
+    Given('a daemon that answers with a page instead of JSON', async () => {
+      const server = createServer((_request, response) => {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        response.end('<!doctype html><title>Factory</title><div id="app"></div>')
+      })
+      stubServer = server
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const port = (server.address() as { port: number }).port
+      daemon = createDaemonClient({ FACTORY_URL: `http://127.0.0.1:${String(port)}` })
+    })
+    When('I run "task list"', () => invoke('task list'))
+    Then('the command fails', () => expect(result.exitCode).toBe(1))
+    And('the output says the answer was not JSON', () =>
+      expect(result.lines.join('\n')).toContain('not JSON'),
+    )
+    And('the output names the request', () =>
+      expect(result.lines.join('\n')).toContain('/api/tasks'),
+    )
   })
 
   Scenario('the short id the listing prints is enough to act on', ({ Given, When, Then }) => {
@@ -1550,6 +1631,202 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     RuleScenario('It is in the help', ({ When, Then }) => {
       When('I run "--help"', () => invoke('--help'))
       Then('the output mentions "factory mcp"', () => expect(output).toContain('factory mcp'))
+    })
+  })
+
+  Rule('how much to trust a task, from a terminal', ({ RuleScenario }) => {
+    const TASK_ID = 'abc123de-0000-4000-8000-000000000000'
+
+    /**
+     * A daemon that knows one task and whatever this scenario says about it.
+     *
+     * The short id has to be expanded first, so every one of these answers the
+     * task listing too — which is also what makes the "no such task" scenario
+     * mean something rather than failing on the wrong request.
+     */
+    const answering = (routes: Record<string, unknown>) => (): void => {
+      asked = []
+      daemon = fakeDaemon((path) => {
+        for (const [suffix, value] of Object.entries(routes)) {
+          if (path.includes(suffix)) return value
+        }
+        if (path.startsWith('/api/tasks?')) {
+          return { items: [{ id: TASK_ID, name: 'Add due dates' }] }
+        }
+        return { items: [] }
+      })
+    }
+
+    const summary = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+      state: 'assessed',
+      score: 88,
+      rawScore: 88,
+      coverage: 70,
+      delta: -3,
+      dimensions: { understanding: 90, regressionSafety: 84 },
+      caps: [],
+      attention: { agent: 1, developer: 0, either: 0, external: 0, potential: {} },
+      ...over,
+    })
+    const withSummary = (over: Record<string, unknown> = {}) =>
+      answering({ '/reliability': { reliability: summary(over) } })
+
+    const says = (fragment: string) => (): void => expect(output).toContain(fragment)
+
+    RuleScenario('A task nobody has judged says so, and how to fix that', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a daemon that says the task is unassessed', () =>
+        withSummary({
+          state: 'unassessed',
+          score: undefined,
+          attention: { agent: 0, developer: 0, either: 0, external: 0, potential: {} },
+        })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says it is not assessed', says('not assessed'))
+      And('the output names the command that would assess it', says('reliability abc123 assess'))
+    })
+
+    RuleScenario('A judged task shows the score and the coverage together', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a daemon that says the task scores 88', () => withSummary()())
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says 88', says('88'))
+      And('the output says the coverage', says('70%'))
+    })
+
+    RuleScenario('A fall is shown with an arrow, not with colour alone', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a daemon that says the task scores 88', () => withSummary()())
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      // Colour is stripped by NO_COLOR in this suite, which is the point: the
+      // direction has to survive without it.
+      Then('the output shows a downward movement', says('↓ -3'))
+    })
+
+    RuleScenario('A cap is explained where it is applied', ({ Given, When, Then }) => {
+      Given('a daemon that says the task is capped', () =>
+        withSummary({
+          score: 70,
+          rawScore: 96,
+          caps: [{ type: 'criticalOpenDriver', value: 70, reason: 'A critical risk is still open.' }],
+        })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('the output says what capped it', says('A critical risk is still open.'))
+    })
+
+    RuleScenario('A stale assessment says so', ({ Given, When, Then }) => {
+      Given('a daemon that says the assessment is stale', () =>
+        withSummary({ state: 'stale', staleReason: 'One run has finished since this was assessed.' })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('the output says it is stale', says('Stale'))
+    })
+
+    RuleScenario('The drivers are listed with their owner', ({ Given, When, Then, And }) => {
+      Given('a daemon with one driver on the task', () =>
+        answering({
+          '/reliability/drivers': {
+            items: [
+              {
+                id: 'driver-1',
+                title: 'checkout regression',
+                description: '',
+                type: 'regression',
+                severity: 'high',
+                status: 'open',
+                owner: 'agent',
+                dimension: 'regressionSafety',
+                scoreImpact: -3,
+              },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 drivers"', () => invoke('reliability abc123 drivers'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output names the driver', says('checkout regression'))
+      And('the output says who should resolve it', says('agent'))
+    })
+
+    RuleScenario('A task with nothing outstanding says so', ({ Given, When, Then }) => {
+      Given('a daemon with no drivers on the task', () =>
+        answering({ '/reliability/drivers': { items: [] } })(),
+      )
+      When('I run "reliability abc123 drivers"', () => invoke('reliability abc123 drivers'))
+      Then('the output says nothing is holding it back', says('Nothing is holding this task back'))
+    })
+
+    RuleScenario('The next actions are estimates and say so', ({ Given, When, Then, And }) => {
+      Given('a daemon offering one next action', () =>
+        answering({
+          '/reliability/next-actions': {
+            currentScore: 88,
+            actions: [
+              {
+                driverId: 'driver-1',
+                title: 'checkout regression',
+                owner: 'agent',
+                severity: 'high',
+                impact: 3,
+                actionType: 'agent_investigation',
+                label: 'Investigate: checkout regression',
+              },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 next"', () => invoke('reliability abc123 next'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says they are estimates', says('Estimates'))
+    })
+
+    RuleScenario('History reads oldest first', ({ Given, When, Then, And }) => {
+      Given('a daemon with two assessments on the task', () =>
+        answering({
+          '/reliability/history': {
+            items: [
+              { sequence: 1, workflow: 'implement', score: 82, coverage: 50, delta: 82, summary: 'first', createdAt: '' },
+              { sequence: 2, workflow: 'verify', score: 88, coverage: 90, delta: 6, summary: 'second', createdAt: '' },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 history"', () => invoke('reliability abc123 history'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output reads 82 before 88', () =>
+        expect(output.indexOf('82')).toBeLessThan(output.indexOf('88')),
+      )
+    })
+
+    RuleScenario('A task nobody can find is refused clearly', ({ Given, When, Then }) => {
+      Given('a daemon with no such task', () => {
+        asked = []
+        daemon = fakeDaemon(() => ({ items: [] }))
+      })
+      When('I run "reliability nope"', () => invoke('reliability nope'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+    })
+
+    RuleScenario('There is no way to set a score', ({ When, Then }) => {
+      When('I run "reliability abc123 set 100"', () => invoke('reliability abc123 set 100'))
+      // Exit code 2, which is what this CLI uses for "that is not a command" —
+      // and the verb does not exist rather than being refused.
+      Then('it is a usage error', () => expect(result.exitCode).toBe(2))
     })
   })
 })

@@ -74,6 +74,13 @@ export class Sandbox {
     return path
   }
 
+  profile(scopeRoot: string, name: string, body: string): string {
+    const path = join(scopeRoot, 'profiles', `${name}.profile.yaml`)
+    mkdirSync(dirname(path), { recursive: true })
+    writeFileSync(path, body)
+    return path
+  }
+
   cleanup(): void {
     rmSync(this.root, { recursive: true, force: true })
   }

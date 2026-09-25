@@ -33,7 +33,7 @@ export type ScopeKind = 'project' | 'user' | 'builtin'
  * declaration of the same union — as it already was, spelled out inline at
  * eight call sites. One named type at least makes the duplication visible.
  */
-export type DefinitionKind = 'workflow' | 'phase' | 'agent'
+export type DefinitionKind = 'workflow' | 'phase' | 'agent' | 'profile'
 
 /** What turning a project setting on copied into the repository. */
 /** Whether adding a project had to create its `.xaedalon/.factory` directory. */
@@ -184,6 +184,22 @@ export interface ProviderEntry {
   effortValues: string[]
   provisional: boolean
   available: boolean
+  /**
+   * The flag that allows one command rather than all of them, if this CLI has one.
+   *
+   * Absent means a custom profile's command list cannot reach it. The profile
+   * editor says so while the list is being written, because it is true and
+   * there is nothing in the YAML that would reveal it.
+   */
+  commandAllowFlag?: string
+  /**
+   * The flag that forbids one command, if this CLI has one.
+   *
+   * A separate question from the one above with a separate answer — Claude has
+   * both, and a CLI with an allow-list and no deny-list would take a profile's
+   * denials in silence. The editor needs both to say which half is lost.
+   */
+  commandDenyFlag?: string
 }
 
 export type TaskState =
@@ -490,6 +506,14 @@ export interface TaskDetail {
   blockers: TaskBlocker[]
   artifacts: TaskArtifact[]
   /**
+   * How much to trust this task, assembled by the daemon and carried here.
+   *
+   * On the detail rather than fetched separately, because the card always
+   * draws and a second request for something assembled from rows already read
+   * is a round trip for nothing.
+   */
+  reliability: ReliabilitySummary
+  /**
    * Absent only when the task's project is missing from the database, which
    * takes a hand-edited one: every task has a project.
    */
@@ -525,6 +549,71 @@ export interface SetupReport {
   items: SetupItem[]
   ready: boolean
   remaining: number
+}
+
+/**
+ * How much to trust a task, as the daemon assembles it.
+ *
+ * `unassessed` is a state and the score is *absent* for it — not zero. A task
+ * nobody has looked at is not a task that failed, and drawing it as 0 would be
+ * the same lie the empty workflow told.
+ */
+export interface ReliabilitySummary {
+  state: 'unassessed' | 'assessed' | 'stale'
+  score?: number
+  rawScore?: number
+  coverage?: number
+  delta?: number
+  dimensions?: Record<string, number>
+  caps?: { type: string; value: number; reason: string }[]
+  assessedAt?: string
+  assessmentId?: string
+  staleReason?: string
+  attention: {
+    agent: number
+    developer: number
+    either: number
+    external: number
+    potential: Record<string, number>
+  }
+}
+
+/** One judgement, with the arithmetic that produced it. */
+export interface ReliabilityAssessment {
+  id: string
+  sequence: number
+  workflow?: string
+  runId?: string
+  score: number
+  rawScore: number
+  coverage: number
+  delta: number
+  summary: string
+  dimensions: Record<string, number>
+  caps: { type: string; value: number; reason: string }[]
+  explanation: {
+    contributions: { dimension: string; score: number; weight: number; contribution: number }[]
+    rawScore: number
+    effectiveScore: number
+    causes: { summary: string; amount: number; driverId?: string }[]
+  }
+  createdAt: string
+}
+
+/** Something that is costing trust, and who can do something about it. */
+export interface ReliabilityDriver {
+  id: string
+  title: string
+  description: string
+  type: string
+  severity: string
+  status: string
+  owner: string
+  dimension: string
+  scoreImpact: number
+  recommendedAction?: { type: string; label: string; workflow?: string }
+  acceptedBy?: string
+  acceptanceReason?: string
 }
 
 export interface Project {
@@ -563,6 +652,16 @@ export interface Project {
    * success, which is the whole reason this is a field and not a convention.
    */
   check?: string
+  /**
+   * The model that reads this project's work, when one does.
+   *
+   * Absent means nobody has chosen, which is not the same as switching judging
+   * off: the free evaluator still runs either way, and naming a model is what
+   * adds one that can read.
+   */
+  reliabilityModel?: string
+  /** Whether this project's runs are judged at all. On until somebody says otherwise. */
+  reliabilityEnabled?: boolean
   /** Directories its agents may reach beyond the workspace, granted for good. */
   grantedDirectories: string[]
   createdAt: string
@@ -634,10 +733,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // parsing it blindly would replace a useful status with a SyntaxError.
   const text = await response.text()
   let body: unknown
+  let parsed = true
   try {
     body = text === '' ? undefined : JSON.parse(text)
   } catch {
     body = undefined
+    parsed = false
   }
 
   if (!response.ok) {
@@ -647,6 +748,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       payload.error ?? `Request failed (${response.status})`,
       payload.problems ?? [],
       body,
+    )
+  }
+
+  // A success that is not JSON is not a success. This used to return
+  // `undefined`, and every caller then failed on a property of it — somewhere
+  // else entirely, with a message naming neither the request nor the cause.
+  // ("Cannot read properties of undefined (reading 'text')" was the one that
+  // got reported, from a daemon whose catch-all answered an API path it did not
+  // know with the board's own HTML and a 200.)
+  //
+  // Thrown rather than logged, because a caller that carries on without the
+  // thing it asked for is the tick-beside-nothing this project keeps finding.
+  if (!parsed) {
+    throw new ApiError(
+      response.status,
+      `The daemon's answer to ${path} was not JSON. It may be an older version ` +
+        `than this page, or something else is answering on its port.`,
     )
   }
   return body as T
@@ -731,6 +849,25 @@ export const api = {
    * A preview produced by a different code path is a preview that can be wrong
    * about what the real one will do.
    */
+  /** The bundles Factory ships, so a project can take one without a terminal. */
+  exampleBundles: () =>
+    request<{
+      items: {
+        name: string
+        description?: string
+        workflows: number
+        phases: number
+        profiles: number
+      }[]
+    }>(
+      '/api/bundles/examples',
+    ),
+
+  exampleBundle: (name: string) =>
+    request<{ name: string; text: string }>(
+      `/api/bundles/examples/${encodeURIComponent(name)}`,
+    ),
+
   importBundle: async (
     text: string,
     options: {
@@ -786,6 +923,29 @@ export const api = {
    */
   setup: () => request<SetupReport>('/api/setup'),
 
+  reliabilityHistory: (task: string) =>
+    request<{ items: ReliabilityAssessment[] }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/history`,
+    ),
+
+  reliabilityDrivers: (task: string) =>
+    request<{ items: ReliabilityDriver[] }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/drivers`,
+    ),
+
+  assessReliability: (task: string) =>
+    request<{ reliability: ReliabilitySummary }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/assess`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+
+  /** `action` is one the driver offers; the daemon refuses anything else. */
+  actOnDriver: (task: string, driver: string, action: string, body: Record<string, unknown> = {}) =>
+    request<{ driver: ReliabilityDriver; reliability: ReliabilitySummary }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/drivers/${encodeURIComponent(driver)}/${action}`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
   projects: () => request<{ items: Project[] }>('/api/projects'),
 
   /**
@@ -812,6 +972,9 @@ export const api = {
       // `null` clears the check command, which is a real answer: a project
       // whose gate should not run is better off saying so.
       check?: string | null
+      /** `null` clears the model, which means no agent reads this project's work. */
+      reliabilityModel?: string | null
+      reliabilityEnabled?: boolean
     },
   ) =>
     request<{ project: Project; scaffolded: ScaffoldReport }>(

@@ -133,8 +133,32 @@ permissionArgs:
 # rather than appends — so a step passing it does not add to Factory's
 # allow-list, it becomes the allow-list, and `--allowedTools Bash` was measured
 # writing outside the workspace. The rest set authority directly.
+# How a custom profile reaches this CLI.
+#
+# `--help` gives the form: `--allowedTools <tools...>` with the example
+# `"Bash(git *) Edit"`. Measured 2026-09-24: `Bash(git status:*)` is accepted as
+# a sub-command rule, and `--disallowedTools` exists alongside it with the same
+# grammar.
+#
+# One flag with a comma-separated value, never repeated — the same reason the
+# Default list above is one flag: a repeated variadic option *replaces* rather
+# than appends, so two flags would leave only the second in force.
+#
+# What a profile can and cannot buy here is worth knowing before writing one:
+# read-only commands are auto-approved whatever this list says, so `git status`
+# and `cat` already work under Default. An allow-list entry buys commands with
+# *side effects* — `cargo`, `make`, `docker` — which is what a profile is for.
+# `docs/security/providers.md` has the measurements.
+commandAllowFlag: '--allowedTools'
+commandDenyFlag: '--disallowedTools'
+commandPattern: 'Bash({command} *)'
+commandSeparator: ','
+
 forbiddenArgs:
   - '--allowedTools'
+  # A step passing this could take back what the project's profile granted, and
+  # quietly: the run would look configured and behave as though it were not.
+  - '--disallowedTools'
   - '--permission-mode'
   - '--permission-prompts'
   - '--dangerously-skip-permissions'

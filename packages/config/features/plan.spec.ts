@@ -1133,6 +1133,113 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
     })
   })
 
+  Rule('a project runs under the profile it names, or refuses to plan', ({ RuleScenario }) => {
+    const planning = (profile?: string) => (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      result = planWorkflow({
+        chain,
+        host,
+        workflow: 'building',
+        workspace: box.dir('work'),
+        ...(profile === undefined ? {} : { profile }),
+      })
+    }
+    const agentPhase = (): void => {
+      box.phase(
+        project,
+        'build',
+        'name: build\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    }
+    const succeeds = (): void =>
+      expect(result.plan, JSON.stringify(result.problems)).toBeDefined()
+    const fails = (): void => expect(result.plan).toBeUndefined()
+    const said = (): string => result.problems.map((p) => p.message).join(' ')
+    /** The rendered argv of the one agent step. */
+    const argv = (): readonly string[] => {
+      const step = result.plan?.phases[0]?.steps[0]
+      expect(step, JSON.stringify(result.problems)).toBeDefined()
+      return step?.planned.args ?? []
+    }
+
+    RuleScenario("A named profile's commands reach the agent's command line", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines the profile "development" allowing "cargo"', () => {
+        box.profile(
+          project,
+          'development',
+          'kind: factory.profile/v1\nname: development\ncommands: [cargo]\n',
+        )
+      })
+      And('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned under the profile "development"', planning('development'))
+      Then('planning succeeds', succeeds)
+      And('the step\'s command allows "Bash(cargo *)"', () => {
+        expect(argv().join(' ')).toContain('Bash(cargo *)')
+      })
+      And("the step's command still confines it", () => {
+        // The profile widens commands and nothing else: `--restricted` is what
+        // keeps the file tools inside the workspace, and it is still there.
+        expect(argv()).toContain('--restricted')
+      })
+    })
+
+    RuleScenario('A profile no scope defines refuses to plan', ({ Given, And, When, Then }) => {
+      Given('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned under the profile "nowhere"', planning('nowhere'))
+      Then('planning fails', fails)
+      And('a problem says no scope defines that profile', () => {
+        expect(said()).toContain('no scope defines one by that name')
+      })
+      And('the problem says Factory will not fall back', () => {
+        expect(said()).toContain('will not fall back')
+      })
+    })
+
+    RuleScenario('A profile that does not parse refuses to plan, and says why', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines the profile "broken" with an unknown key', () => {
+        box.profile(
+          project,
+          'broken',
+          'kind: factory.profile/v1\nname: broken\ncommand: [cargo]\n',
+        )
+      })
+      And('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned under the profile "broken"', planning('broken'))
+      Then('planning fails', fails)
+    })
+
+    RuleScenario('The built-in profiles need no definition', ({ Given, And, When, Then }) => {
+      Given('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned', planning())
+      Then('planning succeeds', succeeds)
+    })
+  })
+
   Rule('a step cannot argue its way past the profile it runs under', ({ RuleScenario }) => {
     const planUnder = (profile: ExecutionProfile) => (): void => {
       const chain = resolveScopes({
@@ -1207,6 +1314,61 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
         'a problem says the step asks for more authority than the profile allows',
         tooMuchAuthority,
       )
+    })
+
+    const refusal = (): string => {
+      const found = result.problems.find((problem) => problem.rule === 'plan.argsWidenProfile')
+      expect(found, JSON.stringify(result.problems)).toBeDefined()
+      return (found as { message: string }).message
+    }
+
+    RuleScenario('The refusal says what the profile already passes for that flag', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "eager" passing "--allowedTools Bash(pnpm *)"',
+        phasePassing('eager', "'--allowedTools', 'Bash(pnpm *)'"),
+      )
+      And('the project scope defines a workflow "build" with the phase "eager"', () =>
+        workflow('build', 'eager'),
+      )
+      When('the workflow "build" is planned', () => plan('build'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('the problem names the flag the step passed', () => {
+        expect(refusal()).toContain('--allowedTools')
+      })
+      And('the problem shows what the profile already passes for it', () => {
+        // The whole list, so a reader can see their own entry is in it and the
+        // answer is to delete their line rather than to widen the profile.
+        expect(refusal()).toContain('Bash(pnpm *)')
+        expect(refusal()).toContain('Bash(npm *)')
+      })
+      And('the problem says a shell step is not governed by that list', () => {
+        expect(refusal()).toContain('shell')
+      })
+    })
+
+    RuleScenario('A flag the profile passes nothing for is refused without a suggestion', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "reckless" passing "--dangerously-skip-permissions"',
+        phasePassing('reckless', "'--dangerously-skip-permissions'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "reckless"', () =>
+        workflow('review', 'reckless'),
+      )
+      When('the workflow "review" is planned', () => plan('review'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('the problem does not claim the profile already passes it', () => {
+        expect(refusal()).not.toContain('already passes')
+      })
     })
 
     RuleScenario('Under Full Access the same step plans', ({ Given, And, When, Then }) => {

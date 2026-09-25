@@ -67,6 +67,40 @@ export interface FactoryEvents {
   }
   'approval.requested': { runId: string; phase: string }
   'approval.granted': { runId: string; phase: string }
+
+  /**
+   * A task's reliability was judged again.
+   *
+   * `delta` is carried because the movement is the interesting part — a board
+   * that only learns the new score has to remember the old one to say anything
+   * useful, and a remembered value is one that drifts.
+   */
+  'reliability.assessed': {
+    taskId: string
+    assessmentId: string
+    score: number
+    delta: number
+    coverage: number
+  }
+  /** Something new is holding the score down, or holding it up. */
+  'reliability.driver.created': {
+    taskId: string
+    driverId: string
+    severity: string
+    owner: string
+  }
+  /**
+   * A driver moved: resolved, accepted, invalidated or superseded.
+   *
+   * `by` is present only for an acceptance, which is the one transition where
+   * who decided is part of the record rather than an audit detail.
+   */
+  'reliability.driver.changed': {
+    taskId: string
+    driverId: string
+    status: string
+    by?: string
+  }
 }
 
 /**
@@ -74,7 +108,7 @@ export interface FactoryEvents {
  * dependency on that one. The two are structurally independent: nothing checks
  * them against each other, so a new kind must be added in both.
  */
-export type DefinitionKind = 'workflow' | 'phase' | 'agent'
+export type DefinitionKind = 'workflow' | 'phase' | 'agent' | 'profile'
 export type FactoryEventName = keyof FactoryEvents
 
 /** An event as delivered to a subscriber. */

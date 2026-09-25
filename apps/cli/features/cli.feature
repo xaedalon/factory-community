@@ -251,6 +251,32 @@ Feature: The factory command
     And the output contains "Cannot reach the Factory daemon"
     And the output contains "factory-daemon"
 
+  Scenario: a run can be tried under a profile before it is chosen for a project
+    # A foreground run has no project to read a profile from, so naming one is
+    # how somebody checks what a profile they just wrote actually does — with
+    # --dry-run, before it is set on anything.
+    Given the project defines the profile "buildtools" allowing "cargo"
+    And a workflow whose step runs an agent
+    When I run "run build --dry-run --profile buildtools"
+    Then the command succeeds
+    And the printed command allows "Bash(cargo *)"
+
+  Scenario: a run under a profile nobody wrote is refused
+    Given a workflow whose step runs an agent
+    When I run "run build --dry-run --profile nowhere"
+    Then the command fails
+    And the output says no scope defines that profile
+
+  Scenario: an answer that is not JSON is explained rather than failing on nothing
+    # A daemon older than this CLI answers a route it does not know with the
+    # board's own HTML and a 200. Read as a result, that produced a crash about
+    # a property of `undefined` — naming neither the request nor the cause.
+    Given a daemon that answers with a page instead of JSON
+    When I run "task list"
+    Then the command fails
+    And the output says the answer was not JSON
+    And the output names the request
+
   Scenario: the short id the listing prints is enough to act on
     Given a daemon with a task "Add due dates" that is queued
     When I run "task cancel task-1a2"
@@ -620,3 +646,76 @@ Feature: The factory command
     Scenario: It is in the help
       When I run "--help"
       Then the output mentions "factory mcp"
+
+  Rule: how much to trust a task, from a terminal
+
+    The same numbers the board draws, through the same API. Nothing here decides
+    anything — the score, the drivers and the next actions all arrive judged.
+
+    There is no `factory reliability set`. The score is not something a person
+    types either.
+
+    Scenario: A task nobody has judged says so, and how to fix that
+      Given a daemon that says the task is unassessed
+      When I run "reliability abc123"
+      Then it succeeds
+      And the output says it is not assessed
+      And the output names the command that would assess it
+
+    Scenario: A judged task shows the score and the coverage together
+      # Either number alone is misleading: a 93 with 20% coverage is not the
+      # same claim as a 93 with 96%.
+      Given a daemon that says the task scores 88
+      When I run "reliability abc123"
+      Then it succeeds
+      And the output says 88
+      And the output says the coverage
+
+    Scenario: A fall is shown with an arrow, not with colour alone
+      Given a daemon that says the task scores 88
+      When I run "reliability abc123"
+      Then the output shows a downward movement
+
+    Scenario: A cap is explained where it is applied
+      Given a daemon that says the task is capped
+      When I run "reliability abc123"
+      Then the output says what capped it
+
+    Scenario: A stale assessment says so
+      Given a daemon that says the assessment is stale
+      When I run "reliability abc123"
+      Then the output says it is stale
+
+    Scenario: The drivers are listed with their owner
+      Given a daemon with one driver on the task
+      When I run "reliability abc123 drivers"
+      Then it succeeds
+      And the output names the driver
+      And the output says who should resolve it
+
+    Scenario: A task with nothing outstanding says so
+      Given a daemon with no drivers on the task
+      When I run "reliability abc123 drivers"
+      Then the output says nothing is holding it back
+
+    Scenario: The next actions are estimates and say so
+      Given a daemon offering one next action
+      When I run "reliability abc123 next"
+      Then it succeeds
+      And the output says they are estimates
+
+    Scenario: History reads oldest first
+      Given a daemon with two assessments on the task
+      When I run "reliability abc123 history"
+      Then it succeeds
+      And the output reads 82 before 88
+
+    Scenario: A task nobody can find is refused clearly
+      Given a daemon with no such task
+      When I run "reliability nope"
+      Then it fails
+
+    Scenario: There is no way to set a score
+      When I run "reliability abc123 set 100"
+      Then it is a usage error
+

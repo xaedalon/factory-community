@@ -25,6 +25,11 @@ Feature: The writer covers every field the schema accepts
     Then no schema field is missing from the table
     And no table entry names a field the schema does not accept
 
+  Scenario: Every profile schema field has a writer rule
+    When the profile field table is compared to the profile schema
+    Then no schema field is missing from the table
+    And no table entry names a field the schema does not accept
+
   Scenario: Every kind's table was actually compared
     Then every field table this package exports has been checked
 
@@ -32,6 +37,7 @@ Feature: The writer covers every field the schema accepts
     Then every workflow table entry names a property the parser produces
     And every phase table entry names a property the parser produces
     And every agent table entry names a property the parser produces
+    And every profile table entry names a property the parser produces
 
   Scenario: A field deliberately left unwritten must say why
     Then every omitted field records a reason

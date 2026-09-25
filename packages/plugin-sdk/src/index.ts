@@ -163,6 +163,39 @@ export { DOCTOR_RULE_KIND } from '@factory/config'
 // SDK rather than let anything reach past it.
 export { LEGACY_SCOPE_DIR, SCOPE_CONFIG_FILE, SCOPE_DIR, userScopeRoot } from '@factory/config'
 
+// --- judging how much to trust a task ------------------------------------
+//
+// Factory owns the arithmetic and an evaluator owns the reading. The contract
+// is here rather than in core's own registry because an evaluator that only
+// core could write is a subsystem with one supplier: a provider vendor who
+// knows how to read their own model's output, or a team with a house rule
+// about what counts as evidence, reaches the same door the built-in one uses.
+//
+// Note what is not exported: nothing that sets a score. There is no such field
+// on `EvaluatorOutput` and no capability that could carry one.
+export type {
+  DimensionAssessment,
+  EvaluatorAgent,
+  EvaluatorInput,
+  EvaluatorOutput,
+  NormalizationNote,
+  NormalizedEvaluation,
+  Observation,
+  ObservationKind,
+  ObservationStatus,
+  ProposedFinding,
+  ReliabilityDimension,
+  ReliabilityDriver,
+  ReliabilityEvaluatorCapability,
+  ReliabilityPolicy,
+} from '@factory/core'
+export {
+  DEFAULT_RELIABILITY_POLICY,
+  RELIABILITY_DIMENSIONS,
+  RELIABILITY_EVALUATOR_KIND,
+  normalize,
+} from '@factory/core'
+
 // --- proving a plugin conforms ------------------------------------------
 export type { ConformanceCheck, ConformanceReport } from '@factory/core'
 export { assertPluginConformance, checkPluginConformance } from '@factory/core'

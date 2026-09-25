@@ -49,8 +49,35 @@ Feature: Definitions survive a read-modify-write untouched
     Then the file no longer contains "on_fail"
     And the comment "# The development pipeline." is still present
 
+  Scenario: Emptying a list deletes its key, rather than leaving the old one
+    # Reported: an agent file carried `args: ['--allowedTools', 'Bash(pnpm *)']`,
+    # which the planner refuses. Clearing the list on the board and saving did
+    # nothing at all — the file kept the argument and the task stayed blocked.
+    #
+    # `args` is emitted only when non-empty, so an emptied list is *not* written;
+    # and the delete beside that was guarded on the value being `undefined`,
+    # which an emptied list is not. So the key was neither written nor removed,
+    # and the writer reported nothing to do. Every `ifNonEmpty` field had it:
+    # a step's `args`, a phase's `variables`, a workflow's `needs`.
+    Given the fixture "full-featured.agent.yaml"
+    When its arguments are emptied
+    Then the file no longer contains "args"
+    And the comment at the top is still present
+
+  Scenario: Clearing a field back to its default deletes its key too
+    # Same shape, one emit rule along: a description cleared to "" is not
+    # written, and has to stop being on disk rather than silently persist.
+    Given the fixture "full-featured.agent.yaml"
+    When its description is cleared
+    Then the file no longer contains "description"
+
   Scenario: A phase round-trips its steps, including the agent step
     Given the fixture "full-featured.phase.yaml"
+    When it is parsed and written back with no changes
+    Then the file is byte-for-byte unchanged
+
+  Scenario: A profile round-trips everything it carries
+    Given the fixture "full-featured.profile.yaml"
     When it is parsed and written back with no changes
     Then the file is byte-for-byte unchanged
 

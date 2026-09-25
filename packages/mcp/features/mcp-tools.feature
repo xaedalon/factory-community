@@ -265,3 +265,66 @@ Feature: The tools an agent is given
       And "FAN_OUT_LIMIT" is a code this surface knows
       And "SELF_ORCHESTRATION_BLOCKED" is a code this surface knows
       And "APPROVAL_SEPARATION" is a code this surface knows
+
+  Rule: an agent can ask what it is allowed to work on next
+
+    The owner on a driver is what makes this surface worth having. An agent that
+    can ask "what is the highest-value thing I can do about this task without a
+    person" is an agent that can keep going, and the answer is a list it can act
+    on rather than a number it can only report.
+
+    Scenario: A task nobody has judged says so rather than scoring zero
+      Given a task nobody has judged
+      When the agent asks how reliable it is
+      Then it comes back "unassessed"
+      And it carries no score
+      And it says how to get one
+
+    Scenario: A judged task comes back with what is waiting for whom
+      Given a task judged at 88 with two agent drivers and one for a developer
+      When the agent asks how reliable it is
+      Then the score is 88
+      And it says 2 are the agent's
+      And it says 1 needs a developer
+
+    Scenario: The reply says to ask what to do next
+      Given a task judged at 88 with two agent drivers and one for a developer
+      When the agent asks how reliable it is
+      Then it points at the next actions
+
+    Scenario: Nothing outstanding says so plainly
+      Given a task judged at 98 with nothing outstanding
+      When the agent asks how reliable it is
+      Then it says nothing is outstanding
+
+  Rule: an agent may say a finding stopped being true, not that it does not matter
+
+    Resolving is a claim evidence can check. Accepting is a decision about what
+    matters, and an acceptance an agent can grant itself is not a gate — the
+    same argument that keeps approving off this surface entirely.
+
+    Scenario: Resolving carries the run the agent is inside
+      Given a task with a driver
+      When the agent resolves it
+      Then the daemon was told which run asked
+
+    Scenario: Accepting carries it too, so the daemon can refuse
+      Given a task with a driver
+      When the agent accepts it
+      Then the daemon was told which run asked
+
+    Scenario: Accepting demands a reason
+      # It is the record. An acceptance nobody explained is indistinguishable
+      # afterwards from one nobody meant.
+      When the agent tries to accept a driver without a reason
+      Then the call is refused before it is sent
+
+  Rule: no tool sets a score
+
+    Scenario: There is no tool that sets a score
+      Then no tool is named "factory_reliability_set"
+      And no tool takes a score
+
+    Scenario: The reliability tools are read-first
+      Then 4 of the reliability tools only read
+

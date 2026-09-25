@@ -1302,3 +1302,178 @@ Feature: Tasks, runs and live updates over HTTP
       When I set that project's check command to the number 7
       Then the response is 400
 
+  Rule: a green project check is evidence, and Factory knows which command it was
+
+    The one expectation Factory can satisfy without being told: a step running
+    exactly the project's own check command and exiting zero *is* the project's
+    checks passing. Everything else waits for a workflow to declare it.
+
+    Knowing which command that was is the daemon's job — the engine has a run
+    and a plan and no idea which project they belong to. It was never handed
+    over, so the credit was reachable only from a unit test that passed the
+    fact in by hand, and no real run ever earned it.
+
+    Scenario: A run of the project's check command earns regression coverage
+      Given the project checks itself with "echo checks passed"
+      And the workflow "check" runs that command
+      And the task "Add due dates" exists with the workflow "check"
+      When I queue the task
+      And the work finishes
+      Then the assessment counts "regression_checks" as collected
+
+    Scenario: A run of some other command earns none
+      Given the project checks itself with "echo checks passed"
+      And the task "Add due dates" exists with the workflow "hello"
+      When I queue the task
+      And the work finishes
+      Then the assessment counts no evidence at all
+
+  Rule: a project says which model judges its work, and whether one does
+
+    The free evaluator always runs. An agent evaluator costs tokens on every run
+    that produced something, so what it costs and whether it is worth it are the
+    project's call — a weekend project and a payments service do not want the
+    same model, and neither wants one chosen for them in Factory's source.
+
+    Naming nothing is not the same as switching it off. One of them starts
+    working the moment a model is named.
+
+    Scenario: A new project names no model and is judged
+      Given a directory with nothing Factory recognises
+      When I add a project at that directory
+      Then the project names no judging model
+      And the project is judged
+
+    Scenario: A model can be chosen
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging model to "claude-opus-5-5"
+      Then the response is 200
+      And the project's judging model is "claude-opus-5-5"
+
+    Scenario: A model can be cleared
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      And that project's judging model is "claude-opus-5-5"
+      When I clear that project's judging model
+      Then the response is 200
+      And the project names no judging model
+
+    Scenario: Judging can be switched off without losing the model
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      And that project's judging model is "claude-opus-5-5"
+      When I stop that project's work being judged
+      Then the response is 200
+      And the project is not judged
+      And the project's judging model is "claude-opus-5-5"
+
+    Scenario: A model that is not text is refused, and the refusal names the field
+      # The status alone does not distinguish a validated refusal from the
+      # store throwing on `7.trim()` — both are 400, and only one of them puts
+      # the error against a field a form can highlight.
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging model to the number 7
+      Then the response is 400
+      And the refusal names the judging model
+
+    Scenario: Judging that is not true or false is refused
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging to "maybe"
+      Then the response is 400
+
+  Rule: a task carries how much to trust it, and no surface can simply say
+
+    The score is assembled from the history — the newest assessment plus the
+    drivers still active — and assembled in one place, so the task payload and
+    the reliability routes cannot describe the same task differently.
+
+    There is no route that sets a score. There is not going to be one, and a
+    scenario asserts it does not exist.
+
+    Scenario: A task nobody has judged says so rather than scoring zero
+      Given the task "Add due dates" exists
+      When I read the task
+      Then its reliability is "unassessed"
+      And it carries no score
+
+    Scenario: The reliability route agrees with the task payload
+      Given the task "Add due dates" exists
+      When I read the task
+      And I read its reliability
+      Then both say the same state
+
+    Scenario: An assessment can be asked for
+      Given the task "Add due dates" exists
+      When I ask for an assessment
+      Then the response is 200
+      And its reliability is "assessed"
+      And it carries a score
+
+    Scenario: History starts empty and grows
+      Given the task "Add due dates" exists
+      When I read its reliability history
+      Then 0 assessments are listed
+      When I ask for an assessment
+      And I read its reliability history
+      Then 1 assessment is listed
+
+    Scenario: Next actions are offered for a task with nothing to do
+      Given the task "Add due dates" exists
+      When I read its next actions
+      Then the response is 200
+      And no actions are offered
+
+    Scenario: There is no route that sets a score
+      Given the task "Add due dates" exists
+      When I try to set its score to 100
+      Then the response is 404
+
+  Rule: accepting a serious risk is a person's, and the daemon is what knows
+
+    An acceptance an agent can grant itself is not a gate. Factory stamps the
+    run into every agent process it launches, so the daemon can tell — and a
+    client that omits it looks like a person, which is the direction that loses
+    authority rather than gains it.
+
+    Scenario: An agent cannot accept a high risk
+      Given a task with a "high" reliability driver
+      When an agent tries to accept that driver
+      Then the response is 409
+      And the refusal says a person is required
+
+    Scenario: A person can accept a high risk
+      Given a task with a "high" reliability driver
+      When a person accepts that driver
+      Then the response is 200
+      And the driver is "accepted"
+      And it records who accepted it
+
+    Scenario: An agent can resolve a high risk
+      # Resolving is a claim evidence can check. Accepting is a decision.
+      Given a task with a "high" reliability driver
+      When an agent resolves that driver
+      Then the response is 200
+      And the driver is "resolved"
+
+    Scenario: Accepting re-judges the task immediately
+      # Leaving it until the next run would show a number contradicting the
+      # list underneath it.
+      Given a task with a "high" reliability driver
+      When a person accepts that driver
+      Then the reliability comes back with the reply
+
+    Scenario: A move the driver does not offer is refused with the ones it does
+      Given a task with a "high" reliability driver
+      And that driver has been resolved
+      When a person tries to resolve it again
+      Then the response is 409
+      And the refusal lists what it would accept
+
+    Scenario: Something that is not a driver action is refused
+      Given a task with a "high" reliability driver
+      When a person tries to "obliterate" that driver
+      Then the response is 400
+

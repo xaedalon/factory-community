@@ -35,6 +35,16 @@ const THEMES: readonly { value: UiTheme; label: string; icon: IconName }[] = [
  * Spelled here rather than derived from the served settings, because the board
  * has to offer a choice the daemon has not been told about yet — and a third
  * profile would be a deliberate change to this list, not a silent one.
+ *
+ * **Custom profiles are deliberately not offered here**, and that is the change
+ * this list did not need. A custom profile is a *definition*, resolved through
+ * the chain of the project that names it — and a project scope's profile does
+ * not exist for any other project. An installation-wide setting naming one
+ * would refuse to plan everywhere except the repository that defined it, which
+ * is a footgun shaped exactly like a setting that works.
+ *
+ * A profile belongs to the repository it is true of, so it is chosen on the
+ * project's page. See `docs/security/profiles.md`.
  */
 const PROFILES: readonly { value: ExecutionProfile; label: string; icon: IconName; hint: string }[] =
   [

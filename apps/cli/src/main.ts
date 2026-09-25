@@ -5,6 +5,7 @@ import * as scopes from './commands/scopes.js'
 import * as security from './commands/security.js'
 import * as definitions from './commands/definitions.js'
 import * as inspect from './commands/inspect.js'
+import * as reliability from './commands/reliability.js'
 import * as bundles from './commands/bundles.js'
 import { run as runWorkflow } from './commands/run.js'
 import * as tasks from './commands/tasks.js'
@@ -44,6 +45,12 @@ Usage
   factory task <action> <id>              queue, approve, reject, retry, cancel, done
   factory task depends <id> <on>          make one wait for another  (--remove)
   factory task move <id> <project>        put it in another project
+
+  factory reliability <task>              how much to trust it, and why
+  factory reliability <task> drivers      what is holding it back  (--status, --owner)
+  factory reliability <task> history      every judgement, oldest first
+  factory reliability <task> next         the highest-value thing to do next
+  factory reliability <task> assess       judge it again now
 
   factory project add <name> <path>       a repository to work in   (--in-place)
   factory project queue <name>            queue the lot, in dependency order
@@ -88,6 +95,7 @@ Task
 
 Run
   --dry-run              print the commands and run nothing
+  --profile <name>       run under this profile, built-in or one you wrote
   --yes                  approve every gate without asking
   --timeout <seconds>    how long one step may take   (default 1800)
   --workspace <dir>      where steps run              (default: here)
@@ -211,7 +219,17 @@ async function dispatch(
     }
 
     case 'profile': {
-      const [wanted] = rest
+      // One command about profiles rather than two: `factory profile` reads or
+      // writes the installation's choice, and `list`/`show` are the definition
+      // verbs every other kind has. They cannot be profile names — the schema
+      // reserves them — so there is nothing to disambiguate.
+      const [wanted, name] = rest
+      if (wanted === 'list') return definitions.list('profile', context, style)
+      if (wanted === 'show') {
+        return name === undefined
+          ? usage('Which profile? Try "factory profile show <name>".')
+          : definitions.show('profile', name, context, style)
+      }
       return security.profile(context, wanted, style)
     }
 
@@ -391,6 +409,7 @@ async function dispatch(
       const timeout = value(rest, '--timeout')
       const workspace = value(rest, '--workspace')
       const provider = value(rest, '--provider')
+      const runProfile = value(rest, '--profile')
       // Built with assignments rather than conditional spreads: a spread of
       // `string | undefined` keeps the undefined in the type, which
       // exactOptionalPropertyTypes then rejects against an optional field.
@@ -416,6 +435,7 @@ async function dispatch(
           ...(timeout === undefined ? {} : { timeoutSeconds: Number(timeout) }),
           ...(workspace === undefined ? {} : { workspace }),
           ...(provider === undefined ? {} : { provider }),
+          ...(runProfile === undefined ? {} : { profile: runProfile }),
           ...(Object.keys(task).length === 0 ? {} : { task }),
         },
         context,
@@ -426,6 +446,31 @@ async function dispatch(
 
     case 'setup':
       return setupCommand(daemon ?? createDaemonClient(context.env), context, style)
+
+    case 'reliability': {
+      const [id, verb] = rest
+      if (id === undefined) return usage('Which task? factory reliability <task>')
+      const client = daemon ?? createDaemonClient(context.env)
+      const status = value(rest, '--status')
+      const owner = value(rest, '--owner')
+      switch (verb) {
+        case undefined:
+          return reliability.show(client, id, style)
+        case 'drivers':
+          return reliability.drivers(client, id, style, {
+            ...(status === undefined ? {} : { status }),
+            ...(owner === undefined ? {} : { owner }),
+          })
+        case 'history':
+          return reliability.history(client, id, style)
+        case 'next':
+          return reliability.next(client, id, style)
+        case 'assess':
+          return reliability.assess(client, id, style)
+        default:
+          return usage(`Unknown: factory reliability <task> ${verb}`)
+      }
+    }
 
     case 'doctor':
       return inspect.doctor(daemon ?? createDaemonClient(context.env), context, style)

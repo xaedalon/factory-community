@@ -359,6 +359,63 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
+  Scenario('The bundles Factory ships can be listed', ({ When, Then, And }) => {
+    When('I GET "/api/bundles/examples"', () => call('GET', '/api/bundles/examples'))
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the bundle "reliability" is offered', () => {
+      const names = (response.body.items as { name: string }[]).map((item) => item.name)
+      expect(names).toContain('reliability')
+    })
+    And('it says how many workflows it carries', () => {
+      const found = (response.body.items as { name: string; workflows: number }[]).find(
+        (item) => item.name === 'reliability',
+      )
+      expect(found?.workflows).toBeGreaterThan(0)
+    })
+  })
+
+  Scenario('A shipped bundle can be read', ({ When, Then, And }) => {
+    When('I GET "/api/bundles/examples/reliability"', () =>
+      call('GET', '/api/bundles/examples/reliability'),
+    )
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the text is a bundle carrying the workflow "analysis"', () => {
+      expect(response.body.text as string).toContain('name: analysis')
+    })
+  })
+
+  Scenario('A bundle Factory does not ship is a 404', ({ When, Then }) => {
+    When('I GET "/api/bundles/examples/nonesuch"', () =>
+      call('GET', '/api/bundles/examples/nonesuch'),
+    )
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+  })
+
+  Scenario('A name that is a path is refused rather than resolved', ({ When, Then }) => {
+    When('I GET a shipped bundle named "../../../etc/passwd"', () =>
+      call('GET', `/api/bundles/examples/${encodeURIComponent('../../../etc/passwd')}`),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+  })
+
+  Scenario('The shipped bundle goes in through the same door a person\'s file does', ({
+    When,
+    Then,
+    And,
+  }) => {
+    When('I import the shipped bundle "reliability" into the user scope', async () => {
+      await call('GET', '/api/bundles/examples/reliability')
+      await call('POST', '/api/bundles/import', {
+        text: response.body.text as string,
+        scope: 'user',
+      })
+    })
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the workflow "analysis" is in the user scope', () => {
+      expect(existsSync(workflowFile(userScope, 'analysis'))).toBe(true)
+    })
+  })
+
   Scenario('Importing is previewed without writing', ({ Given, And, When, Then }) => {
     Given('the project defines the workflow "development"', givenProjectWorkflow)
     And('I have exported it', async () => {
@@ -413,6 +470,25 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('"claude" is listed', () =>
       expect((response.body.items as { id: string }[]).some((item) => item.id === 'claude')).toBe(true),
     )
+  })
+
+  Scenario('The provider registry says which half of a profile a CLI can honour', ({ When, Then, And }) => {
+    When('I GET "/api/registries/providers"', () => call('GET', '/api/registries/providers'))
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    const flagged = (id: string) =>
+      (response.body.items as { id: string; commandAllowFlag?: string; commandDenyFlag?: string }[]).find(
+        (item) => item.id === id,
+      )
+    And('"claude" can be told one command is allowed', () =>
+      expect(flagged('claude')?.commandAllowFlag).toBe('--allowedTools'),
+    )
+    And('"claude" can be told one command is forbidden', () =>
+      expect(flagged('claude')?.commandDenyFlag).toBe('--disallowedTools'),
+    )
+    And('"codex" can be told neither', () => {
+      expect(flagged('codex')?.commandAllowFlag).toBeUndefined()
+      expect(flagged('codex')?.commandDenyFlag).toBeUndefined()
+    })
   })
 
   Scenario('Doctor reports findings in the body, not the status', ({ Given, When, Then, And }) => {
@@ -481,6 +557,45 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
   })
 
+  Scenario('An API path the daemon does not serve is a JSON 404, not the board', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    Given('a built board', givenBuiltBoard)
+    When('I GET "/api/bundles/examples/nothing-like-this"', () =>
+      call('GET', '/api/bundles/examples/nothing-like-this'),
+    )
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    And('the response is JSON', () => {
+      expect(() => JSON.parse(rawResponse) as unknown).not.toThrow()
+    })
+    And("the board's page is not returned", () => expect(rawResponse).not.toContain('id="app"'))
+  })
+
+  Scenario('A page whose name merely begins with those letters is still a page', ({
+    Given,
+    When,
+    Then,
+  }) => {
+    Given('a built board', givenBuiltBoard)
+    When('I GET "/apiary"', () => call('GET', '/apiary'))
+    Then("the board's page is returned", () => expect(rawResponse).toContain('id="app"'))
+  })
+
+  Scenario('An unknown API path is a 404 even where there is no board to serve', ({
+    When,
+    Then,
+    And,
+  }) => {
+    When('I GET "/api/nothing-like-this"', () => call('GET', '/api/nothing-like-this'))
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    And('the response is JSON', () => {
+      expect(() => JSON.parse(rawResponse) as unknown).not.toThrow()
+    })
+  })
+
   Scenario('Without a built board the root page says how to build it', ({
     When,
     Then,
@@ -520,6 +635,70 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       : {}
   const switchTo = (id: string, enabled: unknown) => () =>
     call('POST', `/api/plugins/${encodeURIComponent(id)}`, { enabled })
+
+  Rule('a profile goes in and out through the same routes as everything else', ({
+    RuleScenario,
+  }) => {
+    const profile = (over: Record<string, unknown> = {}) => ({
+      name: 'development',
+      description: 'Build tools this repository uses.',
+      extends: 'default',
+      commands: ['cargo'],
+      denyCommands: [],
+      providers: {},
+      extensions: {},
+      ...over,
+    })
+
+    RuleScenario('A profile can be written and read back', ({ When, Then, And }) => {
+      When('I POST a profile named "development"', () =>
+        call('POST', '/api/profiles', { definition: profile() }),
+      )
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('reading it back returns what was written', async () => {
+        await call('GET', '/api/profiles/development')
+        expect(response.statusCode).toBe(200)
+        expect((response.body.definition as { commands: string[] }).commands).toEqual(['cargo'])
+      })
+      And('the file was written as a profile', () => {
+        expect(existsSync(join(projectScope, 'profiles', 'development.profile.yaml'))).toBe(true)
+      })
+    })
+
+    RuleScenario('Previewing a profile shows the YAML it would write', ({ When, Then, And }) => {
+      When('I preview a profile named "development"', () =>
+        call('POST', '/api/definitions/preview', { kind: 'profile', definition: profile() }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the preview reads as a profile', () => {
+        expect(response.body.text as string).toContain('name: development')
+        expect(response.body.text as string).toContain('cargo')
+      })
+    })
+
+    RuleScenario('A profile that would reach Full Access is refused', ({ When, Then, And }) => {
+      When('I POST a profile that passes "bypassPermissions" to claude', () =>
+        call('POST', '/api/profiles', {
+          definition: profile({
+            name: 'reckless',
+            providers: { claude: { args: ['--permission-mode', 'bypassPermissions'] } },
+          }),
+        }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the refusal names Full Access', () => {
+        const said = JSON.stringify(response.body)
+        expect(said).toContain('Full Access')
+      })
+    })
+
+    RuleScenario('A profile that allows an ordinary build tool is written', ({ When, Then }) => {
+      When('I POST a profile allowing "cargo"', () =>
+        call('POST', '/api/profiles', { definition: profile({ name: 'buildtools' }) }),
+      )
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    })
+  })
 
   Rule('plugins can be listed and switched', ({ RuleScenario }) => {
     RuleScenario('The list names every plugin and what it contributes', ({
@@ -958,6 +1137,32 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       When('I POST a workflow named "allowed"', post('allowed'))
       Then('the response is 400', () => expect(response.statusCode).toBe(400))
       And('the workflow "allowed" was not written', notWritten('allowed'))
+    })
+  })
+
+  Rule('the installation-wide profile stays one of the two Factory ships', ({ RuleScenario }) => {
+    RuleScenario('A custom profile is refused as the installation\'s default', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the user scope defines the profile "buildtools"', () => {
+        file(
+          join(userScope, 'profiles', 'buildtools.profile.yaml'),
+          'kind: factory.profile/v1\nname: buildtools\ncommands: [cargo]\n',
+        )
+      })
+      When('I set the installation profile to "buildtools"', () =>
+        call('PATCH', '/api/settings', { security: { profile: 'buildtools' } }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('The built-ins are still accepted', ({ When, Then }) => {
+      When('I set the installation profile to "full-access"', () =>
+        call('PATCH', '/api/settings', { security: { profile: 'full-access' } }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
     })
   })
 })

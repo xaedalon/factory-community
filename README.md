@@ -106,6 +106,12 @@ through forms, and shows you the file it will write before it writes it.
   step rather than blocking the task for a person to press a button.
 - **Reconciliation** at boot closes runs a crash left marked as running, and blocks the tasks that
   were mid-flight — rather than restarting work that may have already pushed a branch.
+- **Every run is judged**, so a task says how much to trust it rather than only that it is `done`:
+  a score, the evidence coverage behind it, the findings holding it down, and which of those an
+  agent can deal with and which need you. The score can go *down* — a validation that finds a
+  regression has learned something. No agent ever sets it. See
+  [`docs/reliability/`](docs/reliability/), which is also candid that these are heuristics rather
+  than calibrated odds.
 
 ## Extending it
 
@@ -203,7 +209,7 @@ there. Rules are a capability, so a plugin adds its own.
 
 | | |
 |---|---|
-| `factory` | Definitions, scopes, plugins, `run`, `doctor`, and `task` — all with `--json` |
+| `factory` | Definitions, scopes, plugins, `run`, `doctor`, `task` and `reliability` — all with `--json` |
 | `factory-daemon` | HTTP on `127.0.0.1:7317`, including a live event stream |
 | the board | Tasks, runs, logs, evidence, and the builder, at the same address |
 | `factory mcp` | The same contract again, for the coding agent you already have |

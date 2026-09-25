@@ -1,15 +1,30 @@
 import {
   Engine,
   Scheduler,
+  assessReliability,
   reconcile,
   runningInstallationPlugin,
+  stalenessOf,
   type FailureContext,
   type ProjectFacts,
   type ReconcileReport,
   type WorkflowFacts,
 } from '@factory/engine'
-import { definitionPath, planWorkflow, resolveWorkflow } from '@factory/config'
 import {
+  definitionPath,
+  namesIn,
+  planWorkflow,
+  resolveProfileDefinition,
+  resolveWorkflow,
+} from '@factory/config'
+import {
+  DEFAULT_RELIABILITY_POLICY,
+  RELIABILITY_EVALUATOR_KIND,
+  attentionSummary,
+  capsFor,
+  type ReliabilityDriver,
+  type ReliabilityEvaluatorCapability,
+  type ReliabilitySummary,
   artifactsRoot,
   resolveProfile,
   systemCanonical,
@@ -22,6 +37,7 @@ import { createChains, type Chains } from './chains.js'
 import {
   MIGRATIONS,
   ProjectRepository,
+  ReliabilityRepository,
   RunRepository,
   TaskRepository,
   openStore,
@@ -30,8 +46,15 @@ import {
 } from '@factory/store'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ExecutionProfile, Project, Task, TaskWorkspace } from '@factory/core'
+import type {
+  ExecutionProfile,
+  ProfileNames,
+  Project,
+  Task,
+  TaskWorkspace,
+} from '@factory/core'
 import type { Runtime } from '@factory/runtime'
+import { agentFor } from './reliability-agent.js'
 
 /**
  * The running half of a Factory installation.
@@ -48,6 +71,19 @@ export interface Service {
   readonly tasks: TaskRepository
   readonly runs: RunRepository
   readonly projects: ProjectRepository
+  readonly reliability: ReliabilityRepository
+  /**
+   * What a task's reliability is right now, assembled from the history.
+   *
+   * On the service rather than in a route because two surfaces need it — the
+   * task detail payload and the reliability routes — and two assemblies of the
+   * same question is how they come to disagree.
+   */
+  readonly reliabilitySummary: (taskId: string) => ReliabilitySummary
+  /** The workflows a project can run, so a recommendation can name a real one. */
+  readonly workflowNames: (projectId?: string) => readonly string[]
+  /** Built-ins plus what the chain defines, for validating and offering a profile. */
+  readonly profileNames: (projectId?: string) => ProfileNames
   /** Which definitions each project can see. Served by the definition routes. */
   readonly chains: Chains
   /**
@@ -95,6 +131,7 @@ export async function createService(
   const tasks = new TaskRepository({ db: store.db, events: runtime.events })
   const runs = new RunRepository({ db: store.db, events: runtime.events })
   const projects = new ProjectRepository({ db: store.db, events: runtime.events })
+  const reliability = new ReliabilityRepository({ db: store.db, events: runtime.events })
 
   // Definitions are resolved from the project's own directory, not the one the
   // daemon was started in. Everything that reads or writes a workflow goes
@@ -220,6 +257,56 @@ export async function createService(
           ...(failure === undefined ? {} : failureVariables(failure)),
         },
       }),
+    // Judged after every run that reaches a verdict. The engine assembles the
+    // facts — it is the only thing that sees the plan, the outcomes, the
+    // refusals and the artifacts together — and this supplies everything that
+    // needs a database or a host: the repository, the evaluators, and the
+    // workflows this project actually has so a recommendation can name a real
+    // one.
+    //
+    // Evaluators come off the host rather than a list here, which is what lets
+    // a plugin add one. The deterministic evaluator is a built-in and arrives
+    // the same way.
+    assess: async ({ taskId, facts }) => {
+      const task = tasks.get(taskId)
+      if (task === undefined) return []
+      const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
+      const evaluators = runtime.host
+        .list<ReliabilityEvaluatorCapability>(RELIABILITY_EVALUATOR_KIND)
+        .map((entry) => entry.capability)
+      const outcome = await assessReliability({
+        taskId,
+        task: { name: task.name, description: task.description },
+        reliability,
+        evaluators,
+        policy: DEFAULT_RELIABILITY_POLICY,
+        trigger: 'run',
+        // The project's own check command, added here because the engine has a
+        // run and a plan and no idea which project they belong to. A step
+        // running exactly this command and exiting zero *is* the project's
+        // checks passing — the one expectation Factory can satisfy without
+        // being told. It was declared on `RunFacts` and never supplied, so the
+        // credit existed only where a test passed it in by hand.
+        facts: {
+          ...facts,
+          ...(project?.check === undefined ? {} : { checkCommand: project.check }),
+        },
+        workflows: workflowNamesFor(task.projectId),
+        // Absent unless this project chose a model and a CLI is installed to
+        // run it. That is the whole of the cost control: the free evaluator
+        // always runs, and the one that spends money runs when somebody said so.
+        ...(() => {
+          const agent = agentFor({
+            runtime,
+            project,
+            profile: profileFor(task),
+            cwd: project?.path,
+          })
+          return agent === undefined ? {} : { agent }
+        })(),
+      })
+      return outcome.problems
+    },
   })
 
   // Before anything is allowed to start: rows that say "running" from a process
@@ -229,6 +316,77 @@ export async function createService(
 
   // One answer to "what does this workflow say about being scheduled", shared
   // by the scheduler and by the doctor rule that explains why nothing started.
+  /**
+   * The workflows a project can actually run.
+   *
+   * Handed to the evaluators so a recommendation names one that exists — a
+   * suggestion to run something the project does not have is worse than no
+   * suggestion, because the board draws a button behind it.
+   */
+  /**
+   * The profiles this installation would recognise, for a given project.
+   *
+   * Built-ins plus whatever the chain defines, which is what a route needs
+   * before storing a name and what the board needs before offering one. Read
+   * per request rather than cached: a profile can be written while the daemon
+   * runs, and the next save should see it.
+   */
+  const profileNamesFor = (projectId?: string): ProfileNames => {
+    const chain = chains.for(projectId) ?? runtime.chain
+    const names = [...new Set(chain.scopes.flatMap((scope) => namesIn(scope, 'profile')))]
+    return {
+      names,
+      describe: (name) => resolveProfileDefinition(chain, name)?.value?.description || undefined,
+    }
+  }
+
+  const workflowNamesFor = (projectId?: string): readonly string[] => {
+    const chain = chains.for(projectId) ?? runtime.chain
+    // `namesIn` per scope rather than `listDefinitions`, which wants a parser:
+    // this needs the names, not the definitions, and parsing every workflow to
+    // answer "does this one exist" would be work nobody asked for.
+    return [...new Set(chain.scopes.flatMap((scope) => namesIn(scope, 'workflow')))]
+  }
+
+  /**
+   * What a task's reliability is right now.
+   *
+   * Assembled rather than stored — the newest assessment plus the drivers still
+   * active — and assembled *here*, so the task detail payload and the
+   * reliability routes cannot describe the same task differently. A stored
+   * column would be a third answer.
+   */
+  const reliabilitySummary = (taskId: string): ReliabilitySummary => {
+    const newest = reliability.newest(taskId)
+    const drivers = reliability.drivers(taskId)
+    const caps = (list: readonly ReliabilityDriver[]) =>
+      capsFor(list, DEFAULT_RELIABILITY_POLICY, [], [])
+    const attention = attentionSummary(drivers, newest?.score ?? 0, caps)
+    if (newest === undefined) return { taskId, state: 'unassessed', attention }
+
+    // Finished runs oldest first, which is the order staleness compares in.
+    const finished = [...runs.forTask(taskId)]
+      .reverse()
+      .filter((run) => run.state !== 'running')
+      .map((run) => run.id)
+    const stale = stalenessOf(newest, finished)
+
+    return {
+      taskId,
+      state: stale === undefined ? 'assessed' : 'stale',
+      score: newest.score,
+      rawScore: newest.rawScore,
+      coverage: newest.coverage,
+      delta: newest.delta,
+      dimensions: newest.dimensions,
+      caps: newest.caps,
+      assessedAt: newest.createdAt,
+      assessmentId: newest.id,
+      ...(stale === undefined ? {} : { staleReason: stale }),
+      attention,
+    }
+  }
+
   const workflow = (name: string, projectId?: string): WorkflowFacts | undefined => {
     const chain = chains.for(projectId) ?? runtime.chain
     const found = resolveWorkflow(chain, name)
@@ -317,6 +475,10 @@ export async function createService(
     tasks,
     runs,
     projects,
+    reliability,
+    reliabilitySummary,
+    workflowNames: workflowNamesFor,
+    profileNames: profileNamesFor,
     chains,
     workspace,
     engine,

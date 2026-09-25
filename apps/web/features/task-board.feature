@@ -387,6 +387,16 @@ Feature: The task board
       Then the page says a task needs a project
       And it offers to add a repository
 
+    Scenario: A refusal is shown at the top, not under the buttons
+      # The same reason the project form's banner moved. On a form with five
+      # fields and a workflow list, a message below all of them is off the
+      # screen at the moment it appears.
+      Given the daemon refuses the next task
+      When I open the new task page
+      And I try to create the task
+      Then the form says the task was refused
+      And it says so above the first field
+
     Scenario: Workflows keep the order they were added in
       Given the project defines the workflow "hello" that prints "hello"
       And the project defines the workflow "development"
@@ -1269,3 +1279,111 @@ Feature: The task board
       And I choose Full Access
       And I choose the default profile
       Then the page does not warn about Full Access
+
+  Rule: a task says how much to trust it, and what is still uncertain
+
+    "Is it done" is answered by the state. "How much should I trust that" was
+    the question this page could not answer at all.
+
+    Two numbers, always together: a 93 with 20% coverage is not the same claim
+    as a 93 with 96%, and showing only the first is how a confidence number
+    becomes flattery.
+
+    Scenario: A task nobody has judged says so rather than showing a zero
+      Given a task nobody has judged
+      When I open that task
+      Then the reliability card says it is not assessed
+      And it offers to assess it
+
+    Scenario: A judged task shows the score and the coverage together
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the reliability card shows 88
+      And it shows the coverage
+
+    Scenario: A fall is shown with an arrow, not with colour alone
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the card shows a downward arrow
+
+    Scenario: The breakdown is there for anybody who wants it
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      And I show the breakdown
+      Then every dimension is listed
+
+    Scenario: A ceiling says what applied it
+      Given a task capped at 70 by a critical risk
+      When I open that task
+      Then the card says what capped it
+
+    Scenario: A stale judgement says so
+      Given a task whose judgement is stale
+      When I open that task
+      Then the card says it is stale
+
+    Scenario: The card sits beside the work, not under it
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the reliability card is in the rail
+
+  Rule: the graph shows the score falling, because that is the useful part
+
+    A validation that finds a regression has learned something. A graph that
+    could only rise would hide the most valuable thing this feature produces.
+
+    Scenario: A history of several judgements is drawn
+      Given a task judged four times, the third lower than the second
+      When I open that task
+      Then the graph is drawn
+      And it has 4 points
+
+    Scenario: The fall is visible in the drawing
+      # Read off the geometry, not off a label: a point that fell is lower on
+      # the screen, and a graph that normalised that away would pass a test
+      # that only read the numbers back.
+      Given a task judged four times, the third lower than the second
+      When I open that task
+      Then the third point is below the second
+
+    Scenario: A point says why it moved
+      Given a task judged four times, the third lower than the second
+      When I look at the third point
+      Then it says what changed
+
+    Scenario: One judgement is not a graph
+      Given a task judged once
+      When I open that task
+      Then no graph is drawn
+
+  Rule: the drivers say who should deal with them
+
+    Scenario: A driver is listed with its owner
+      Given a task with a high driver the agent can resolve
+      When I open that task
+      Then the drivers list names it
+      And it says the agent can resolve it
+
+    Scenario: The worst thing is listed first
+      Given a task with a critical driver and a low one
+      When I open that task
+      Then the critical group comes before the low group
+
+    Scenario: A resolved driver moves out of the way
+      Given a task with a high driver the agent can resolve
+      When I resolve that driver
+      Then it is no longer in the list
+      And it is counted among the ones dealt with
+
+    Scenario: Accepting a risk asks why first
+      # An acceptance nobody explained is indistinguishable afterwards from one
+      # nobody meant.
+      Given a task with a high driver the agent can resolve
+      When I click to accept that risk
+      Then it asks why
+
+    Scenario: A task with nothing outstanding says so
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the drivers list is not drawn
+

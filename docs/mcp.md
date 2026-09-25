@@ -58,10 +58,18 @@ takes it back out.
 | `factory_workflow_create` | Write a workflow, or copy one that already exists — with `needs:` to chain it |
 | `factory_run_get` · `factory_run_logs` | What happened, and what it printed |
 | `factory_approval_list` | What is waiting for you |
+| `factory_reliability_get` · `_drivers` · `_history` | How much to trust a task, what is holding it back, and how it got here |
+| `factory_reliability_next_actions` | The highest-value thing to do next — `owner: "agent"` means you can do it |
+| `factory_reliability_resolve_driver` · `_accept_driver` | Say a finding stopped being true, or record that a risk is being lived with |
 
 **Queueing is what starts work, and cancelling is what stops it.** There is no run to start and
 none to cancel: a run is what Factory does with a queued task, and cancelling a task kills its
 process group. Both are `factory_task_act`.
+
+**No tool sets a reliability score**, and accepting a critical or high risk is refused for an
+agent — the daemon can tell, because Factory stamps the run into every agent process it launches.
+An acceptance an agent can grant itself is not a gate, which is the same reason approving is absent.
+Resolving is different and is offered: it is a claim evidence can check.
 
 **A task carries the actions it will accept.** The agent is told what a task can do right now and
 should use that rather than guess — the same list the board draws its buttons from.

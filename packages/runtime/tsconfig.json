@@ -11,6 +11,7 @@
     { "path": "../plugins/task-session" },
     { "path": "../plugins/task-diffity" },
     { "path": "../plugins/provider-codex" },
-    { "path": "../plugins/provider-copilot" }
+    { "path": "../plugins/provider-copilot" },
+    { "path": "../plugins/reliability-agent" }
   ]
 }

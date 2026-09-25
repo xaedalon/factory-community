@@ -1,6 +1,7 @@
 import type { Workflow } from './workflow.js'
 import type { Phase } from './phase.js'
 import type { Agent } from './agent.js'
+import type { Profile } from './profile.js'
 
 /**
  * The field tables.
@@ -58,6 +59,7 @@ export const WORKFLOW_FIELDS: readonly FieldSpec<Workflow>[] = [
   { yaml: 'conditions', from: 'conditions', emit: 'ifPresent' },
   { yaml: 'on_fail', from: 'onFail', emit: 'ifPresent' },
   { yaml: 'override', from: 'override', emit: 'ifPresent' },
+  { yaml: 'reliability', from: 'reliability', emit: 'ifPresent' },
   { yaml: 'phases', from: 'phases', emit: 'always' },
 ]
 
@@ -71,6 +73,19 @@ export const AGENT_FIELDS: readonly FieldSpec<Agent>[] = [
   { yaml: 'subagent', from: 'subagent', emit: 'ifPresent' },
   { yaml: 'session', from: 'session', emit: 'ifPresent' },
   { yaml: 'args', from: 'args', emit: 'ifNonEmpty' },
+]
+
+export const PROFILE_FIELDS: readonly FieldSpec<Profile>[] = [
+  { yaml: 'kind', from: 'kind', emit: 'ifPresent' },
+  { yaml: 'name', from: 'name', emit: 'always' },
+  { yaml: 'description', from: 'description', emit: 'ifNotDefault', fallback: '' },
+  // Written only when it is not the one permitted value, which today means
+  // never — but a file that says `extends: default` out loud keeps saying it,
+  // because the unchanged check leaves what an author wrote on purpose alone.
+  { yaml: 'extends', from: 'extends', emit: 'ifNotDefault', fallback: 'default' },
+  { yaml: 'commands', from: 'commands', emit: 'ifNonEmpty' },
+  { yaml: 'deny_commands', from: 'denyCommands', emit: 'ifNonEmpty' },
+  { yaml: 'providers', from: 'providers', emit: 'ifNonEmpty' },
 ]
 
 export const PHASE_FIELDS: readonly FieldSpec<Phase>[] = [
@@ -115,4 +130,5 @@ export const FIELD_TABLES = {
   workflow: WORKFLOW_FIELDS,
   phase: PHASE_FIELDS,
   agent: AGENT_FIELDS,
+  profile: PROFILE_FIELDS,
 } as const satisfies Record<string, readonly FieldSpec<never>[]>

@@ -351,9 +351,27 @@ Feature: Projects — the repositories Factory works in
       # a boundary, and a project nobody can load is worse than a lost grant.
       Then it has granted no directories
 
-    Scenario: A profile edited by hand into nonsense reads as unstated
+    Scenario: A profile the store does not recognise is kept, not discarded
+      # Changed when custom profiles arrived, and it is a change for the safer.
+      # The store cannot know what is defined — that needs a scope chain it does
+      # not have — so a name it does not recognise used to read as *unstated*,
+      # which means inheriting the installation's profile. A project that had
+      # asked for something particular would quietly run under something else.
+      #
+      # The name is kept now, and the guard moved to the two places that can
+      # actually answer: the route refuses an unknown name before storing it,
+      # and planning refuses to run a profile no scope defines. A row edited by
+      # hand into nonsense therefore stops the work loudly instead of loosening
+      # it silently.
       Given the project "factory" exists
       And its profile column says "sort-of-safe"
+      Then its profile is "sort-of-safe"
+
+    Scenario: A blank profile column still reads as unstated
+      # Empty is absence, which is a real answer and the one every project
+      # starts from.
+      Given the project "factory" exists
+      And its profile column says ""
       Then it states no profile
 
   Rule: the database refuses it too, not only the repository
@@ -500,3 +518,68 @@ Feature: Projects — the repositories Factory works in
       When I rename it to "factory-core"
       Then the project's check command is "pnpm test"
 
+  Rule: a project says which model judges its work, and whether one does at all
+
+    The deterministic evaluator is free and always runs. An agent evaluator
+    costs tokens on every run that produced something, and the model worth
+    spending them on is not the same in a weekend project and in a payments
+    service — so it is the project's choice, not the installation's and not a
+    constant in the source.
+
+    Absent means "nobody has said", which is not the same as "off". A project
+    that has never chosen has no agent evaluator; a project that has switched
+    judging off has none either, and the difference matters because only one of
+    them starts working the moment a model is named.
+
+    Scenario: A new project has no judging model
+      When I add the project "factory" at that directory
+      Then the project names no judging model
+
+    Scenario: A judging model can be chosen
+      Given the project "factory" exists
+      When I set its judging model to "claude-opus-5-5"
+      Then the project's judging model is "claude-opus-5-5"
+
+    Scenario: Whitespace around it is not part of the model
+      Given the project "factory" exists
+      When I set its judging model to "  claude-opus-5-5  "
+      Then the project's judging model is "claude-opus-5-5"
+
+    Scenario: A blank model clears it
+      Given the project "factory" exists
+      And its judging model is "claude-opus-5-5"
+      When I set its judging model to "   "
+      Then the project names no judging model
+
+    Scenario: A model edited to blank by hand reads as unset
+      Given the project "factory" exists
+      And its judging model column is edited by hand to "   "
+      Then the project names no judging model
+
+    Scenario: Judging is on until somebody turns it off
+      When I add the project "factory" at that directory
+      Then the project is judged
+
+    Scenario: Judging can be turned off
+      Given the project "factory" exists
+      When I stop its work being judged
+      Then the project is not judged
+
+    Scenario: Turning judging off keeps the model that was chosen
+      # So switching it back on does not silently cost nothing: the choice is
+      # still there, and turning it on is one click rather than two decisions.
+      Given the project "factory" exists
+      And its judging model is "claude-opus-5-5"
+      When I stop its work being judged
+      Then the project's judging model is "claude-opus-5-5"
+
+    Scenario: Choosing a model is announced
+      Given the project "factory" exists
+      When I set its judging model to "claude-opus-5-5"
+      Then a "project.changed" event says so
+
+    Scenario: The choice survives a rename
+      Given the project "factory" exists
+      And its judging model is "claude-opus-5-5"
+      When I rename it to "factory-core"
+      Then the project's judging model is "claude-opus-5-5"

@@ -31,6 +31,17 @@ report full of ticks for work it had not done. A profile that breaks `npm test`
 on an unfamiliar repository is a profile everyone turns off on their first
 afternoon.
 
+**The list is not the only thing that decides.** Claude Code auto-approves *read-only* commands
+whatever the list says, so an agent under this profile can already run `git status`, `cat` a file in
+the repository and `find` its way around. What the list governs is commands with a side effect —
+which is why `cargo`, `make`, `go` and `docker` are refused and `pnpm` is not.
+[`providers.md`](providers.md) has the measurements.
+
+**If this list is not enough, write a profile rather than reaching for Full
+Access.** A custom profile adds commands to this one and changes nothing else —
+the boundary, the credential filter and the directory grants all still apply.
+[`profiles.md`](profiles.md) is how.
+
 It is worth being exact about what the list costs. `pnpm test` runs your
 project's own code and `pnpm exec` runs anything, so **inside those commands the
 workspace boundary does not hold.** That is why the list is package managers and
@@ -55,6 +66,13 @@ attempt — it is not on the list and will not be.
   setting changed and nothing said. It is refused at plan time now, naming the
   argument. What counts is derived from each provider's own Full Access flags,
   so it stays true as descriptors change.
+
+  The refusal also shows **what this profile already passes for that flag**,
+  because the common case is not somebody reaching for authority. It is somebody
+  told that a step needs `args: ['--allowedTools', 'Bash(pnpm *)']` to run
+  `pnpm` — which it does not, and which would *replace* the list above rather
+  than add to it, since `--allowedTools` is variadic. Seeing the granted list
+  makes the answer obvious: delete the line.
 
 When something is withheld, the run says so against the step that lost it —
 names only, never values. When an agent is refused something, the refusal is

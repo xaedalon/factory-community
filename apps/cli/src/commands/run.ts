@@ -30,6 +30,15 @@ export interface RunFlags {
   readonly workspace?: string
   readonly provider?: string
   /**
+   * Which profile to run under.
+   *
+   * A foreground run has no project, so there is nothing to read a profile
+   * from — the installation's is what it would otherwise get. Naming one here
+   * is how somebody tries a profile they have just written before setting it on
+   * a project, and `--dry-run` shows the argv it produces.
+   */
+  readonly profile?: string
+  /**
    * What the run is about.
    *
    * Any workflow that mentions `{{ task.* }}` needs this, and until the Task
@@ -73,6 +82,7 @@ export async function run(
     // `started: false` because it has plainly never existed before now.
     session: { id: randomUUID(), started: false },
     ...(flags.provider === undefined ? {} : { defaultProvider: flags.provider }),
+    ...(flags.profile === undefined ? {} : { profile: flags.profile }),
     ...(flags.task === undefined ? {} : { task: flags.task }),
   })
 

@@ -2,6 +2,10 @@ import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
 import fc from 'fast-check'
+import {
+  RELIABILITY_DIMENSIONS,
+  type ReliabilityDimension,
+} from '../src/reliability/model.js'
 import { EventBus } from '@factory/events'
 import { CapabilityHost } from '../src/host.js'
 import { builtinStepsPlugin } from '../src/builtins/steps.js'
@@ -86,6 +90,19 @@ const workflowArb: fc.Arbitrary<Workflow> = fc
     needs: fc.array(slugArb, { maxLength: 3 }),
     onFail: fc.option(slugArb, { nil: undefined }),
     override: fc.option(fc.constant('required' as const), { nil: undefined }),
+    // Optional in the schema, so both shapes are generated: an absent block
+    // must stay absent through a save, the same property `conditions` has.
+    reliability: fc.option(
+      fc.record({
+        contributes: fc.array(
+          fc.constantFrom(...(RELIABILITY_DIMENSIONS as readonly ReliabilityDimension[])),
+          { maxLength: 3 },
+        ),
+        expected_evidence: fc.array(slugArb, { maxLength: 3 }),
+        evaluate_after_run: fc.option(fc.boolean(), { nil: undefined }),
+      }),
+      { nil: undefined },
+    ),
     phases: fc.array(slugArb, { maxLength: 4 }),
   })
   .map((value) => {

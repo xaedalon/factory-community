@@ -3,6 +3,7 @@ import type { Capability } from '../capabilities.js'
 import type { CapabilityLookup } from '../host.js'
 import type { Problem } from '../problems.js'
 import type { ExecutionProfile } from '../security/profile.js'
+import type { Profile } from './profile.js'
 import type { DenialPattern } from '../security/denials.js'
 import type { StreamReaderFactory } from '../providers/stream.js'
 import { closedWithExtensions, problemsFromZod, slug } from './common.js'
@@ -71,6 +72,14 @@ export interface PlanStepContext {
    * command can ignore it.
    */
   readonly profile?: ExecutionProfile
+  /**
+   * The profile's definition, when the profile is a custom one.
+   *
+   * What a kind rendering a command for something else needs in order to honour
+   * it: the profile's name says *which*, and this says *what*. Absent under a
+   * built-in, and a kind that runs its own command can ignore it.
+   */
+  readonly profileDefinition?: Profile
   /**
    * Directories outside `cwd` this step may reach, as the project granted them.
    *

@@ -15,10 +15,15 @@ import {
   type ProviderCapability,
   type RenderRequest,
 } from '../providers/capability.js'
-import { profileWideningArgs } from '../providers/descriptor.js'
-import { DEFAULT_PROFILE } from '../security/profile.js'
+import {
+  permissionArgsFor,
+  profileWideningArgs,
+  type ProviderDescriptor,
+} from '../providers/descriptor.js'
+import { DEFAULT_PROFILE, type ExecutionProfile } from '../security/profile.js'
 import { worktreeStepKind } from './worktree.js'
 import type { Problem } from '../problems.js'
+import { grantsFor } from '../schema/profile.js'
 import { MODEL_ROLES, type ModelRole } from '../model-roles.js'
 import { artifactFile, artifactsRoot, joinPath } from '../task/paths.js'
 
@@ -201,15 +206,19 @@ export const agentStepKind: StepKindCapability = defineStepKind({
       agent.args ?? [],
     )
     if (widening.length > 0) {
+      const profile = context.profile ?? DEFAULT_PROFILE
       return {
         problems: [
           {
             severity: 'error',
             message:
               `This step passes ${widening.map((argument) => `"${argument}"`).join(', ')} to ` +
-              `${chosen.provider.id}, which would give it more authority than the ` +
-              `${context.profile ?? DEFAULT_PROFILE} profile allows. Run this project under Full ` +
-              `Access if it needs that, rather than asking for it one argument at a time.`,
+              `${chosen.provider.id}, which decides authority rather than asking for it: ` +
+              `arguments are appended after the flags that confine the agent, so the ` +
+              `${profile} profile refuses them. ` +
+              alreadyPassed(chosen.provider.descriptor, profile, widening) +
+              `Run the command in a \`shell\` step, which an agent's allow-list does not govern, ` +
+              `or run this project under Full Access if the agent itself needs it.`,
             field: 'args',
             rule: 'plan.argsWidenProfile',
           } satisfies Problem,
@@ -239,6 +248,11 @@ export const agentStepKind: StepKindCapability = defineStepKind({
       allowedDirectories: [
         ...new Set([artifactsRootFor(context), ...(context.allowedDirectories ?? [])]),
       ],
+      // What a custom profile adds, narrowed to the provider that is about to
+      // run. Absent under a built-in, where it is a no-op anyway.
+      ...(context.profileDefinition === undefined
+        ? {}
+        : { grants: grantsFor(context.profileDefinition, chosen.provider.id) }),
     }
     const rendered = chosen.provider.render(request)
 
@@ -422,6 +436,45 @@ function chooseProvider(
       `(${installed.map((p) => p.id).sort().join(', ')}). Set "provider:" on the step, or a ` +
       `default in the scope configuration.`,
     'plan.ambiguousProvider',
+  )
+}
+
+/**
+ * What the profile already passes for the flags a step tried to pass itself.
+ *
+ * Reported because the common case is not somebody reaching for authority: it
+ * is somebody told — by a stale note, or by an agent that read a measurement
+ * table as an instruction — that a step needs `--allowedTools 'Bash(pnpm *)'`
+ * to run pnpm. The Default profile has passed exactly that since the package
+ * managers were measured, and `--allowedTools` is variadic, so the step's copy
+ * would have *replaced* the list rather than added to it.
+ *
+ * A refusal that only says "more authority" and points at Full Access sends
+ * that person at the most dangerous lever in the building, when the answer is
+ * to delete the line. So: show what is granted, and let them see their own
+ * entry in it.
+ *
+ * Empty when the profile passes nothing for that flag — `--permission-mode` is
+ * not in the Default profile's arguments at all, and inventing a line for it
+ * would be worse than saying nothing.
+ */
+function alreadyPassed(
+  descriptor: ProviderDescriptor,
+  profile: ExecutionProfile,
+  widening: readonly string[],
+): string {
+  const passed = permissionArgsFor(descriptor, profile)
+  const shown: string[] = []
+  for (const flag of widening) {
+    const at = passed.indexOf(flag)
+    if (at === -1) continue
+    const value = passed[at + 1]
+    shown.push(value === undefined || value.startsWith('--') ? flag : `${flag} '${value}'`)
+  }
+  if (shown.length === 0) return ''
+  return (
+    `The ${profile} profile already passes ${shown.join(', ')} — ` +
+    `if that covers what this step needs, remove the argument. `
   )
 }
 

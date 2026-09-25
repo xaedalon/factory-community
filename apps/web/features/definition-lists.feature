@@ -59,3 +59,78 @@ Feature: Seeing what is installed
     Given the daemon is not running
     When I open the workflows page
     Then the page says it cannot reach the daemon
+
+  Rule: a profile is edited like anything else, and says what it cannot do
+
+    A profile is a definition, so it gets the same list, the same editor and the
+    same YAML preview. What it needs beyond that is honesty about two things the
+    file cannot say for itself: that a command may already be allowed, and that a
+    provider may be unable to honour the list at all.
+
+    Scenario: Profiles are listed
+      Given the project defines the profile "development"
+      When I open the profiles page
+      Then the profile "development" is listed
+
+    Scenario: The page says where a profile is used
+      # Somebody wrote one and looked for a way to attach it to an agent or a
+      # phase. There is none, on purpose — so the page that writes a profile has
+      # to say where it is chosen, or the feature is unreachable by anyone who
+      # has not read the docs.
+      When I open the new profile page
+      Then it says a profile is chosen on a project
+
+    Scenario: A profile can be written from the page
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      And I save it
+      Then the profile "buildtools" is listed
+
+    Scenario: The YAML preview shows what would be written
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      And I look at the YAML
+      Then the preview says "name: buildtools"
+      And the preview says "cargo"
+
+    Scenario: Allowing an interpreter warns before it is saved
+      # The parser warns too, but by then the decision is made. This is said
+      # while it is being typed.
+      When I open the new profile page
+      And I name it "risky"
+      And I allow the command "node"
+      Then it warns that the command runs whatever it is given
+
+    Scenario: A provider that cannot allow one command is named
+      # The Rule above promises this honesty and nothing tested it. Codex
+      # expresses no command list at all, so an Allow entry never reaches it —
+      # invisibly, unless the page says which providers are missing it.
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      Then it names a provider that cannot allow one command
+
+    Scenario: A provider that cannot forbid one command is named too
+      # Denying is a separate question with a separate answer, and the page had
+      # no note for it: a denial written for a CLI with no deny-list was taken in
+      # silence. The denial is the half somebody writes *because* they are being
+      # careful, so it is the worse one to lose quietly.
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "git"
+      And I deny the command "git push"
+      Then it names a provider that cannot forbid one command
+
+    Scenario: Denying nothing says nothing about deny-lists
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "git"
+      Then it says nothing about deny-lists
+
+    Scenario: An ordinary build tool does not warn
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      Then it does not warn

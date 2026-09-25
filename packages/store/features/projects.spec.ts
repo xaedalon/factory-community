@@ -658,13 +658,19 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('it has granted no directories', noGrants)
     })
 
-    RuleScenario('A profile edited by hand into nonsense reads as unstated', ({
+    RuleScenario('A profile the store does not recognise is kept, not discarded', ({
       Given,
       And,
       Then,
     }) => {
       Given('the project "factory" exists', exists)
       And('its profile column says "sort-of-safe"', columnSays('profile', 'sort-of-safe'))
+      Then('its profile is "sort-of-safe"', () => expect(project?.profile).toBe('sort-of-safe'))
+    })
+
+    RuleScenario('A blank profile column still reads as unstated', ({ Given, And, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its profile column says ""', columnSays('profile', ''))
       Then('it states no profile', unstated)
     })
   })
@@ -900,6 +906,109 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         }),
       )
       Then('the project\'s check command is "pnpm test"', is('pnpm test'))
+    })
+  })
+
+  Rule('a project says which model judges its work, and whether one does at all', ({
+    RuleScenario,
+  }) => {
+    const exists = (): void => add('factory')
+    const setModel = (model: string | undefined) => (): void =>
+      attempt(() => {
+        project = projects.setReliabilityModel((project as Project).id, model)
+      })
+    const namesNone = (): void => expect(project?.reliabilityModel).toBeUndefined()
+    const is = (model: string) => (): void => expect(project?.reliabilityModel).toBe(model)
+
+    RuleScenario('A new project has no judging model', ({ When, Then }) => {
+      When('I add the project "factory" at that directory', exists)
+      Then('the project names no judging model', namesNone)
+    })
+
+    RuleScenario('A judging model can be chosen', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its judging model to "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      Then('the project\'s judging model is "claude-opus-5-5"', is('claude-opus-5-5'))
+    })
+
+    RuleScenario('Whitespace around it is not part of the model', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its judging model to "  claude-opus-5-5  "', setModel('  claude-opus-5-5  '))
+      Then('the project\'s judging model is "claude-opus-5-5"', is('claude-opus-5-5'))
+    })
+
+    RuleScenario('A blank model clears it', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging model is "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      When('I set its judging model to "   "', setModel('   '))
+      Then('the project names no judging model', namesNone)
+    })
+
+    RuleScenario('A model edited to blank by hand reads as unset', ({ Given, And, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging model column is edited by hand to "   "', () => {
+        store.db.run(
+          'UPDATE projects SET reliability_model = ? WHERE id = ?',
+          '   ',
+          (project as Project).id,
+        )
+        project = projects.get((project as Project).id)
+      })
+      Then('the project names no judging model', namesNone)
+    })
+
+    RuleScenario('Judging is on until somebody turns it off', ({ When, Then }) => {
+      When('I add the project "factory" at that directory', exists)
+      Then('the project is judged', () => {
+        expect(project?.reliabilityEnabled).toBe(true)
+      })
+    })
+
+    RuleScenario('Judging can be turned off', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I stop its work being judged', () =>
+        attempt(() => {
+          project = projects.setReliabilityEnabled((project as Project).id, false)
+        }),
+      )
+      Then('the project is not judged', () => {
+        expect(project?.reliabilityEnabled).toBe(false)
+      })
+    })
+
+    RuleScenario('Turning judging off keeps the model that was chosen', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging model is "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      When('I stop its work being judged', () =>
+        attempt(() => {
+          project = projects.setReliabilityEnabled((project as Project).id, false)
+        }),
+      )
+      Then('the project\'s judging model is "claude-opus-5-5"', is('claude-opus-5-5'))
+    })
+
+    RuleScenario('Choosing a model is announced', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its judging model to "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      Then('a "project.changed" event says so', () =>
+        expect(events.filter((event) => event.name === 'project.changed')).not.toHaveLength(0),
+      )
+    })
+
+    RuleScenario('The choice survives a rename', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging model is "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      When('I rename it to "factory-core"', () =>
+        attempt(() => {
+          project = projects.rename((project as Project).id, 'factory-core')
+        }),
+      )
+      Then('the project\'s judging model is "claude-opus-5-5"', is('claude-opus-5-5'))
     })
   })
 })

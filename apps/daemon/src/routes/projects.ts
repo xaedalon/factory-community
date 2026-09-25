@@ -11,7 +11,7 @@ import {
   PROJECT_TONES,
   detectCheckCommand,
   hasAccepted,
-  isExecutionProfile,
+  isKnownProfile,
   queueOrder,
   type ProjectFileReader,
 } from '@factory/core'
@@ -286,6 +286,8 @@ export function registerProjectRoutes(
       usesEnvironments?: boolean
       profile?: unknown
       check?: unknown
+      reliabilityModel?: unknown
+      reliabilityEnabled?: unknown
     }
   }>('/api/projects/:id', async (request, reply) => {
     if (projects.get(request.params.id) === undefined) {
@@ -299,6 +301,9 @@ export function registerProjectRoutes(
     const settingInitials = 'initials' in (request.body ?? {})
     // Present-and-blank clears it, so "in the body" is the question here too.
     const settingCheck = 'check' in (request.body ?? {})
+    // Present-and-null clears the model, the way the check command does.
+    const settingModel = 'reliabilityModel' in (request.body ?? {})
+    const judging = request.body?.reliabilityEnabled
     if (
       name === undefined &&
       defaultBranch === undefined &&
@@ -307,13 +312,16 @@ export function registerProjectRoutes(
       !settingProfile &&
       !settingTone &&
       !settingInitials &&
-      !settingCheck
+      !settingCheck &&
+      !settingModel &&
+      judging === undefined
     ) {
       return reply.code(400).send({
         error:
           'Send { name } or { defaultBranch } to change what the project is called or where ' +
           'work starts, { usesWorktrees } or { usesEnvironments }, true or false, ' +
           '{ check } for the command that verifies its work, ' +
+          '{ reliabilityModel } or { reliabilityEnabled } to say how its work is judged, ' +
           'or { profile } to say how much authority its runs get.',
       })
     }
@@ -347,9 +355,15 @@ export function registerProjectRoutes(
     // `null` clears it, which is not the same as `default`: a project that
     // states nothing follows the installation's choice, and returning to that
     // has to be expressible.
-    if (settingProfile && profile !== null && !isExecutionProfile(profile)) {
+    // A built-in, or a profile this project's chain defines. An unknown name is
+    // refused rather than stored: read back later as "not stated" it would
+    // silently loosen a project that had asked to be confined.
+    if (settingProfile && profile !== null && !isKnownProfile(profile, service.profileNames(request.params.id))) {
+      const known = service.profileNames(request.params.id).names
       return reply.code(400).send({
-        error: `profile is ${EXECUTION_PROFILES.join(', ')} or null to follow the installation.`,
+        error:
+          `profile is ${[...EXECUTION_PROFILES, ...known].join(', ')} or null to follow the ` +
+          `installation.`,
       })
     }
     if (
@@ -362,6 +376,19 @@ export function registerProjectRoutes(
       return reply
         .code(400)
         .send({ error: 'check is the command that verifies this project, or null to clear it.' })
+    }
+    if (
+      settingModel &&
+      request.body.reliabilityModel !== null &&
+      typeof request.body.reliabilityModel !== 'string'
+    ) {
+      return reply.code(400).send({
+        error:
+          'reliabilityModel is the model that judges this project, or null so nothing does.',
+      })
+    }
+    if (judging !== undefined && typeof judging !== 'boolean') {
+      return reply.code(400).send({ error: 'Settings are true or false.' })
     }
 
     try {
@@ -400,6 +427,15 @@ export function registerProjectRoutes(
           request.params.id,
           (request.body.check as string | null) ?? undefined,
         )
+      }
+      if (settingModel) {
+        project = projects.setReliabilityModel(
+          request.params.id,
+          (request.body.reliabilityModel as string | null) ?? undefined,
+        )
+      }
+      if (judging !== undefined) {
+        project = projects.setReliabilityEnabled(request.params.id, judging)
       }
       if (settingProfile) {
         // Nothing is scaffolded for a profile: it changes what the next run is

@@ -410,6 +410,43 @@ Feature: Definitions become a runnable plan
       When the workflow "design" is planned
       Then planning succeeds
 
+  Rule: a project runs under the profile it names, or refuses to plan
+
+    A profile is a definition, so it can be missing — and a missing one must not
+    quietly become Default. A project that asked to run under `development` and
+    silently ran under something else is the failure the stored-profile guard
+    already exists to stop, one layer up.
+
+    Scenario: A named profile's commands reach the agent's command line
+      Given the project scope defines the profile "development" allowing "cargo"
+      And the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned under the profile "development"
+      Then planning succeeds
+      And the step's command allows "Bash(cargo *)"
+      And the step's command still confines it
+
+    Scenario: A profile no scope defines refuses to plan
+      Given the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned under the profile "nowhere"
+      Then planning fails
+      And a problem says no scope defines that profile
+      And the problem says Factory will not fall back
+
+    Scenario: A profile that does not parse refuses to plan, and says why
+      Given the project scope defines the profile "broken" with an unknown key
+      And the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned under the profile "broken"
+      Then planning fails
+
+    Scenario: The built-in profiles need no definition
+      Given the project scope defines a phase "build" with an agent step
+      And the project scope defines a workflow "building" with the phase "build"
+      When the workflow "building" is planned
+      Then planning succeeds
+
   Rule: a step cannot argue its way past the profile it runs under
 
     `args:` is appended to the rendered command *after* the permission
@@ -439,6 +476,35 @@ Feature: Definitions become a runnable plan
       When the workflow "building" is planned
       Then planning fails
       And a problem says the step asks for more authority than the profile allows
+
+    Scenario: The refusal says what the profile already passes for that flag
+      # Reported from a real run: an agent told somebody the README required
+      # `args: ['--allowedTools', 'Bash(pnpm *)']` to make pnpm work. It did
+      # not — the Default profile has passed exactly that since the package
+      # managers were measured, and `--allowedTools` is variadic, so the step's
+      # copy would have *replaced* the list and dropped npm, yarn and bun.
+      #
+      # The refusal said "more authority" and pointed at Full Access, which is
+      # the most dangerous lever in the building and the wrong one here. It has
+      # to show what is already granted, because for this argument the answer is
+      # usually "delete the line".
+      Given the project scope defines a phase "eager" passing "--allowedTools Bash(pnpm *)"
+      And the project scope defines a workflow "build" with the phase "eager"
+      When the workflow "build" is planned
+      Then planning fails
+      And the problem names the flag the step passed
+      And the problem shows what the profile already passes for it
+      And the problem says a shell step is not governed by that list
+
+    Scenario: A flag the profile passes nothing for is refused without a suggestion
+      # `--dangerously-skip-permissions` is forbidden and is in none of the
+      # profile's own arguments, so there is nothing to show and nothing to
+      # delete. Inventing a line for it would be worse than saying nothing.
+      Given the project scope defines a phase "reckless" passing "--dangerously-skip-permissions"
+      And the project scope defines a workflow "review" with the phase "reckless"
+      When the workflow "review" is planned
+      Then planning fails
+      And the problem does not claim the profile already passes it
 
     Scenario: Under Full Access the same step plans
       # There is no boundary left to widen, and the profile was chosen

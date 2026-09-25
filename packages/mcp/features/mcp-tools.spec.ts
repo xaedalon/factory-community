@@ -25,6 +25,7 @@ const aProject = (name: string, id: string): Project => ({
   usesWorktrees: true,
   usesEnvironments: false,
   grantedDirectories: [],
+  reliabilityEnabled: true,
   createdAt: '2026-01-01T00:00:00Z',
 })
 
@@ -44,6 +45,8 @@ const aTask = (name: string, projectId: string, state: TaskState = 'draft'): Tas
 describeFeature(feature, ({ Background, Rule }) => {
   let factory: FakeFactory
   let answer: Record<string, unknown>
+  /** What a tool's own schema said about an input, before anything was sent. */
+  let parsed: ReturnType<McpTool['parse']>
   let failure: ToolError | undefined
   let tasks: Task[]
 
@@ -771,6 +774,196 @@ describeFeature(feature, ({ Background, Rule }) => {
         known('SELF_ORCHESTRATION_BLOCKED'),
       )
       And('"APPROVAL_SEPARATION" is a code this surface knows', known('APPROVAL_SEPARATION'))
+    })
+  })
+
+  Rule('an agent can ask what it is allowed to work on next', ({ RuleScenario }) => {
+    const summary = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+      state: 'assessed',
+      score: 88,
+      rawScore: 88,
+      coverage: 70,
+      delta: -2,
+      dimensions: { design: 90 },
+      caps: [],
+      attention: { agent: 2, developer: 1, either: 0, external: 0, potential: {} },
+      ...over,
+    })
+    const judged = (reliability: Record<string, unknown>) => (): void => {
+      factory.answer('/api/tasks/task-add-due-dates/reliability', { reliability })
+    }
+    const ask = () => call('factory_reliability_get', { task: 'task-add-due-dates' })
+
+    RuleScenario('A task nobody has judged says so rather than scoring zero', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a task nobody has judged', judged({ state: 'unassessed', attention: { agent: 0, developer: 0, either: 0, external: 0, potential: {} } }))
+      When('the agent asks how reliable it is', ask)
+      Then('it comes back "unassessed"', () => expect(answer['state']).toBe('unassessed'))
+      And('it carries no score', () => expect(answer['score']).toBeUndefined())
+      And('it says how to get one', () => expect(String(answer['next'])).toContain('assess'))
+    })
+
+    RuleScenario('A judged task comes back with what is waiting for whom', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a task judged at 88 with two agent drivers and one for a developer', judged(summary()))
+      When('the agent asks how reliable it is', ask)
+      Then('the score is 88', () => expect(answer['score']).toBe(88))
+      And("it says 2 are the agent's", () =>
+        expect((answer['needsAttention'] as { agent: number }).agent).toBe(2),
+      )
+      And('it says 1 needs a developer', () =>
+        expect((answer['needsAttention'] as { developer: number }).developer).toBe(1),
+      )
+    })
+
+    RuleScenario('The reply says to ask what to do next', ({ Given, When, Then }) => {
+      Given('a task judged at 88 with two agent drivers and one for a developer', judged(summary()))
+      When('the agent asks how reliable it is', ask)
+      Then('it points at the next actions', () =>
+        expect(String(answer['next'])).toContain('factory_reliability_next_actions'),
+      )
+    })
+
+    RuleScenario('Nothing outstanding says so plainly', ({ Given, When, Then }) => {
+      Given('a task judged at 98 with nothing outstanding', judged(
+        summary({ score: 98, attention: { agent: 0, developer: 0, either: 0, external: 0, potential: {} } }),
+      ))
+      When('the agent asks how reliable it is', ask)
+      Then('it says nothing is outstanding', () =>
+        expect(String(answer['next'])).toContain('Nothing is outstanding'),
+      )
+    })
+  })
+
+  Rule('an agent may say a finding stopped being true, not that it does not matter', ({
+    RuleScenario,
+  }) => {
+    const driver = {
+      id: 'driver-1',
+      title: 'checkout regression',
+      description: '',
+      type: 'regression',
+      severity: 'high',
+      status: 'resolved',
+      owner: 'agent',
+      dimension: 'regressionSafety',
+      scoreImpact: -3,
+    }
+    const willAnswer = (action: string) => (): void => {
+      factory.answer(`/api/tasks/task-add-due-dates/reliability/drivers/driver-1/${action}`, {
+        driver,
+        reliability: {
+          state: 'assessed',
+          score: 91,
+          rawScore: 91,
+          coverage: 70,
+          attention: { agent: 0, developer: 0, either: 0, external: 0, potential: {} },
+        },
+      })
+    }
+    const sentWith = (action: string): { initiator?: unknown } =>
+      sentTo(
+        `POST /api/tasks/task-add-due-dates/reliability/drivers/driver-1/${action}`,
+      ) as { initiator?: unknown }
+
+    /**
+     * Called as an agent Factory launched, which is the case that matters.
+     *
+     * The initiator is not self-reported: it comes from the environment Factory
+     * stamped into the process. This drives the tool with one, because a tool
+     * that dropped it would leave the daemon unable to tell an agent from a
+     * person — and the refusal depends entirely on that.
+     */
+    const asAgent = async (name: string, input: Record<string, unknown>): Promise<void> => {
+      const tool = factoryTools.find((candidate) => candidate.name === name) as McpTool
+      const value = tool.parse(input)
+      if ('problems' in value) throw new Error(value.problems.join('; '))
+      await tool.run(value.value, {
+        api: factory,
+        cwd: CWD,
+        env: {},
+        initiator: { label: 'claude', runId: 'run-1', taskId: 'task-1' },
+      })
+    }
+
+    RuleScenario('Resolving carries the run the agent is inside', ({ Given, When, Then }) => {
+      Given('a task with a driver', willAnswer('resolve'))
+      When('the agent resolves it', () =>
+        asAgent('factory_reliability_resolve_driver', {
+          task: 'task-add-due-dates',
+          driver: 'driver-1',
+        }),
+      )
+      Then('the daemon was told which run asked', () =>
+        expect(sentWith('resolve').initiator).toBeDefined(),
+      )
+    })
+
+    RuleScenario('Accepting carries it too, so the daemon can refuse', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a task with a driver', willAnswer('accept'))
+      When('the agent accepts it', () =>
+        asAgent('factory_reliability_accept_driver', {
+          task: 'task-add-due-dates',
+          driver: 'driver-1',
+          reason: 'out of support',
+        }),
+      )
+      Then('the daemon was told which run asked', () =>
+        expect(sentWith('accept').initiator).toBeDefined(),
+      )
+    })
+
+    RuleScenario('Accepting demands a reason', ({ When, Then }) => {
+      When('the agent tries to accept a driver without a reason', () => {
+        const tool = factoryTools.find(
+          (candidate) => candidate.name === 'factory_reliability_accept_driver',
+        ) as McpTool
+        parsed = tool.parse({ task: 'task-add-due-dates', driver: 'driver-1' })
+      })
+      // Refused by the schema, before anything is sent — the cheapest possible
+      // place for it and the one an agent cannot talk its way past.
+      Then('the call is refused before it is sent', () => expect('problems' in parsed).toBe(true))
+    })
+  })
+
+  Rule('no tool sets a score', ({ RuleScenario }) => {
+    RuleScenario('There is no tool that sets a score', ({ Then, And }) => {
+      // Not "it refuses" — a tool that does not exist is a stronger guarantee
+      // than one that says no, and this is the rule the whole subsystem turns
+      // on.
+      Then('no tool is named "factory_reliability_set"', () =>
+        expect(factoryTools.map((tool) => tool.name)).not.toContain('factory_reliability_set'),
+      )
+      And('no tool takes a score', () => {
+        for (const tool of factoryTools) {
+          const schema = JSON.stringify(tool.inputSchema)
+          expect(schema, tool.name).not.toContain('"score"')
+        }
+      })
+    })
+
+    RuleScenario('The reliability tools are read-first', ({ Then }) => {
+      Then('4 of the reliability tools only read', () => {
+        const reliability = factoryTools.filter((tool) =>
+          tool.name.startsWith('factory_reliability_'),
+        )
+        const reads = reliability.filter(
+          (tool) => !tool.name.includes('resolve') && !tool.name.includes('accept'),
+        )
+        expect(reads).toHaveLength(4)
+      })
     })
   })
 })

@@ -45,6 +45,26 @@ const branch = ref('main')
  * is added, from what is actually in the repository.
  */
 const check = ref('')
+/**
+ * The model that reads this project's work, when one does.
+ *
+ * Blank means nobody has said, and nobody having said means no agent evaluator
+ * — not a default chosen here. Spending somebody's tokens on a model they never
+ * named is the one thing this field exists to prevent.
+ */
+/**
+ * The profiles this project could run under.
+ *
+ * The two Factory ships plus whatever the chain defines, read from the daemon
+ * rather than written here: a list in the page would go stale the moment
+ * somebody wrote a profile, and offering a name the daemon would refuse is
+ * worse than not offering it.
+ */
+const definedProfiles = ref<string[]>([])
+const profileOptions = computed(() => ['default', 'full-access', ...definedProfiles.value])
+
+const judgeModel = ref('')
+const judged = ref(true)
 const usesWorktrees = ref(true)
 const usesEnvironments = ref(false)
 const profile = ref('')
@@ -99,6 +119,8 @@ async function load(): Promise<void> {
     path.value = found.path
     branch.value = found.defaultBranch
     check.value = found.check ?? ''
+    judgeModel.value = found.reliabilityModel ?? ''
+    judged.value = found.reliabilityEnabled !== false
     usesWorktrees.value = found.usesWorktrees
     usesEnvironments.value = found.usesEnvironments
     profile.value = found.profile ?? ''
@@ -122,6 +144,51 @@ const cannotUseWorktrees = computed(() => loaded.value !== undefined && !loaded.
 watch(cannotUseWorktrees, (blocked) => {
   if (blocked) usesWorktrees.value = false
 })
+
+/**
+ * Take the reliability pipeline into this project.
+ *
+ * Reads the bundle Factory ships and posts it back through the ordinary import
+ * route — the same door a person's own file goes through, so there is one
+ * implementation of importing and one set of conflict rules. Only offered for a
+ * project that exists: there is nowhere to write it until then.
+ */
+/** The bundle being imported, so only its own button says so. */
+const importing = ref('')
+const imported = ref<string[]>([])
+
+/**
+ * The bundles Factory ships, offered by name rather than one hard-coded button.
+ *
+ * It was `importReliability()` and a button that said so, which worked until a
+ * second bundle shipped. Read from the daemon, so a bundle added later needs no
+ * change here — and so the counts beside each one are the file's rather than a
+ * sentence somebody remembered to update.
+ */
+const shipped = ref<{ name: string; description?: string; profiles: number }[]>([])
+
+async function importShipped(name: string): Promise<void> {
+  if (isNew.value) return
+  importing.value = name
+  error.value = undefined
+  fieldErrors.value.bundles = undefined
+  try {
+    const bundle = await api.exampleBundle(name)
+    const result = await api.importBundle(bundle.text, {
+      scope: 'project',
+      dryRun: false,
+      project: id.value as string,
+    })
+    imported.value = result.written ?? []
+  } catch (caught) {
+    // Against the control that caused it, not in the form's banner: this
+    // failure is about one button, and a message at the other end of a long
+    // form reads as unrelated to it.
+    fieldErrors.value.bundles = caught instanceof ApiError ? caught.message : String(caught)
+  } finally {
+    importing.value = ''
+  }
+}
 
 async function save(): Promise<void> {
   error.value = undefined
@@ -160,6 +227,8 @@ async function save(): Promise<void> {
       tone: tone.value ?? null,
       initials: letters.value ?? null,
       check: check.value.trim() === '' ? null : check.value.trim(),
+      reliabilityModel: judgeModel.value.trim() === '' ? null : judgeModel.value.trim(),
+      reliabilityEnabled: judged.value,
     })
     // A scaffold *error* is a reason to stay: it is about this form, and the
     // person is mid-edit. A scaffold *report* is a result, and travels.
@@ -212,7 +281,32 @@ const canSave = computed(
   () => name.value.trim() !== '' && (isNew.value ? path.value.trim() !== '' : true),
 )
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // **Asked of this project's chain**, not the daemon's. A profile written into
+  // a repository lives in that repository's scope, so listing without the
+  // project id finds the daemon's own scopes and reports nothing — which is
+  // exactly what happened: a profile sitting in the project's `profiles/`
+  // directory, valid, selected in the database, and absent from the picker that
+  // is supposed to offer it.
+  //
+  // Never fatal: the picker still offers the two built-ins, which is what every
+  // installation has. A profile list that could not be read is a smaller
+  // problem than a page that will not open.
+  try {
+    const listed = isNew.value
+      ? await api.list('profile')
+      : await api.list('profile', id.value as string)
+    definedProfiles.value = listed.items.map((item) => item.name)
+  } catch {
+    definedProfiles.value = []
+  }
+  try {
+    shipped.value = (await api.exampleBundles()).items
+  } catch {
+    shipped.value = []
+  }
+})
 </script>
 
 <template>
@@ -237,6 +331,21 @@ onMounted(load)
 
   <div class="px-8 py-6">
     <form class="max-w-2xl" data-testid="project-form" @submit.prevent="save">
+      <!-- At the top, not at the foot. A failure that belongs to no single box
+           goes where the form begins: below every field it is off the screen on
+           a form this long, and a message nobody sees is a message that did not
+           happen. What *does* belong to a box is rendered under that box by
+           `FieldRow`, which is why this banner is the exception rather than the
+           rule. -->
+      <p
+        v-if="error"
+        class="mb-5 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
+        data-testid="error"
+      >
+        <AppIcon name="alert" class="mt-0.5" />
+        {{ error }}
+      </p>
+
       <div v-if="!isNew && loaded" class="mb-5 flex items-center gap-3">
         <span
           class="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-medium text-white"
@@ -305,6 +414,55 @@ onMounted(load)
       </FieldRow>
 
       <FieldRow
+        v-if="!isNew && shipped.length > 0"
+        label="Add to this repo"
+        icon="import"
+        :error="fieldErrors.bundles"
+        hint="Definitions Factory ships, copied into this repository where you can edit them. They go in through the ordinary import, so what lands is what a preview would have shown."
+      >
+        <div>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="bundle in shipped"
+              :key="bundle.name"
+              type="button"
+              class="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm text-[var(--color-ink)] hover:bg-[var(--color-raised)] disabled:opacity-60"
+              :data-testid="`import-${bundle.name}`"
+              :title="bundle.description"
+              :disabled="importing !== ''"
+              @click="importShipped(bundle.name)"
+            >
+              {{ importing === bundle.name ? 'Importing…' : bundle.name }}
+            </button>
+          </div>
+          <!-- A profile is not a workflow, and importing one does not make a
+               project use it: it has to be chosen below. Said here because the
+               button looks like it finished the job. -->
+          <p
+            v-if="shipped.some((bundle) => bundle.profiles > 0)"
+            class="mt-1.5 text-xs text-[var(--color-ink-faint)]"
+          >
+            A bundle carrying a profile only writes the file. Choose it under
+            &ldquo;Runs under&rdquo; to use it.
+          </p>
+          <!-- The files, not a count. Factory has just written into somebody's
+               working copy, and the next thing that happens is a `git status`
+               they were not expecting — the same reason the scaffold report
+               below names every path. -->
+          <div
+            v-if="imported.length > 0"
+            class="mt-1.5 text-meta text-[var(--color-ink-muted)]"
+            data-testid="import-bundle-done"
+          >
+            <p>Written into this repository:</p>
+            <ul class="mt-0.5 space-y-0.5">
+              <li v-for="file in imported" :key="file" class="font-mono text-xs">{{ file }}</li>
+            </ul>
+          </div>
+        </div>
+      </FieldRow>
+
+      <FieldRow
         label="Checked by"
         icon="check"
         for="project-check"
@@ -316,6 +474,22 @@ onMounted(load)
           mono
           data-testid="project-check"
           placeholder="pnpm test"
+        />
+      </FieldRow>
+
+      <FieldRow
+        v-if="!isNew"
+        label="Judged by"
+        icon="check"
+        for="project-judge-model"
+        hint="The model that reads the work and says what is still uncertain. Left empty, nothing reads it — Factory still judges every run from what it observed, which costs nothing. Passed to whichever agent CLI is installed, so name a model that one understands."
+      >
+        <TextInput
+          id="project-judge-model"
+          v-model="judgeModel"
+          mono
+          data-testid="project-judge-model"
+          placeholder="claude-opus-5-5"
         />
       </FieldRow>
 
@@ -335,6 +509,15 @@ onMounted(load)
         <p class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
           How work runs here
         </p>
+
+        <ToggleField
+          v-model="judged"
+          label="Judge this project's work"
+          icon="check"
+          data-testid="project-judged-field"
+          when-on="Every run is scored on what Factory observed, and the task says how much to trust it."
+          when-off="Nothing is judged here. Existing history is kept."
+        />
 
         <ToggleField
           v-model="usesWorktrees"
@@ -376,7 +559,7 @@ onMounted(load)
             data-testid="project-profile"
             allow-empty
             empty-label="Follows the installation"
-            :options="['default', 'full-access']"
+            :options="profileOptions"
           />
           <p
             v-if="profile === 'full-access'"
@@ -389,15 +572,6 @@ onMounted(load)
           </p>
         </FieldRow>
       </div>
-
-      <p
-        v-if="error"
-        class="mt-5 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
-        data-testid="error"
-      >
-        <AppIcon name="alert" class="mt-0.5" />
-        {{ error }}
-      </p>
 
       <!-- Factory has just written into a working copy. Say which files,
            because the next thing that happens is a `git status` nobody was

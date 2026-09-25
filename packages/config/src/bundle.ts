@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml'
-import type { Agent, CapabilityLookup, Phase, Problem, Workflow } from '@factory/core'
+import type { Agent, CapabilityLookup, Phase, Problem, Profile, Workflow } from '@factory/core'
 import {
   BUNDLE_KIND,
   buildBundle,
@@ -9,10 +9,12 @@ import {
   parseAgentFile,
   parseBundleEnvelope,
   parsePhaseFile,
+  parseProfileFile,
   parseWorkflowFile,
   planImport,
   writeNewAgent,
   writeNewPhase,
+  writeNewProfile,
   writeNewWorkflow,
   type Bundle,
   type ConflictPolicy,
@@ -108,6 +110,7 @@ export function readBundle(text: string, host: CapabilityLookup, file?: string):
   const workflows: Workflow[] = []
   const phases: Phase[] = []
   const agents: Agent[] = []
+  const profiles: Profile[] = []
 
   // Definitions inside a bundle go through the same schemas as definitions on
   // disk. A bundle is an untrusted document from somewhere else; it does not
@@ -127,6 +130,11 @@ export function readBundle(text: string, host: CapabilityLookup, file?: string):
     collected.push(...prefix(parsed.problems, `agents.${index}`))
     if (parsed.value !== undefined) agents.push(parsed.value)
   })
+  envelope.profiles.forEach((entry, index) => {
+    const parsed = parseProfileFile(stringifyYaml(entry), file)
+    collected.push(...prefix(parsed.problems, `profiles.${index}`))
+    if (parsed.value !== undefined) profiles.push(parsed.value)
+  })
 
   if (collected.some((problem) => problem.severity === 'error')) return { problems: collected }
 
@@ -141,10 +149,11 @@ export function readBundle(text: string, host: CapabilityLookup, file?: string):
         sourceScope: envelope.metadata?.sourceScope ?? '',
         unresolved: envelope.metadata?.unresolved ?? [],
       },
-      entry: envelope.entry,
+      ...(envelope.entry === undefined ? {} : { entry: envelope.entry }),
       workflows,
       phases,
       agents,
+      profiles,
     },
     problems: collected,
   }
@@ -219,6 +228,8 @@ export function importBundle(options: ApplyOptions): ApplyResult {
       phase: () =>
         writeNewPhase(plan.phases.find((p) => p.name === item.targetName) as Phase, options.host),
       agent: () => writeNewAgent(plan.agents.find((a) => a.name === item.targetName) as Agent),
+      profile: () =>
+        writeNewProfile(plan.profiles.find((p) => p.name === item.targetName) as Profile),
     }
     const text = writers[item.kind]()
 

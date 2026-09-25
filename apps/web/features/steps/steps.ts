@@ -2235,3 +2235,470 @@ Then('{string} cannot be chosen to wait for', async ({ page }, name: string) => 
     0,
   )
 })
+
+/** The task these scenarios judged, so the navigation steps can find it. */
+let judged = ''
+
+/* ---- reliability ---------------------------------------------------- */
+
+Given('a task nobody has judged', async ({ world }) => {
+  await world.startDaemon()
+  judged = await world.createTask('Add due dates', [])
+})
+
+Given('a task judged at 88 with 70% coverage', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: -3, workflow: 'validate' }])
+  judged = id
+})
+
+Given('a task capped at 70 by a critical risk', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [
+    {
+      score: 70,
+      coverage: 70,
+      delta: -20,
+      workflow: 'validate',
+      caps: [{ type: 'criticalOpenDriver', value: 70, reason: 'A critical risk is still open.' }],
+    },
+  ])
+  judged = id
+})
+
+Given('a task whose judgement is stale', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  // The assessment considered a run that no longer is the newest, which is what
+  // staleness means — derived, never stored. So both runs have to exist: the
+  // one it looked at, and the one that finished after it.
+  const considered = await world.finishedRun(id, 'validate')
+  await world.judge(id, [
+    { score: 88, coverage: 70, delta: 0, workflow: 'validate', consideredRunId: considered },
+  ])
+  await world.finishedRun(id, 'verify')
+  judged = id
+})
+
+Given('a task judged four times, the third lower than the second', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [
+    { score: 70, coverage: 30, delta: 70, workflow: 'analysis' },
+    { score: 84, coverage: 60, delta: 14, workflow: 'implement' },
+    { score: 76, coverage: 85, delta: -8, workflow: 'validate', causes: [{ summary: 'checkout regression', amount: -8 }] },
+    { score: 92, coverage: 100, delta: 16, workflow: 'verify' },
+  ])
+  judged = id
+})
+
+Given('a task judged once', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: 88, workflow: 'analysis' }])
+  judged = id
+})
+
+Given('a task with a high driver the agent can resolve', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: 0, workflow: 'validate' }])
+  await world.addDriver(id, { title: 'checkout regression', severity: 'high', owner: 'agent' })
+  judged = id
+})
+
+Given('a task with a critical driver and a low one', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 70, coverage: 70, delta: 0, workflow: 'validate' }])
+  await world.addDriver(id, { title: 'a low note', severity: 'low', owner: 'agent' })
+  await world.addDriver(id, { title: 'unsafe redirect', severity: 'critical', owner: 'developer' })
+  judged = id
+})
+
+When('I open that task', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await expect(page.getByTestId('reliability-card')).toBeVisible()
+})
+
+When('I show the breakdown', async ({ page }) => {
+  await page.getByTestId('reliability-breakdown-toggle').click()
+})
+
+When('I look at the third point', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-point-2').hover()
+})
+
+When('I resolve that driver', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-drivers').getByRole('button', { name: 'Resolved' }).click()
+})
+
+When('I click to accept that risk', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-drivers').getByRole('button', { name: 'Accept the risk' }).click()
+})
+
+Then('the reliability card says it is not assessed', async ({ page }) => {
+  await expect(page.getByTestId('reliability-unassessed')).toBeVisible()
+})
+
+Then('it offers to assess it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-assess')).toBeVisible()
+})
+
+Then('the reliability card shows 88', async ({ page }) => {
+  await expect(page.getByTestId('reliability-score')).toHaveText('88')
+})
+
+Then('it shows the coverage', async ({ page }) => {
+  await expect(page.getByTestId('reliability-coverage')).toContainText('70%')
+})
+
+Then('the card shows a downward arrow', async ({ page }) => {
+  // The arrow, not the colour: this has to read for somebody who cannot tell
+  // red from green.
+  await expect(page.getByTestId('reliability-delta')).toContainText('↓')
+})
+
+Then('every dimension is listed', async ({ page }) => {
+  const breakdown = page.getByTestId('reliability-breakdown')
+  await expect(breakdown).toBeVisible()
+  await expect(breakdown.locator('dt')).toHaveCount(6)
+})
+
+Then('the card says what capped it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-cap')).toContainText('critical risk is still open')
+})
+
+Then('the card says it is stale', async ({ page }) => {
+  await expect(page.getByTestId('reliability-stale')).toBeVisible()
+})
+
+Then('the reliability card is in the rail', async ({ page }) => {
+  // Geometry, the way `the facts sit beside the work` reads it: the card is to
+  // the right of the plan and roughly level with it.
+  const card = await page.getByTestId('reliability-card').boundingBox()
+  const plan = await page.getByTestId('task-plan').boundingBox()
+  expect(card).not.toBeNull()
+  expect(plan).not.toBeNull()
+  expect((card as { x: number }).x).toBeGreaterThan((plan as { x: number }).x)
+})
+
+Then('the graph is drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-graph')).toBeVisible()
+  await expect(page.getByTestId('reliability-line')).toBeVisible()
+})
+
+Then('it has {int} points', async ({ page }, count: number) => {
+  await expect(page.getByTestId('reliability-graph').locator('circle')).toHaveCount(count)
+})
+
+Then('the third point is below the second', async ({ page }) => {
+  // On screen, in pixels. A graph that normalised a fall away would pass a
+  // check that only read the numbers back.
+  const second = await page.getByTestId('reliability-point-1').boundingBox()
+  const third = await page.getByTestId('reliability-point-2').boundingBox()
+  expect(second).not.toBeNull()
+  expect(third).not.toBeNull()
+  expect((third as { y: number }).y).toBeGreaterThan((second as { y: number }).y)
+})
+
+Then('it says what changed', async ({ page }) => {
+  await expect(page.getByTestId('reliability-causes')).toContainText('checkout regression')
+})
+
+Then('no graph is drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-graph')).toHaveCount(0)
+})
+
+Then('the drivers list names it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toContainText('checkout regression')
+})
+
+Then('it says the agent can resolve it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toContainText('the agent can resolve this')
+})
+
+Then('the critical group comes before the low group', async ({ page }) => {
+  const critical = await page.getByTestId('reliability-group-critical').boundingBox()
+  const low = await page.getByTestId('reliability-group-low').boundingBox()
+  expect(critical).not.toBeNull()
+  expect(low).not.toBeNull()
+  expect((critical as { y: number }).y).toBeLessThan((low as { y: number }).y)
+})
+
+Then('it is no longer in the list', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers-empty')).toBeVisible()
+})
+
+Then('it is counted among the ones dealt with', async ({ page }) => {
+  await expect(page.getByTestId('reliability-settled')).toContainText('1 already dealt with')
+})
+
+Then('it asks why', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers').locator('input')).toBeVisible()
+})
+
+Then('the drivers list is not drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toHaveCount(0)
+})
+
+/* ---- the bundles Factory ships, and who judges a project ------------- */
+
+/** The project these scenarios open. Registered, not the suite's default one. */
+let settingsProject = ''
+/** Its directory, so a definition can be written into that repository's own scope. */
+let settingsRepo = ''
+
+Given('a project', async ({ world }) => {
+  await world.startDaemon()
+  settingsRepo = world.makeRepository('judged')
+  settingsProject = await world.addProject('judged', settingsRepo)
+})
+
+When("I open that project's settings", async ({ page }) => {
+  await page.goto(`/projects/${settingsProject}`)
+  await expect(page.getByTestId('save-project')).toBeVisible()
+})
+
+Then('it offers to add the reliability workflows', async ({ page }) => {
+  await expect(page.getByTestId('import-reliability')).toBeVisible()
+})
+
+Then('it offers to add the build tools profile', async ({ page }) => {
+  await expect(page.getByTestId('import-build-tools')).toBeVisible()
+})
+
+When('I add the reliability workflows', async ({ page }) => {
+  await page.getByTestId('import-reliability').click()
+})
+
+Then('it says what was written', async ({ page }) => {
+  await expect(page.getByTestId('import-bundle-done')).toBeVisible()
+})
+
+Then('the workflow {string} is in the project', async ({ page }, name: string) => {
+  // Read off what the page says was written, not off the workflows list: the
+  // list shows the daemon's own chain, and this landed in the project's scope —
+  // which is the whole point of importing it against a project.
+  await expect(page.getByTestId('import-bundle-done')).toContainText(`${name}.workflow.yaml`)
+})
+
+Then('no judging model is named', async ({ page }) => {
+  await expect(page.getByTestId('project-judge-model')).toHaveValue('')
+})
+
+When('I name {string} as the judging model', async ({ page }, model: string) => {
+  await page.getByTestId('project-judge-model').fill(model)
+})
+
+When('I save the project', async ({ page }) => {
+  await page.getByTestId('save-project').click()
+  await expect(page).toHaveURL(/\/projects$/)
+})
+
+Then('the judging model is {string}', async ({ page }, model: string) => {
+  await expect(page.getByTestId('project-judge-model')).toHaveValue(model)
+})
+
+/* ---- what a failure looks like, and where ---------------------------- */
+
+Given('the daemon refuses to hand over the bundle', async ({ page }) => {
+  await page.route('**/api/bundles/examples/*', (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'The bundle could not be read.' }),
+    }),
+  )
+})
+
+Given('the daemon answers that request with a page instead of JSON', async ({ page }) => {
+  // Exactly what an older daemon did: its catch-all served the board's own
+  // shell for an API path it did not know, with a 200 on it.
+  await page.route('**/api/bundles/examples/*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><title>Factory</title><div id="app"></div>',
+    }),
+  )
+})
+
+Given('the daemon refuses the next save', async ({ page }) => {
+  await page.route('**/api/projects/*', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'The daemon could not write that.' }),
+        })
+      : route.continue(),
+  )
+})
+
+Then('the field says what went wrong', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('could not be read')
+})
+
+Then("the form's banner says nothing", async ({ page }) => {
+  await expect(page.getByTestId('error')).toHaveCount(0)
+})
+
+Then('the field says the daemon was not understood', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('not JSON')
+})
+
+Then('it names the request that failed', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('/api/bundles/examples/')
+})
+
+When('I try to save the project', async ({ page }) => {
+  // Deliberately not the step above: that one waits for the list, and a save
+  // that is refused never gets there. A scenario about a refusal must not
+  // depend on the success path's navigation.
+  await page.getByTestId('save-project').click()
+})
+
+Then('the form says what went wrong', async ({ page }) => {
+  await expect(page.getByTestId('error')).toContainText('could not write that')
+})
+
+Then('it says so above the first field', async ({ page }) => {
+  // Geometry, the way the rail is read, and against whichever form is open:
+  // the banner sits above that form's first box, so it is on the screen when
+  // the button that produced it is. Asking the page for "the first input" rather
+  // than naming one keeps this step usable by every form.
+  const banner = await page.getByTestId('error').boundingBox()
+  const first = await page.locator('form input').first().boundingBox()
+  expect(banner).not.toBeNull()
+  expect(first).not.toBeNull()
+  expect((banner as { y: number }).y).toBeLessThan((first as { y: number }).y)
+})
+
+Given('the daemon refuses the next task', async ({ page }) => {
+  await page.route('**/api/tasks', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'The daemon could not make that task.' }),
+        })
+      : route.continue(),
+  )
+})
+
+When('I try to create the task', async ({ page }) => {
+  await page.getByTestId('task-name').fill('Add due dates')
+  await page.getByTestId('create-task').click()
+})
+
+Then('the form says the task was refused', async ({ page }) => {
+  await expect(page.getByTestId('error')).toContainText('could not make that task')
+})
+
+/* ---- profiles ------------------------------------------------------- */
+
+Given('the project defines the profile {string}', async ({ world }, name: string) => {
+  world.profile(
+    world.projectScope,
+    name,
+    `kind: factory.profile/v1\nname: ${name}\ncommands: [cargo]\n`,
+  )
+})
+
+When('I open the profiles page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/profiles')
+})
+
+Then('the profile {string} is listed', async ({ page }, name: string) => {
+  await expect(page.getByTestId(`row-${name}`)).toBeVisible()
+})
+
+When('I open the new profile page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/profiles/new')
+})
+
+When('I name it {string}', async ({ page }, name: string) => {
+  await page.locator('#pr-name').fill(name)
+})
+
+When('I allow the command {string}', async ({ page }, command: string) => {
+  // Typed into the draft box, then added — the list editor keeps the two apart
+  // so an unfinished entry is never part of the value.
+  await page.getByTestId('profile-commands-input').fill(command)
+  await page.getByTestId('profile-commands-add').click()
+})
+
+When('I save it', async ({ page }) => {
+  await page.getByTestId('save').click()
+  await expect(page).toHaveURL(/\/profiles$/)
+})
+
+When('I look at the YAML', async ({ page }) => {
+  await page.getByTestId('view-yaml').click()
+})
+
+Then('the preview says {string}', async ({ page }, text: string) => {
+  await expect(page.getByTestId('yaml-preview')).toContainText(text)
+})
+
+Then('it warns that the command runs whatever it is given', async ({ page }) => {
+  await expect(page.getByTestId('profile-interpreter-warning')).toBeVisible()
+})
+
+Then('it does not warn', async ({ page }) => {
+  await expect(page.getByTestId('profile-interpreter-warning')).toHaveCount(0)
+})
+
+When('I deny the command {string}', async ({ page }, command: string) => {
+  await page.getByTestId('profile-deny-commands-input').fill(command)
+  await page.getByTestId('profile-deny-commands-add').click()
+})
+
+Then('it names a provider that cannot allow one command', async ({ page }) => {
+  await expect(page.getByTestId('profile-unsupported')).toBeVisible()
+})
+
+Then('it names a provider that cannot forbid one command', async ({ page }) => {
+  await expect(page.getByTestId('profile-deny-unsupported')).toBeVisible()
+})
+
+Then('it says nothing about deny-lists', async ({ page }) => {
+  await expect(page.getByTestId('profile-deny-unsupported')).toHaveCount(0)
+})
+
+When('I add the build tools profile', async ({ page }) => {
+  await page.getByTestId('import-build-tools').click()
+})
+
+Then('the profile {string} is in the project', async ({ page }, name: string) => {
+  await expect(page.getByTestId('import-bundle-done')).toContainText(`${name}.profile.yaml`)
+})
+
+Then('it says a profile is chosen on a project', async ({ page }) => {
+  const said = page.getByTestId('profile-how-to-use')
+  await expect(said).toBeVisible()
+  await expect(said).toContainText('Authority')
+})
+
+Given('that project defines the profile {string}', async ({ world }, name: string) => {
+  // Into the *project's* own scope, which is the whole point of the scenario:
+  // a profile in the daemon's scopes would pass for the wrong reason.
+  world.profile(
+    `${settingsRepo}/.xaedalon/.factory`,
+    name,
+    `kind: factory.profile/v1\nname: ${name}\ncommands: [cargo]\n`,
+  )
+})
+
+Then('{string} can be chosen as the authority', async ({ page }, name: string) => {
+  const options = page.locator('[data-testid="project-profile"] option')
+  await expect(options.filter({ hasText: name }).first()).toHaveCount(1)
+})

@@ -2,6 +2,7 @@ import type { McpTool } from '../tool.js'
 import { projectTools } from './projects.js'
 import { taskReadTools } from './tasks.js'
 import { definitionTools } from './definitions.js'
+import { reliabilityTools } from './reliability.js'
 import { runTools } from './runs.js'
 import { mutationTools } from './mutations.js'
 
@@ -17,6 +18,7 @@ export const factoryTools: readonly McpTool[] = [
   ...definitionTools,
   ...taskReadTools,
   ...runTools,
+  ...reliabilityTools,
   ...mutationTools,
 ]
 

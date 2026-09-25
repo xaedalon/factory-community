@@ -1,16 +1,30 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Agent, CapabilityLookup, HookRegistry, Phase, Problem, Workflow } from '@factory/core'
+import type {
+  Agent,
+  CapabilityLookup,
+  HookRegistry,
+  Phase,
+  Problem,
+  Profile,
+  ProviderCapability,
+  Workflow,
+} from '@factory/core'
 import {
+  PROVIDER_KIND,
   parseAgentFile,
   parsePhaseFile,
+  parseProfileFile,
   parseWorkflowFile,
+  profileProblems,
   updateExistingAgent,
   updateExistingPhase,
+  updateExistingProfile,
   updateExistingWorkflow,
   writeNewAgent,
   writeNewPhase,
+  writeNewProfile,
   writeNewWorkflow,
 } from '@factory/core'
 import type { ScopeChain, ScopeKind } from './scopes.js'
@@ -44,7 +58,7 @@ export interface WriteRequest {
    */
   readonly hooks?: HookRegistry
   readonly kind: DefinitionKind
-  readonly definition: Workflow | Phase | Agent
+  readonly definition: Workflow | Phase | Agent | Profile
   readonly scope?: ScopeKind
   /**
    * The etag the caller last read. When it no longer matches, the file changed
@@ -87,6 +101,22 @@ export async function writeDefinition(request: WriteRequest): Promise<WriteOutco
   // is still read back below: a hook that adjusts a definition into something
   // Factory cannot load is refused by the same check that catches a bad client.
   let definition = request.definition
+
+  // A profile is the one kind whose validity depends on what is *installed*:
+  // whether its arguments would reach Full Access is a question about each
+  // provider's own flags. `parseProfile` has no host on purpose — a profile
+  // names providers and none of them has to be present for it to be written
+  // down — so the check happens here, where the host is, and before a plugin
+  // is asked to adjust something that is going to be refused anyway.
+  if (kind === 'profile') {
+    const providers = request.host
+      .list<ProviderCapability>(PROVIDER_KIND)
+      .map((entry) => entry.capability.descriptor)
+    const problems = profileProblems(definition as Profile, providers, { file })
+    const refusals = problems.filter((problem) => problem.severity === 'error')
+    if (refusals.length > 0) return { status: 'refused', problems: refusals }
+  }
+
   if (request.hooks !== undefined) {
     const problems = (
       await request.hooks.collect('validateDefinition', {
@@ -132,6 +162,11 @@ export async function writeDefinition(request: WriteRequest): Promise<WriteOutco
       write: () => writeNewAgent(definition as Agent),
       patch: (raw) => updateExistingAgent(raw, definition as Agent),
       read: (text) => parseAgentFile(text, file),
+    },
+    profile: {
+      write: () => writeNewProfile(definition as Profile),
+      patch: (raw) => updateExistingProfile(raw, definition as Profile),
+      read: (text) => parseProfileFile(text, file),
     },
   }
   const handler = handlers[kind]

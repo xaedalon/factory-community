@@ -114,10 +114,11 @@ came up" from "it came up too slowly" without re-running anything.
 
 ## 6. `git.feature` fails under a saturated machine, and it is the deadline
 
-Seen four times — twice on 2026-09-24 and twice more on 2026-09-25, each time in
+Seen six times — twice on 2026-09-24 and four times on 2026-09-25, each time in
 a full `pnpm test` (60 workers) and each time passing when the file is run alone.
-The two later sightings both came in the run immediately after a six-minute
-Playwright suite, which is the load this deadline cannot survive:
+Several came in the run immediately after a six-minute Playwright suite, which is
+the load this deadline cannot survive, but the latest did not — so the trigger is
+machine load generally rather than that suite in particular:
 
 ```
 FAIL  packages/core/features/git.spec.ts > A question with an answer
@@ -204,3 +205,30 @@ was clean.
 
 **Shape of the fix:** add `build/`, `release/` and `test-results/` to the ESLint
 config's `ignores`, so the two ignore lists agree about what is not ours.
+
+## 11. Copilot has a reasoning-effort flag and the descriptor says it has none
+
+`packages/plugins/provider-copilot/provider.yaml` carries the comment "No effort
+setting; a phase that sets one gets a doctor warning rather than silently having
+it ignored", and declares no `effortFlag`. Measured against GitHub Copilot CLI
+1.0.89-1 on 2026-09-25, `copilot --help` says otherwise:
+
+```text
+--reasoning-effort <level>
+    Set the reasoning effort level
+    [possible values: none, minimal, low, medium, high, xhigh, max]
+```
+
+Two consequences, and the second is new. A phase or agent that sets an effort for
+Copilot is warned it will be ignored — which is now wrong advice. And the
+reliability judge, which reads the same `effortFlag` through
+`checkProviderSettings`, both warns wrongly *and* drops the effort a project
+chose, so a Copilot judge always thinks at whatever the CLI defaults to.
+
+**Shape of the fix:** `effortFlag: '--reasoning-effort'` and the seven
+`effortValues` above, then delete the comment. Wants one end-to-end measurement
+first — that the flag is accepted with `-p` and not only interactively — because
+this descriptor has been wrong in the other direction before: two configurations
+read correctly in `--help` and did nothing, which is why
+`docs/security/providers.md` has a section called "Configurations that read
+correctly and did not work".

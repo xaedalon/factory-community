@@ -1680,6 +1680,7 @@ this repository does not contain.
 | `packages/core/features/reliability-scoring.feature` | Weights, ceilings, coverage, deltas, and why a validation that finds something lowers the score and raises coverage at once |
 | `packages/core/features/reliability-drivers.feature` | Findings: the one table of moves, who owns each, what may be resolved and what only a person may accept |
 | `packages/core/features/reliability-evaluator.feature` | The authority boundary: what an evaluator may say, what `normalize` refuses, and the score field that does not exist |
+| `packages/core/features/judge.feature` | Which agent reads the work: project over installation, field by field |
 | `packages/plugins/reliability-agent/features/reliability-agent.feature` | The agent evaluator: when it declines, what it is asked, how an answer is read, and that a score cannot be smuggled through it |
 | `packages/store/features/reliability.feature` | The three tables: append-only history, driver lifecycle, and a hand-edited row that degrades rather than making a task unloadable |
 | `packages/engine/features/reliability.feature` | Judging after a run: every verdict judged, a failed assessment that does not fail the run, what a declaration refines, and staleness derived rather than stored |

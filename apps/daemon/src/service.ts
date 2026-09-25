@@ -274,6 +274,12 @@ export async function createService(
       const evaluators = runtime.host
         .list<ReliabilityEvaluatorCapability>(RELIABILITY_EVALUATOR_KIND)
         .map((entry) => entry.capability)
+      const judge = agentFor({
+        runtime,
+        project,
+        profile: profileFor(task),
+        cwd: project?.path,
+      })
       const outcome = await assessReliability({
         taskId,
         task: { name: task.name, description: task.description },
@@ -295,17 +301,13 @@ export async function createService(
         // Absent unless this project chose a model and a CLI is installed to
         // run it. That is the whole of the cost control: the free evaluator
         // always runs, and the one that spends money runs when somebody said so.
-        ...(() => {
-          const agent = agentFor({
-            runtime,
-            project,
-            profile: profileFor(task),
-            cwd: project?.path,
-          })
-          return agent === undefined ? {} : { agent }
-        })(),
+        ...(judge.agent === undefined ? {} : { agent: judge.agent }),
       })
-      return outcome.problems
+      // The judge's own problems ride out beside the assessment's, through the
+      // channel `reliability.evaluatorFailed` already uses: a project whose
+      // named CLI is not installed has to hear about it somewhere, and a run
+      // that succeeded is not the place to refuse.
+      return [...outcome.problems, ...judge.problems]
     },
   })
 

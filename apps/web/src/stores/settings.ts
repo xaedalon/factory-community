@@ -229,6 +229,30 @@ export const useSettings = defineStore('settings', () => {
     }
   }
 
+  /** What reads the work, for a project that has not said. Empty is a real answer. */
+  const judge = computed(() => settings.value?.reliability ?? {})
+
+  /**
+   * Name, or clear, part of the installation's judge.
+   *
+   * `null` clears one. Shaped like `setProfile` and for the same reason: the
+   * page changes one thing and the store is the only place that knows the patch
+   * shape.
+   */
+  async function setJudge(patch: {
+    provider?: string | null
+    model?: string | null
+    effort?: string | null
+  }): Promise<void> {
+    try {
+      const answer = await api.saveSettings({ reliability: patch })
+      settings.value = answer.settings
+      error.value = undefined
+    } catch (caught) {
+      error.value = caught instanceof ApiError ? caught.message : String(caught)
+    }
+  }
+
   /**
    * Was this refusal the disclaimer, and if so, show it.
    *
@@ -274,6 +298,8 @@ export const useSettings = defineStore('settings', () => {
     setScale,
     setTheme,
     setProfile,
+    judge,
+    setJudge,
     accept,
     dismiss,
     handledRefusal,

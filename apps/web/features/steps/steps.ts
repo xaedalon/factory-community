@@ -2602,6 +2602,29 @@ When('I save the project', async ({ page }) => {
   await expect(page).toHaveURL(/\/projects$/)
 })
 
+When('I choose {string} as the judging agent', async ({ page }, provider: string) => {
+  await page.getByTestId('project-judge-provider').selectOption(provider)
+})
+
+Then('the judging agent is {string}', async ({ page }, provider: string) => {
+  await expect(page.getByTestId('project-judge-provider')).toHaveValue(provider)
+})
+
+Then('{string} is offered as a judging model', async ({ page }, model: string) => {
+  // The datalist the combo offers, which carries the chosen provider's own model
+  // roles and ids rather than a list written on this page. Options have a value
+  // and no text, so this reads the attribute.
+  const values = await page
+    .getByTestId('project-judge-model-options')
+    .locator('option')
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLOptionElement).value))
+  expect(values).toContain(model)
+})
+
+Then("it says that agent's command was not found", async ({ page }) => {
+  await expect(page.getByTestId('project-judge-provider-unavailable')).toBeVisible()
+})
+
 Then('the judging model is {string}', async ({ page }, model: string) => {
   await expect(page.getByTestId('project-judge-model')).toHaveValue(model)
 })

@@ -62,6 +62,25 @@ missing. An interpreter warns, names the measurement, and
 then lets you, because the risk is the repository owner's to take.
 [`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
 
+**You choose the agent that judges your work, not just its model.** Factory used whichever provider
+CLI happened to be registered first and available, and passed no effort at all — the one place that
+did not honour bring-your-own-AI. Now the installation names an agent, a model and an effort, and a
+project overrides any of the three on its own page.
+
+Inherited **field by field**, never as a trio: a project that had named a model keeps it and inherits
+the provider, which a whole-trio rule would have quietly stopped judging. Nothing is defaulted in
+Factory's source at either level, because a model named there would spend your tokens on a decision
+you never made.
+
+*If it cannot be asked:* a named CLI whose command is missing means no judgement and one warning, and
+Factory does **not** quietly ask a different one — honouring two thirds of the trio would ask Claude
+for a Codex model id. An effort a CLI has no flag for is ignored and says so, the same warning an
+agent step already gets. Nothing named anywhere behaves exactly as before.
+
+**A setting can now be cleared.** `null` in a settings patch removes a value; `undefined` still
+leaves it alone. Until now every setting had a default so there was nothing to un-set — an
+installation default nobody can un-set is a default they cannot stop paying for.
+
 **A task row says how much to trust it.** The score and the evidence coverage, together — a 93 with
 41% coverage is not the same claim as a 93 with 96%, and a row showing only the first would be the
 flattery the reliability card was written to avoid. A task nobody has judged shows an em dash, never

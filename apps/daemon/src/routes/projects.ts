@@ -9,13 +9,20 @@ import {
   EXECUTION_PROFILES,
   NOT_ACCEPTED,
   PROJECT_TONES,
+  PROVIDER_KIND,
   detectCheckCommand,
   hasAccepted,
   isKnownProfile,
   queueOrder,
   type ProjectFileReader,
 } from '@factory/core'
-import type { ExecutionProfile, Project, ProjectSetting, Task } from '@factory/core'
+import type {
+  ExecutionProfile,
+  Project,
+  ProjectSetting,
+  ProviderCapability,
+  Task,
+} from '@factory/core'
 import { AmbiguousProjectError, ProjectHasTasksError } from '@factory/store'
 import type { Runtime } from '@factory/runtime'
 import type { Service } from '../service.js'
@@ -287,6 +294,8 @@ export function registerProjectRoutes(
       profile?: unknown
       check?: unknown
       reliabilityModel?: unknown
+      reliabilityProvider?: unknown
+      reliabilityEffort?: unknown
       reliabilityEnabled?: unknown
     }
   }>('/api/projects/:id', async (request, reply) => {
@@ -303,6 +312,11 @@ export function registerProjectRoutes(
     const settingCheck = 'check' in (request.body ?? {})
     // Present-and-null clears the model, the way the check command does.
     const settingModel = 'reliabilityModel' in (request.body ?? {})
+    // The other two thirds of the same decision. Present-and-null returns this
+    // project to following the installation, which is a real position and not
+    // the same as naming nothing for the first time.
+    const settingProvider = 'reliabilityProvider' in (request.body ?? {})
+    const settingEffort = 'reliabilityEffort' in (request.body ?? {})
     const judging = request.body?.reliabilityEnabled
     if (
       name === undefined &&
@@ -314,6 +328,8 @@ export function registerProjectRoutes(
       !settingInitials &&
       !settingCheck &&
       !settingModel &&
+      !settingProvider &&
+      !settingEffort &&
       judging === undefined
     ) {
       return reply.code(400).send({
@@ -321,7 +337,8 @@ export function registerProjectRoutes(
           'Send { name } or { defaultBranch } to change what the project is called or where ' +
           'work starts, { usesWorktrees } or { usesEnvironments }, true or false, ' +
           '{ check } for the command that verifies its work, ' +
-          '{ reliabilityModel } or { reliabilityEnabled } to say how its work is judged, ' +
+          '{ reliabilityProvider }, { reliabilityModel }, { reliabilityEffort } or ' +
+          '{ reliabilityEnabled } to say how its work is judged, ' +
           'or { profile } to say how much authority its runs get.',
       })
     }
@@ -387,6 +404,42 @@ export function registerProjectRoutes(
           'reliabilityModel is the model that judges this project, or null so nothing does.',
       })
     }
+    if (
+      settingProvider &&
+      request.body.reliabilityProvider !== null &&
+      typeof request.body.reliabilityProvider !== 'string'
+    ) {
+      return reply.code(400).send({
+        error:
+          'reliabilityProvider is the agent CLI that judges this project, or null to follow the installation.',
+      })
+    }
+    // Registered, not installed. A machine is configured before its CLIs are,
+    // and refusing a provider somebody has not installed yet would make the
+    // field unusable on a fresh box. A name nobody registered *is* refused: read
+    // back later it would look like "nobody has said" and fall through to
+    // whatever is installed, judging with a CLI nobody chose.
+    if (settingProvider && typeof request.body.reliabilityProvider === 'string') {
+      const known = runtime.host
+        .list<ProviderCapability>(PROVIDER_KIND)
+        .map((entry) => entry.capability.id)
+      const named = request.body.reliabilityProvider.trim()
+      if (named !== '' && !known.includes(named)) {
+        return reply.code(400).send({
+          error: `No provider called "${named}" is registered. Installed or not, it has to be one Factory knows: ${known.join(', ')}.`,
+        })
+      }
+    }
+    if (
+      settingEffort &&
+      request.body.reliabilityEffort !== null &&
+      typeof request.body.reliabilityEffort !== 'string'
+    ) {
+      return reply.code(400).send({
+        error:
+          'reliabilityEffort is how hard the judge should think, or null to follow the installation.',
+      })
+    }
     if (judging !== undefined && typeof judging !== 'boolean') {
       return reply.code(400).send({ error: 'Settings are true or false.' })
     }
@@ -428,11 +481,21 @@ export function registerProjectRoutes(
           (request.body.check as string | null) ?? undefined,
         )
       }
-      if (settingModel) {
-        project = projects.setReliabilityModel(
-          request.params.id,
-          (request.body.reliabilityModel as string | null) ?? undefined,
-        )
+      // One call for the three, so saving a page is one UPDATE and one
+      // `project.changed` rather than three of each — each event costs the board
+      // a refetch.
+      if (settingModel || settingProvider || settingEffort) {
+        project = projects.setJudge(request.params.id, {
+          ...(settingModel
+            ? { model: (request.body.reliabilityModel as string | null) ?? undefined }
+            : {}),
+          ...(settingProvider
+            ? { provider: (request.body.reliabilityProvider as string | null) ?? undefined }
+            : {}),
+          ...(settingEffort
+            ? { effort: (request.body.reliabilityEffort as string | null) ?? undefined }
+            : {}),
+        })
       }
       if (judging !== undefined) {
         project = projects.setReliabilityEnabled(request.params.id, judging)

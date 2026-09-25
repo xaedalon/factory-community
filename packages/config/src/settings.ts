@@ -86,6 +86,22 @@ const shape = {
      */
     profile: z.enum(EXECUTION_PROFILES).default(DEFAULT_PROFILE),
   }).default({ profile: DEFAULT_PROFILE }),
+  /**
+   * What reads the work, for a project that has not said.
+   *
+   * All three optional with **no default**. A default model here would spend
+   * somebody's tokens on a decision nobody made, and the whole point of the
+   * agent evaluator being opt-in is that the free deterministic one always runs.
+   *
+   * A project overrides any of the three on its own page; `resolveJudge` in
+   * `@factory/core` is the one place that decides which wins.
+   */
+  reliability: closedWithExtensions({
+    provider: z.string().min(1).optional(),
+    /** A role — `strong`, `balanced`, `fast` — or a literal id, as `RenderRequest.model` takes. */
+    model: z.string().min(1).optional(),
+    effort: z.string().min(1).optional(),
+  }).default({}),
   orchestration: closedWithExtensions({
     /**
      * How far work may start work.
@@ -140,6 +156,18 @@ export interface SettingsPatch {
   readonly orchestration?: {
     readonly maxDepth?: number
     readonly maxTasksPerRun?: number
+  }
+  /**
+   * `null` clears a value; `undefined` leaves it alone.
+   *
+   * The only group with optional values and no default, so it is the only one
+   * that can be *un*-set — and an installation default nobody can un-set is a
+   * default they cannot stop paying for.
+   */
+  readonly reliability?: {
+    readonly provider?: string | null
+    readonly model?: string | null
+    readonly effort?: string | null
   }
 }
 
@@ -233,6 +261,11 @@ export function writeSettings(
    * caller that spreads an optional field in under `exactOptionalPropertyTypes`
    * would otherwise erase what is already there.
    *
+   * `null` is how "clear it" is spelled, and it is spelled at all because one
+   * group — `reliability` — has optional values with no default. Without this
+   * there was no way to take a value back out of the file: writing `undefined`
+   * left it, and writing `null` was refused by the schema.
+   *
    * The result is parsed against the schema below before anything is written,
    * which is what makes the indexing here safe to do dynamically.
    */
@@ -240,10 +273,14 @@ export function writeSettings(
   const merged: Record<string, unknown> = { ...current, kind: SETTINGS_KIND }
   for (const [name, values] of Object.entries(patch)) {
     if (values === undefined) continue
-    const stated = Object.fromEntries(
-      Object.entries(values as Record<string, unknown>).filter(([, value]) => value !== undefined),
+    const entries = Object.entries(values as Record<string, unknown>).filter(
+      ([, value]) => value !== undefined,
     )
-    merged[name] = { ...groups[name], ...stated }
+    const stated = Object.fromEntries(entries.filter(([, value]) => value !== null))
+    const cleared = entries.filter(([, value]) => value === null).map(([key]) => key)
+    const group: Record<string, unknown> = { ...groups[name], ...stated }
+    for (const key of cleared) delete group[key]
+    merged[name] = group
   }
 
   const text = `${JSON.stringify(merged, undefined, 2)}\n`

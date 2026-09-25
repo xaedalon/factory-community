@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ApiError, api, type ExecutionProfile, type Project } from '../api/client.js'
+import { ApiError, api, type ExecutionProfile, type Project, type ProviderEntry } from '../api/client.js'
 import { markInitials, markTone } from '../identity.js'
+import { useSettings } from '../stores/settings.js'
 import PageHeader from '../components/PageHeader.vue'
 import AppButton from '../components/AppButton.vue'
 import AppIcon from '../components/AppIcon.vue'
@@ -10,6 +11,7 @@ import Tooltip from '../components/Tooltip.vue'
 import FieldRow from '../components/form/FieldRow.vue'
 import TextInput from '../components/form/TextInput.vue'
 import SelectInput from '../components/form/SelectInput.vue'
+import ComboInput from '../components/form/ComboInput.vue'
 import ToggleField from '../components/form/ToggleField.vue'
 import MarkPicker from '../components/form/MarkPicker.vue'
 
@@ -61,9 +63,33 @@ const check = ref('')
  * worse than not offering it.
  */
 const definedProfiles = ref<string[]>([])
+/**
+ * Which provider's models and efforts to offer.
+ *
+ * What this project would use if it chose nothing — its own answer, else the
+ * installation's. Only ever about which *list* to show; which provider is
+ * actually asked is `resolveJudge`'s answer and is decided on the daemon.
+ */
+const offering = computed(
+  () => judgeProvider.value || installation.settings?.reliability?.provider || '',
+)
+const chosenJudge = computed(() => providers.value.find((entry) => entry.id === offering.value))
+const judgeModelOptions = computed(() => [
+  'strong',
+  'balanced',
+  'fast',
+  ...Object.values(chosenJudge.value?.models ?? {}),
+])
+const judgeEffortOptions = computed(() => chosenJudge.value?.effortValues ?? [])
+const providerIds = computed(() => providers.value.map((entry) => entry.id))
+
 const profileOptions = computed(() => ['default', 'full-access', ...definedProfiles.value])
 
 const judgeModel = ref('')
+const installation = useSettings()
+const judgeProvider = ref('')
+const judgeEffort = ref('')
+const providers = ref<ProviderEntry[]>([])
 const judged = ref(true)
 const usesWorktrees = ref(true)
 const usesEnvironments = ref(false)
@@ -120,6 +146,8 @@ async function load(): Promise<void> {
     branch.value = found.defaultBranch
     check.value = found.check ?? ''
     judgeModel.value = found.reliabilityModel ?? ''
+  judgeProvider.value = found.reliabilityProvider ?? ''
+  judgeEffort.value = found.reliabilityEffort ?? ''
     judged.value = found.reliabilityEnabled !== false
     usesWorktrees.value = found.usesWorktrees
     usesEnvironments.value = found.usesEnvironments
@@ -228,6 +256,8 @@ async function save(): Promise<void> {
       initials: letters.value ?? null,
       check: check.value.trim() === '' ? null : check.value.trim(),
       reliabilityModel: judgeModel.value.trim() === '' ? null : judgeModel.value.trim(),
+      reliabilityProvider: judgeProvider.value === '' ? null : judgeProvider.value,
+      reliabilityEffort: judgeEffort.value === '' ? null : judgeEffort.value,
       reliabilityEnabled: judged.value,
     })
     // A scaffold *error* is a reason to stay: it is about this form, and the
@@ -300,6 +330,13 @@ onMounted(async () => {
     definedProfiles.value = listed.items.map((item) => item.name)
   } catch {
     definedProfiles.value = []
+  }
+  // Same habit as the profile list above: a registry that cannot be read leaves
+  // the pickers empty rather than stopping the page from opening.
+  try {
+    providers.value = (await api.providers()).items
+  } catch {
+    providers.value = []
   }
   try {
     shipped.value = (await api.exampleBundles()).items
@@ -477,19 +514,69 @@ onMounted(async () => {
         />
       </FieldRow>
 
+      <!-- Three controls, the same three an agent definition carries and drawn
+           the same way, because it is the same question: which CLI, which
+           model, how hard. Empty means "follow the installation" — the idiom
+           the Authority picker above already uses. -->
       <FieldRow
         v-if="!isNew"
         label="Judged by"
         icon="check"
-        for="project-judge-model"
-        hint="The model that reads the work and says what is still uncertain. Left empty, nothing reads it — Factory still judges every run from what it observed, which costs nothing. Passed to whichever agent CLI is installed, so name a model that one understands."
+        for="project-judge-provider"
+        hint="Which agent CLI reads the work and says what is still uncertain. Left empty it follows the installation, and if nothing is named there either, Factory uses whichever CLI is installed."
       >
-        <TextInput
+        <SelectInput
+          id="project-judge-provider"
+          v-model="judgeProvider"
+          :options="providerIds"
+          allow-empty
+          data-testid="project-judge-provider"
+        />
+        <p
+          v-if="chosenJudge && !chosenJudge.available"
+          class="mt-2 flex items-start gap-1.5 rounded-md border border-[var(--color-warn)]/40 bg-[var(--color-warn)]/5 px-3 py-2 text-xs text-[var(--color-warn)]"
+          data-testid="project-judge-provider-unavailable"
+        >
+          <AppIcon name="alert" :size="12" class="mt-0.5" />
+          <span>
+            {{ chosenJudge.displayName }} is installed as a plugin but its command was not found on
+            this machine, so nothing will read this project's work until it is. Factory will not
+            quietly ask a different one.
+          </span>
+        </p>
+      </FieldRow>
+
+      <FieldRow
+        v-if="!isNew"
+        label="Judging model"
+        for="project-judge-model"
+        hint="A role — strong, balanced, fast — or a model id that provider understands. Left empty, nothing reads the work: Factory still judges every run from what it observed, which costs nothing."
+      >
+        <ComboInput
           id="project-judge-model"
           v-model="judgeModel"
-          mono
-          data-testid="project-judge-model"
-          placeholder="claude-opus-5-5"
+          :options="judgeModelOptions"
+          placeholder="strong"
+          testid="project-judge-model"
+        />
+      </FieldRow>
+
+      <FieldRow
+        v-if="!isNew"
+        label="Judging effort"
+        for="project-judge-effort"
+        :hint="
+          judgeEffortOptions.length === 0
+            ? 'The chosen provider does not take an effort setting, so this would be ignored.'
+            : 'How hard the judge should think before answering.'
+        "
+      >
+        <SelectInput
+          id="project-judge-effort"
+          v-model="judgeEffort"
+          :options="judgeEffortOptions"
+          allow-empty
+          data-testid="project-judge-effort"
         />
       </FieldRow>
 

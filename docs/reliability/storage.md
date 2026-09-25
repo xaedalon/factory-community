@@ -25,15 +25,24 @@ duplicated here would be a second copy that goes stale. But without this the
 explanation of a score cannot be reconstructed once the run logs are trimmed,
 and they are, on a budget.
 
-Two columns on `projects`, not one nullable model: `reliability_model` (nullable)
-and `reliability_enabled` (`INTEGER NOT NULL DEFAULT 1`).
+Four columns on `projects`: `reliability_provider`, `reliability_model` and
+`reliability_effort` (all nullable), and `reliability_enabled`
+(`INTEGER NOT NULL DEFAULT 1`).
 
-Two, because "nobody has said" and "switched off" are different positions.
-Unlike `profile`, there is no installation-level fallback to inherit — a project
-that names no model has no agent evaluator, and falling back to a model named in
-Factory's own source would spend somebody's tokens on a decision they never made.
-Switching judging off keeps whatever model was chosen, so turning it back on is
-one click rather than two decisions.
+Separate from `enabled`, because "nobody has said" and "switched off" are
+different positions — switching judging off keeps the trio, so turning it back on
+is one click rather than three decisions.
+
+**Nullable means "nobody has said", and it inherits the installation's choice**,
+the way `projects.profile` does. Migration 21's own comment said so when the
+first two columns were added; nothing implemented it, and an earlier version of
+this page claimed the opposite. Migration 22 added the other two and
+`resolveJudge` made the inheritance real.
+
+Inherited per field, never as a trio — a project that named a model before a
+provider could be named keeps that model and inherits a provider. Nothing is
+defaulted in Factory's own source at either level: a model named there would
+spend somebody's tokens on a decision nobody made.
 
 ## Two things deliberately not stored
 

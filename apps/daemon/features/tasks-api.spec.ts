@@ -2383,6 +2383,68 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a project names the agent that judges it, not only the model', ({ RuleScenario }) => {
+    const givenProject = async (): Promise<void> => {
+      // The directory has to exist: registering a project reads it.
+      const directory = join(root, `judge-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`)
+      mkdirSync(directory, { recursive: true })
+      await addProject(`judge-${String(Date.now())}`, directory)
+    }
+    const patch = (body: Record<string, unknown>) => () =>
+      call('PATCH', `/api/projects/${projectId}`, body)
+    const project = () => response.body.project as Record<string, unknown> | undefined
+    const status = (code: number) => (): void => expect(response.statusCode).toBe(code)
+
+    RuleScenario('A judging provider can be chosen for a project', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project to work in', givenProject)
+      When("I set the project's judging provider to \"claude\"", patch({ reliabilityProvider: 'claude' }))
+      Then('the response is 200', status(200))
+      And("the project's judging provider is \"claude\"", () =>
+        expect(project()?.['reliabilityProvider']).toBe('claude'),
+      )
+    })
+
+    RuleScenario('A provider nobody registered is refused, and the refusal names the field', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project to work in', givenProject)
+      When("I set the project's judging provider to \"nonesuch\"", patch({ reliabilityProvider: 'nonesuch' }))
+      Then('the response is 400', status(400))
+      And('the refusal names "nonesuch"', () =>
+        expect(String(response.body.error)).toContain('nonesuch'),
+      )
+    })
+
+    RuleScenario('An effort that is not text is refused', ({ Given, When, Then }) => {
+      Given('a project to work in', givenProject)
+      When("I set the project's judging effort to a number", patch({ reliabilityEffort: 3 }))
+      Then('the response is 400', status(400))
+    })
+
+    RuleScenario('Clearing the provider returns the project to following the installation', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('its judging provider is "claude"', patch({ reliabilityProvider: 'claude' }))
+      When("I clear the project's judging provider", patch({ reliabilityProvider: null }))
+      Then('the response is 200', status(200))
+      And('the project names no judging provider', () =>
+        expect(project()?.['reliabilityProvider']).toBeUndefined(),
+      )
+    })
+  })
+
   Rule('a list says how much to trust each task, in two numbers', ({ RuleScenario }) => {
     let listed: Record<string, unknown> | undefined
     let detail: Record<string, unknown>

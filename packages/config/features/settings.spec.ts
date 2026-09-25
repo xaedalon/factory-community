@@ -260,6 +260,76 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
       And('the scale is 2', () => expect(settings.ui.scale).toBe(2))
     })
   })
+  Rule('what reads the work is an installation preference a project may override', ({
+    RuleScenario,
+  }) => {
+    const judge = () => settings.reliability
+    const nameJudge = save({
+      reliability: { provider: 'codex', model: 'strong', effort: 'high' },
+    })
+
+    RuleScenario('A fresh installation names no judge', ({ Given, Then, And }) => {
+      Given('an installation with the default settings', () => {
+        givenUserScope()()
+        read()
+      })
+      Then('no judging provider is named', () => expect(judge().provider).toBeUndefined())
+      And('no judging model is named', () => expect(judge().model).toBeUndefined())
+    })
+
+    RuleScenario('A judge can be named', ({ Given, When, Then, And }) => {
+      Given('an installation with the default settings', givenUserScope())
+      When('the judge is set to "codex" using "strong" at "high"', () => {
+        nameJudge()
+        read()
+      })
+      Then('the judging provider is "codex"', () => expect(judge().provider).toBe('codex'))
+      And('the judging model is "strong"', () => expect(judge().model).toBe('strong'))
+      And('the judging effort is "high"', () => expect(judge().effort).toBe('high'))
+    })
+
+    RuleScenario('Naming the judge leaves the interface alone', ({ Given, When, Then }) => {
+      Given('the interface scale is 2', () => {
+        givenUserScope()()
+        save({ ui: { scale: 2 } })()
+      })
+      When('the judge is set to "codex" using "strong" at "high"', () => {
+        nameJudge()
+        read()
+      })
+      Then('the scale is 2', scaleIs(2))
+    })
+  })
+
+  Rule('a setting can be cleared, not only changed', ({ RuleScenario }) => {
+    const judge = () => settings.reliability
+    const nameJudge = save({
+      reliability: { provider: 'codex', model: 'strong', effort: 'high' },
+    })
+
+    RuleScenario('Null takes a value back out of the file', ({ Given, And, When, Then }) => {
+      Given('an installation with the default settings', givenUserScope())
+      And('the judge is set to "codex" using "strong" at "high"', nameJudge)
+      When('the judging model is cleared', () => {
+        save({ reliability: { model: null } })()
+        read()
+      })
+      Then('no judging model is named', () => expect(judge().model).toBeUndefined())
+      // The other two are untouched: clearing one is not clearing the group.
+      And('the judging provider is "codex"', () => expect(judge().provider).toBe('codex'))
+    })
+
+    RuleScenario('Undefined still leaves a value alone', ({ Given, And, When, Then }) => {
+      Given('an installation with the default settings', givenUserScope())
+      And('the judge is set to "codex" using "strong" at "high"', nameJudge)
+      When('a patch mentions the judge but names no model', () => {
+        save({ reliability: { effort: 'low' } })()
+        read()
+      })
+      Then('the judging model is "strong"', () => expect(judge().model).toBe('strong'))
+    })
+  })
+
   Rule('how far work may start work is a setting', ({ RuleScenario }) => {
     RuleScenario('A fresh installation allows three levels and ten tasks a run', ({
       Given,

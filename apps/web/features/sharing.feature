@@ -160,7 +160,7 @@ Feature: Sharing a workflow with someone else
       Then it says what was written
       And the profile "build-tools" is in the project
 
-  Rule: a project says which model reads its work
+  Rule: a project says which agent reads its work
 
     Scenario: A new project names none
       Given a project
@@ -190,3 +190,27 @@ Feature: Sharing a workflow with someone else
       And I save the project
       And I open that project's settings
       Then the judging model is "claude-opus-5-5"
+
+    Scenario: An agent can be named beside the model
+      Given a project
+      When I open that project's settings
+      And I choose "claude" as the judging agent
+      And I save the project
+      And I open that project's settings
+      Then the judging agent is "claude"
+
+    Scenario: The models the chosen agent knows are offered
+      Given a project
+      When I open that project's settings
+      And I choose "claude" as the judging agent
+      Then "opus" is offered as a judging model
+
+    Scenario: An agent whose command is missing says so
+      # Not a refusal. Configuring a machine before installing the CLI is
+      # ordinary, and Factory will not quietly ask a different one instead. This
+      # suite runs with an empty PATH, so no agent CLI is installed here — which
+      # is exactly the case being described.
+      Given a project
+      When I open that project's settings
+      And I choose "codex" as the judging agent
+      Then it says that agent's command was not found

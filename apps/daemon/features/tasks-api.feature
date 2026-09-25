@@ -857,6 +857,32 @@ Feature: Tasks, runs and live updates over HTTP
       Then the response is 400
       And the response says what a profile can be
 
+  Rule: a project names the agent that judges it, not only the model
+
+    Scenario: A judging provider can be chosen for a project
+      Given a project to work in
+      When I set the project's judging provider to "claude"
+      Then the response is 200
+      And the project's judging provider is "claude"
+
+    Scenario: A provider nobody registered is refused, and the refusal names the field
+      Given a project to work in
+      When I set the project's judging provider to "nonesuch"
+      Then the response is 400
+      And the refusal names "nonesuch"
+
+    Scenario: An effort that is not text is refused
+      Given a project to work in
+      When I set the project's judging effort to a number
+      Then the response is 400
+
+    Scenario: Clearing the provider returns the project to following the installation
+      Given a project to work in
+      And its judging provider is "claude"
+      When I clear the project's judging provider
+      Then the response is 200
+      And the project names no judging provider
+
   Rule: a list says how much to trust each task, in two numbers
 
     The card on a task page assembles three queries; a board of forty rows asking

@@ -2413,6 +2413,37 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
     })
 
+    RuleScenario('A dependency written with a half-read initiator is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task "Scaffold" exists', exists('Scaffold'))
+      And('the task "The model" exists', exists('The model'))
+      When('"The model" is made to wait for "Scaffold" with an initiator of "yes please"', () =>
+        call('POST', `/api/tasks/${idOf('The model')}/dependencies`, {
+          dependsOn: idOf('Scaffold'),
+          initiator: 'yes please',
+        }),
+      )
+      Then('the response is 400', status(400))
+    })
+
+    RuleScenario('Undoing a dependency reads the initiator too', ({ Given, And, When, Then }) => {
+      Given('the task "Scaffold" exists', exists('Scaffold'))
+      And('the task "The model" exists', exists('The model'))
+      And('"The model" is made to wait for "Scaffold"', waitFor('The model', 'Scaffold'))
+      When('the wait is removed with an initiator of "yes please"', () =>
+        call(
+          'DELETE',
+          `/api/tasks/${idOf('The model')}/dependencies/${idOf('Scaffold')}`,
+          { initiator: 'yes please' },
+        ),
+      )
+      Then('the response is 400', status(400))
+    })
+
     RuleScenario('A dependency is written and read back', ({ Given, And, When, Then }) => {
       Given('the task "Scaffold" exists', exists('Scaffold'))
       And('the task "The model" exists', exists('The model'))

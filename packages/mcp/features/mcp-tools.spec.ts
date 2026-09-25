@@ -583,6 +583,62 @@ describeFeature(feature, ({ Background, Rule }) => {
     })
   })
 
+  Rule('an agent can say one task waits for another', ({ RuleScenario }) => {
+    const waiting = (): void => {
+      const task = aTask('Ship it', 'project-1')
+      const reply = {
+        task: { ...task, dependsOn: ['task-groundwork'] },
+        actions: [{ action: 'queue', label: 'Queue', to: 'queued' }],
+        blockers: [],
+      }
+      factory.answer(`/api/tasks/${task.id}/dependencies`, reply)
+      factory.answer(`/api/tasks/${task.id}/dependencies/task-groundwork`, reply)
+    }
+    const depend = (remove?: boolean) =>
+      call('factory_task_depends_on', {
+        task: 'task-ship-it',
+        dependsOn: 'task-groundwork',
+        ...(remove === undefined ? {} : { remove }),
+      }).catch((error: unknown) => {
+        failure = error as ToolError
+      })
+
+    RuleScenario('A task is made to wait for another', ({ Given, When, Then }) => {
+      Given('a task "Ship it" that can be queued', waiting)
+      When('the agent makes "Ship it" wait for "task-groundwork"', () => depend())
+      Then('Factory was asked to make it wait for "task-groundwork"', () => {
+        expect(factory.asked).toContain('POST /api/tasks/task-ship-it/dependencies')
+        expect(sentTo('POST /api/tasks/task-ship-it/dependencies')).toMatchObject({
+          dependsOn: 'task-groundwork',
+        })
+      })
+    })
+
+    RuleScenario('The waiting can be taken back off', ({ Given, When, Then }) => {
+      Given('a task "Ship it" that can be queued', waiting)
+      When('the agent stops "Ship it" waiting for "task-groundwork"', () => depend(true))
+      Then('Factory was asked to remove that dependency', () =>
+        expect(factory.asked).toContain(
+          'DELETE /api/tasks/task-ship-it/dependencies/task-groundwork',
+        ),
+      )
+    })
+
+    RuleScenario('A ring comes back in the store\'s own words', ({ Given, And, When, Then }) => {
+      Given('a task "Ship it" that can be queued', waiting)
+      And('Factory refuses the dependency as "Groundwork already waits for Ship it."', () => {
+        factory.answer('/api/tasks/task-ship-it/dependencies', {
+          status: 400,
+          message: 'Groundwork already waits for Ship it.',
+        })
+      })
+      When('the agent makes "Ship it" wait for "task-groundwork"', () => depend())
+      Then('the refusal says "Groundwork already waits for Ship it."', () =>
+        expect(failure?.message).toContain('Groundwork already waits for Ship it.'),
+      )
+    })
+  })
+
   Rule('a workflow is copied rather than assembled', ({ RuleScenario }) => {
     const original = (): void => {
       factory.answer('/api/workflows/development?project=project-1', {

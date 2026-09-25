@@ -872,6 +872,24 @@ Feature: Tasks, runs and live updates over HTTP
       And I ask for the task
       Then it waits for nothing
 
+    Scenario: A dependency written with a half-read initiator is refused
+      # Every other mutating task route reads the initiator, and these two did
+      # not — which was harmless while only a person could reach them. An MCP
+      # tool makes an agent the caller, and a request whose initiator went
+      # missing is the one shape the guards elsewhere exist to catch, so it is
+      # refused here rather than recorded as having come from nobody.
+      Given the task "Scaffold" exists
+      And the task "The model" exists
+      When "The model" is made to wait for "Scaffold" with an initiator of "yes please"
+      Then the response is 400
+
+    Scenario: Undoing a dependency reads the initiator too
+      Given the task "Scaffold" exists
+      And the task "The model" exists
+      And "The model" is made to wait for "Scaffold"
+      When the wait is removed with an initiator of "yes please"
+      Then the response is 400
+
     Scenario: A dependency is written and read back
       Given the task "Scaffold" exists
       And the task "The model" exists

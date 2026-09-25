@@ -181,6 +181,38 @@ Feature: The tools an agent is given
       Then it is refused as ACTION_NOT_AVAILABLE
       And the refusal lists the actions it does offer
 
+  Rule: an agent can say one task waits for another
+
+    An agent that plans three pieces of work can already create all three, and
+    until now could only describe their order in prose nobody enforces. The
+    ordering is a fact about the work, so it belongs beside the work rather than
+    in a description — the scheduler reads it, doctor reports on it, and the
+    board draws it.
+
+    None of the rules are here. The store refuses a ring, a task waiting for
+    itself, and a link across projects, and it says why in its own words; this
+    tool carries the sentence rather than composing a second one that could
+    drift from it.
+
+    Scenario: A task is made to wait for another
+      Given a task "Ship it" that can be queued
+      When the agent makes "Ship it" wait for "task-groundwork"
+      Then Factory was asked to make it wait for "task-groundwork"
+
+    Scenario: The waiting can be taken back off
+      Given a task "Ship it" that can be queued
+      When the agent stops "Ship it" waiting for "task-groundwork"
+      Then Factory was asked to remove that dependency
+
+    Scenario: A ring comes back in the store's own words
+      # Not "a cycle was detected". The store already writes the sentence a
+      # person reads on the board, and two wordings for one refusal is one
+      # wording that goes stale.
+      Given a task "Ship it" that can be queued
+      And Factory refuses the dependency as "Groundwork already waits for Ship it."
+      When the agent makes "Ship it" wait for "task-groundwork"
+      Then the refusal says "Groundwork already waits for Ship it."
+
   Rule: a workflow is copied rather than assembled
 
     Assembling one out of phase names is how an agent produces a workflow that

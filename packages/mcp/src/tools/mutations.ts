@@ -176,6 +176,39 @@ export const mutationTools: readonly McpTool[] = [
   }),
 
   defineTool({
+    name: 'factory_task_depends_on',
+    title: 'Make one task wait for another',
+    description:
+      'Say that a task cannot start until another one is done. This is how an agent that planned ' +
+      'several pieces of work records their order — the scheduler passes over a task whose ' +
+      'blocker is not finished, so the ordering is enforced rather than described. Pass ' +
+      '`remove: true` to take the waiting back off. Both tasks must be in the same project.',
+    schema: z.object({
+      task: z.string().describe('The task that waits.'),
+      dependsOn: z.string().describe('The task id it waits for.'),
+      remove: z
+        .boolean()
+        .optional()
+        .describe('Take the dependency off instead of putting it on.'),
+    }),
+    run: async (input, context) => {
+      // The store refuses a ring, a task waiting for itself and a link across
+      // projects, and the route already carries its sentence out. Repeating any
+      // of that here would be a second copy of a rule to keep in step with the
+      // first.
+      const path = `/api/tasks/${encodeURIComponent(input.task)}/dependencies`
+      const reply =
+        input.remove === true
+          ? await del<TaskReply>(context, `${path}/${encodeURIComponent(input.dependsOn)}`)
+          : await post<TaskReply>(context, path, { dependsOn: input.dependsOn })
+      return {
+        ...(input.remove === true ? { stoppedWaitingFor: input.dependsOn } : { waitsFor: input.dependsOn }),
+        ...shape(reply),
+      }
+    },
+  }),
+
+  defineTool({
     name: 'factory_workflow_create',
     title: 'Write a workflow',
     description:
@@ -299,5 +332,7 @@ const request = async <T>(
 }
 const post = <T>(context: ToolContext, path: string, body?: unknown): Promise<T> =>
   request<T>(context, path, 'POST', body)
+const del = <T>(context: ToolContext, path: string): Promise<T> =>
+  request<T>(context, path, 'DELETE')
 const get = <T>(context: ToolContext, path: string): Promise<T> =>
   request<T>(context, path, 'GET')

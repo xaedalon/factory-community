@@ -20,12 +20,26 @@ supports:
 # checking when GitHub retires one — the CLI validates the value and exits
 # immediately, which at least fails fast and clearly.
 #
-# `claude-opus-5` was retired by GitHub and reported on 2026-09-25. The CLI has
-# no way to list what it accepts — there is no `models` subcommand and `--help`
-# only says `--model <model>` — so this is the one field here that cannot be
-# checked from a terminal and is changed on a report instead.
+# `claude-opus-5` was retired by GitHub, reported 2026-09-25. Its replacement was
+# first written `claude-opus-5-5`, which the CLI refused outright:
+#
+#   Error: Model "claude-opus-5-5" from --model flag is not available.
+#
+# **A point release dots the minor version here; it does not hyphenate it.**
+# Confirmed against the ids this machine's own Copilot sessions have recorded —
+# `gpt-5.4-nano`, `gpt-5.6-sol`, `gpt-5.6-terra` — every one dotting the minor
+# version while hyphenating the name. `claude-opus-5` and `claude-sonnet-5` have
+# no minor part, which is why nothing here showed the convention until one was
+# needed.
+#
+# This field is the one in this file that **cannot be checked from a terminal**.
+# There is no `models` subcommand, `--help` says only `--model <model>`, and the
+# CLI will not validate the flag without an interactive session — probed with a
+# scrubbed environment, with Factory's own argv, and under a pty, exiting before
+# reading the flag every time. So it is maintained by running it for real and
+# reading the error.
 models:
-  strong: claude-opus-5-5
+  strong: claude-opus-5.5
   balanced: claude-sonnet-5
   fast: claude-haiku-4-5
 

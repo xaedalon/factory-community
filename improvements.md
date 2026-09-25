@@ -232,3 +232,33 @@ this descriptor has been wrong in the other direction before: two configurations
 read correctly in `--help` and did nothing, which is why
 `docs/security/providers.md` has a section called "Configurations that read
 correctly and did not work".
+
+## 12. A model id Copilot rejects reads as a failed run, not as a wrong setting
+
+Copilot validates `--model` and exits. When the id is wrong the whole run fails,
+and what reaches the task page is:
+
+```text
+Error: Model "claude-opus-5-5" from --model flag is not available.
+```
+
+That is a clear sentence, and Factory does nothing with it. It is attributed to
+the run rather than to the setting that caused it, so the task looks like work
+that failed instead of a project pointing at a model that no longer exists. It
+cost two wrong values in one day to notice, because the second one read exactly
+like the first.
+
+`provider-copilot/provider.yaml` declares `denialPatterns: []`, and the field is
+the right home: Claude's descriptor already uses it to recognise a refused path
+and say which one. A pattern here — `contains: 'from --model flag is not
+available'` — would let Factory say *"this project's judging model is not one
+Copilot serves"* and point at the field that holds it.
+
+Worth widening slightly while there: the same shape catches a retired model named
+on an agent definition or a phase, not only on a project's judge.
+
+**Shape of the fix:** one `denialPatterns` entry on the Copilot descriptor
+capturing the quoted id, and a scenario asserting the run's problem names the
+model and the setting rather than the exit code. The measurement is already
+above — that error text is verbatim from a real run on 2026-09-25.
+

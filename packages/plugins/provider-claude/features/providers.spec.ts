@@ -69,8 +69,8 @@ describeFeature(feature, ({ Background, Rule, Scenario, ScenarioOutline, BeforeE
     Then('"strong" resolves to "opus" for "claude"', () =>
       expect(provider('claude').resolveModel('strong')).toBe('opus'),
     )
-    And('"strong" resolves to "claude-opus-5-5" for "copilot"', () =>
-      expect(provider('copilot').resolveModel('strong')).toBe('claude-opus-5-5'),
+    And('"strong" resolves to "claude-opus-5.5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('strong')).toBe('claude-opus-5.5'),
     )
   })
 

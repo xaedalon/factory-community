@@ -19,7 +19,7 @@ Feature: Agent providers
 
   Scenario: A model role resolves to the provider's own identifier
     Then "strong" resolves to "opus" for "claude"
-    And "strong" resolves to "claude-opus-5-5" for "copilot"
+    And "strong" resolves to "claude-opus-5.5" for "copilot"
 
   Scenario: A literal model identifier passes through untouched
     Then "claude-fable-5" resolves to "claude-fable-5" for "claude"

@@ -87,6 +87,47 @@ it is working in, run `git status`, and look around — none of which needs a fl
 This matters when reading a refusal. "The agent could not run `git -C … status`" is the boundary
 working, not a missing allow-list entry, and adding `git` to a list will not change it.
 
+#### What counts as read-only is decided by parsing, and three things defeat it
+
+Measured 2026-09-25 against 2.1.282 with the Default flags, one command shape per run in a throwaway
+repository, reading the `permission_denied` events rather than the agent's prose. Every refusal below
+was reproduced.
+
+**A compound command is not the rule.** `;`, `&&`, `||`, `|` and `2>&1` were all allowed, including a
+five-stage pipeline. Three narrower things are what actually refuse:
+
+| | | allow-list entry lifts it? |
+|---|---|---|
+| `echo "exit=$?"` — **alone, no compound** | **refused** | **yes** — `Bash(echo *)` |
+| `$$`, `$#`, `${?}` | **refused** | yes |
+| `$HOME`, `$RANDOM`, `$(date)`, `` `date` `` | allowed | — |
+| `sed '2d' f`, `sed 's/a/b/' f` | **refused** | **no** — refused 3/3 with `Bash(sed *)` |
+| `sed -n '1,3p' f` | allowed | — |
+| `… \| sed '/x/d' \| diff - f && echo same` | **refused** | **yes** — allowed 2/2 with `Bash(sed *)` |
+| `grep -v '<form' f \| diff - g && echo same` | allowed | — |
+| `echo hi > out.txt` — **inside the workspace** | **refused** | **no** |
+
+1. **A special shell parameter defeats the classification.** `$?`, `$$`, `$#` and `${?}` are refused;
+   ordinary and environment expansions are not, and neither is command substitution. Reading: the
+   value depends on shell state the checker cannot see, so the command is no longer provably
+   read-only and falls through to the allow-list — where Default has no `echo`, and
+   `--permission-prompts none` turns needing approval into being denied. Adding `Bash(echo *)` was
+   measured making both `echo "exit=$?"` and `pnpm check 2>&1; echo "exit=$?"` pass.
+2. **A stream editor with an *editing* script is not read-only.** `sed -n '1,3p'` prints and is
+   allowed; `sed '2d'` and `sed 's/a/b/'` are refused although neither has `-i` and neither writes.
+   Allow-listing `sed` lifts it inside a pipeline but **not** for `sed <script> <file>`, which reads
+   as editing the file it names. `grep -v` is the read-only equivalent and needs nothing.
+3. **Shell redirection to a file is refused wherever it points**, including inside the working
+   directory, and no allow-list entry lifts it — `echo hi > out.txt` stayed refused with
+   `Bash(echo *)` on the list. `--restricted` confines the shell's redirection; that is the flag
+   working, not a gap. An agent that needs a file written should use the Write tool, or a `shell`
+   step.
+
+Two of these cost a phase in practice. `command; echo "exit=$?"` is a habit, and under Default it is
+refused for the `$?` rather than for the command. `sed '/pattern/d' | diff` is how an agent compares
+a document against a filtered file; `grep -v` does the same thing and is allowed. A profile can buy
+the first with `commands: [echo]`; the second is better fixed in the prompt.
+
 `--allowedTools` is variadic (`<tools...>` in `--help`), and a repeated
 variadic option **replaces** rather than appends. Four flags would leave only
 the last in force — which looks like it works. Factory passes one flag with a

@@ -307,6 +307,15 @@ export interface TaskListItem extends Task {
   actions: AvailableAction[]
   progress?: { completed: number; total: number }
   blockers: TaskBlocker[]
+  /**
+   * The two numbers a row draws, or nothing.
+   *
+   * Absent when nobody has judged the task — an em dash on the row, never a
+   * zero, because a zero reads as a verdict rather than as silence. Read from
+   * the same newest assessment the card reads, through a narrower projection, so
+   * the row and the card cannot disagree about the number.
+   */
+  reliability?: { score: number; coverage: number }
 }
 
 export interface TaskHistoryEntry {

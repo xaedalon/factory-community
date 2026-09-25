@@ -112,6 +112,37 @@ Feature: Keeping a task's judgement, and never rewriting it
       And its dimensions column holds only "design"
       Then every dimension the model lists is present
 
+  Rule: what a board draws is one read, not one per task
+
+    The card on a task page assembles three queries — the newest assessment, the
+    drivers, the runs — and that is right for one task. A board of forty rows
+    asking the same three would be a hundred and twenty statements for one
+    answer, and the task list already reads its dependency graph once for the
+    whole page rather than once per row.
+
+    So a list reads a projection: the newest score and coverage of every task
+    that has one, in a single statement, parsing none of the JSON columns a row
+    never draws. A task nobody has judged is **absent** from the answer rather
+    than present with a zero — `unassessed` is a state, and a missing key is the
+    honest shape for it.
+
+    Scenario: Every task's newest score comes back in one answer
+      Given a second task in the same project
+      And the first task was judged at 88 with 70% coverage
+      And the second task was judged at 61 with 40% coverage
+      Then the board read says the first task is 88 with 70% coverage
+      And the board read says the second task is 61 with 40% coverage
+
+    Scenario: The newest of several judgements is the one that comes back
+      Given the task was judged at 40 with 10% coverage
+      And the task was judged at 91 with 95% coverage
+      Then the board read says the task is 91 with 95% coverage
+
+    Scenario: A task nobody has judged is absent rather than scoring zero
+      Given a second task in the same project
+      And the first task was judged at 88 with 70% coverage
+      Then the board read does not mention the second task
+
   Rule: drivers are found, moved, and never quietly dropped
 
     Scenario: A driver is stored with everything it was given

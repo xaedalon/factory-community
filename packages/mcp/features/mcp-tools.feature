@@ -71,6 +71,22 @@ Feature: The tools an agent is given
       When the agent lists only the active tasks
       Then only "Add due dates" is listed
 
+  Rule: a listed task says how much to trust it
+
+    An agent choosing what to pick up wants the score and how hard anybody
+    looked, and asking `factory_reliability_get` per task to find out is a
+    request per row for something the list already read once.
+
+    Scenario: A listed task carries the score and the coverage
+      Given a task judged at 88 with 70% coverage
+      When the agent lists the tasks
+      Then the listed task is 88 with 70% coverage
+
+    Scenario: A task nobody has judged carries neither
+      Given a task nobody has judged
+      When the agent lists the tasks
+      Then the listed task carries no reliability
+
   Rule: what a project can run is what it is offered
 
     Scenario: A workflow comes with what it needs

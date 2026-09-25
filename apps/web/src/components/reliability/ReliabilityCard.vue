@@ -11,6 +11,7 @@
  * second implementation of the scoring engine, and the wrong one.
  */
 import { computed, ref } from 'vue'
+import { scoreTone } from '../../states.js'
 import AppIcon from '../AppIcon.vue'
 import type { ReliabilitySummary } from '../../api/client'
 
@@ -35,13 +36,7 @@ function label(name: string): string {
  * Never the only signal — the number is right there, and the delta carries an
  * arrow. This is emphasis, not information.
  */
-const tone = computed(() => {
-  const score = props.reliability.score ?? 0
-  if (score >= 90) return 'var(--color-ok)'
-  if (score >= 75) return 'var(--color-info)'
-  if (score >= 60) return 'var(--color-warn)'
-  return 'var(--color-danger)'
-})
+const tone = computed(() => scoreTone(props.reliability.score ?? 0))
 </script>
 
 <template>

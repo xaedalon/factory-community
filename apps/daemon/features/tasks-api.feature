@@ -857,6 +857,40 @@ Feature: Tasks, runs and live updates over HTTP
       Then the response is 400
       And the response says what a profile can be
 
+  Rule: a list says how much to trust each task, in two numbers
+
+    The card on a task page assembles three queries; a board of forty rows asking
+    the same three would be a hundred and twenty statements to draw one column.
+    So the list reads a projection of the newest assessment — the score and the
+    evidence coverage — in one statement, and carries both or neither.
+
+    Both, because a 93 with 41% coverage is not the same claim as a 93 with 96%,
+    and a list that showed only the first would be exactly the flattery the card
+    was written to avoid.
+
+    Scenario: The list carries the score and the coverage together
+      Given the task "Add due dates" exists
+      And it has been assessed
+      When I ask for every task
+      Then the response is 200
+      And the row carries a score and a coverage
+
+    Scenario: A task nobody has judged carries no reliability at all
+      Given the task "Add due dates" exists
+      When I ask for every task
+      Then the response is 200
+      And the row carries no reliability
+
+    Scenario: The list and the task agree about the score
+      # Two projections of one row. If they could disagree, the number somebody
+      # scanned a board for would not be the number they opened the task to read.
+      Given the task "Add due dates" exists
+      And it has been assessed
+      When I ask for every task
+      And I read the task
+      Then both say the same score
+      And both say the same coverage
+
   Rule: a task says what it is waiting for
 
     Derived per request rather than stored, the way progress is. The scheduler

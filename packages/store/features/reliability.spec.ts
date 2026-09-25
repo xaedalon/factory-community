@@ -315,6 +315,83 @@ describeFeature(feature, ({ Background, Rule, AfterEachScenario }) => {
     })
   })
 
+  Rule('what a board draws is one read, not one per task', ({ RuleScenario }) => {
+    let second = ''
+    const judgeOne = (task: string, score: number, coverage: number) => (): void => {
+      reliability.record({
+        taskId: task,
+        trigger: 'run',
+        score,
+        rawScore: score,
+        coverage,
+        delta: score,
+        summary: `scored ${score}`,
+        dimensions: flat(score),
+        caps: [],
+        explanation: {
+          contributions: [],
+          rawScore: score,
+          caps: [],
+          effectiveScore: score,
+          causes: [],
+        },
+        scoringModelVersion: '1.0',
+      })
+    }
+    const read = () => reliability.newestScores()
+    /** Read when the step runs, not when the Rule is built. */
+    const projectId = (): string => {
+      const task = tasks.get(taskId)
+      if (task === undefined) throw new Error('The background task is missing.')
+      return task.projectId
+    }
+
+    RuleScenario("Every task's newest score comes back in one answer", ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a second task in the same project', () => {
+        second = tasks.create({ name: 'another task', projectId: projectId() }).id
+      })
+      And('the first task was judged at 88 with 70% coverage', () => judgeOne(taskId, 88, 70)())
+      And('the second task was judged at 61 with 40% coverage', () => judgeOne(second, 61, 40)())
+      Then('the board read says the first task is 88 with 70% coverage', () =>
+        expect(read().get(taskId)).toEqual({ score: 88, coverage: 70 }),
+      )
+      And('the board read says the second task is 61 with 40% coverage', () =>
+        expect(read().get(second)).toEqual({ score: 61, coverage: 40 }),
+      )
+    })
+
+    RuleScenario('The newest of several judgements is the one that comes back', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('the task was judged at 40 with 10% coverage', () => judgeOne(taskId, 40, 10)())
+      And('the task was judged at 91 with 95% coverage', () => judgeOne(taskId, 91, 95)())
+      Then('the board read says the task is 91 with 95% coverage', () =>
+        expect(read().get(taskId)).toEqual({ score: 91, coverage: 95 }),
+      )
+    })
+
+    RuleScenario('A task nobody has judged is absent rather than scoring zero', ({
+      Given,
+      And,
+      Then,
+    }) => {
+      Given('a second task in the same project', () => {
+        second = tasks.create({ name: 'another task', projectId: projectId() }).id
+      })
+      And('the first task was judged at 88 with 70% coverage', () => judgeOne(taskId, 88, 70)())
+      Then('the board read does not mention the second task', () => {
+        expect(read().has(second)).toBe(false)
+        expect(read().size).toBe(1)
+      })
+    })
+  })
+
   Rule('drivers are found, moved, and never quietly dropped', ({ RuleScenario }) => {
     RuleScenario('A driver is stored with everything it was given', ({ When, Then, And }) => {
       When('a "high" driver owned by the agent is added', () => {

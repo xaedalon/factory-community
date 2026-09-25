@@ -2383,6 +2383,80 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a list says how much to trust each task, in two numbers', ({ RuleScenario }) => {
+    let listed: Record<string, unknown> | undefined
+    let detail: Record<string, unknown>
+
+    const exists = async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+      taskId = (response.body.task as { id: string }).id
+    }
+    const assessed = async (): Promise<void> => {
+      await call('POST', `/api/tasks/${taskId}/reliability/assess`, {})
+    }
+    const askList = async (): Promise<void> => {
+      await call('GET', '/api/tasks')
+      listed = (response.body.items as Record<string, unknown>[]).find(
+        (item) => item['id'] === taskId,
+      )
+    }
+    const brief = () => listed?.['reliability'] as { score?: number; coverage?: number } | undefined
+
+    RuleScenario('The list carries the score and the coverage together', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      And('it has been assessed', assessed)
+      When('I ask for every task', askList)
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the row carries a score and a coverage', () => {
+        expect(typeof brief()?.score).toBe('number')
+        expect(typeof brief()?.coverage).toBe('number')
+      })
+    })
+
+    RuleScenario('A task nobody has judged carries no reliability at all', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I ask for every task', askList)
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      // Not `score: 0`. A task nobody looked at is not a task that failed.
+      And('the row carries no reliability', () => expect(brief()).toBeUndefined())
+    })
+
+    RuleScenario('The list and the task agree about the score', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      And('it has been assessed', assessed)
+      When('I ask for every task', askList)
+      And('I read the task', async () => {
+        await call('GET', `/api/tasks/${taskId}`)
+        detail = response.body
+      })
+      Then('both say the same score', () =>
+        expect(brief()?.score).toBe(
+          (detail['reliability'] as { score?: number }).score,
+        ),
+      )
+      And('both say the same coverage', () =>
+        expect(brief()?.coverage).toBe(
+          (detail['reliability'] as { coverage?: number }).coverage,
+        ),
+      )
+    })
+  })
+
   Rule('a task says what it is waiting for', ({ RuleScenario }) => {
     const ids = new Map<string, string>()
     const exists = (name: string) => async (): Promise<void> => {

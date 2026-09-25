@@ -10,6 +10,7 @@ import {
   type DriverType,
   type Observation,
   type ReliabilityAssessment,
+  type ReliabilityBrief,
   type ReliabilityCap,
   type ReliabilityDimension,
   type ReliabilityDriver,
@@ -257,6 +258,30 @@ export class ReliabilityRepository {
       taskId,
     )
     return row === undefined ? undefined : this.#hydrateAssessment(row)
+  }
+
+  /**
+   * The newest score and coverage of every task that has one, in one statement.
+   *
+   * The whole table once, the way the task list reads its dependency graph once
+   * for the whole page rather than once per row. Forty tasks asking `newest`,
+   * `drivers` and `forTask` each would be a hundred and twenty statements for
+   * one answer, and none of the JSON columns a row never draws are parsed here.
+   *
+   * A task with no assessment is **absent from the map**, never present with a
+   * zero: `unassessed` is a state, and a missing key is what it looks like.
+   */
+  newestScores(): Map<string, ReliabilityBrief> {
+    const rows = this.#db.all<{ task_id: string; score: number; coverage: number }>(
+      `SELECT a.task_id, a.score, a.coverage
+         FROM reliability_assessments a
+         JOIN (
+           SELECT task_id, MAX(sequence) AS sequence
+             FROM reliability_assessments
+            GROUP BY task_id
+         ) newest ON newest.task_id = a.task_id AND a.sequence = newest.sequence`,
+    )
+    return new Map(rows.map((row) => [row.task_id, { score: row.score, coverage: row.coverage }]))
   }
 
   /** Every judgement, oldest first — which is the order a graph wants. */

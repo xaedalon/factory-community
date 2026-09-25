@@ -223,6 +223,35 @@ describeFeature(feature, ({ Background, Rule }) => {
     })
   })
 
+  Rule('a listed task says how much to trust it', ({ RuleScenario }) => {
+    const listed = () =>
+      (answer.tasks as { reliability?: { score: number; coverage: number } }[] | undefined)?.[0]
+
+    RuleScenario('A listed task carries the score and the coverage', ({ Given, When, Then }) => {
+      Given('a task judged at 88 with 70% coverage', () => {
+        tasks = [aTask('Add due dates', 'project-1')]
+        publishTasks({ reliability: { score: 88, coverage: 70 } })
+      })
+      When('the agent lists the tasks', () => call('factory_task_list'))
+      Then('the listed task is 88 with 70% coverage', () =>
+        expect(listed()?.reliability).toEqual({ score: 88, coverage: 70 }),
+      )
+    })
+
+    RuleScenario('A task nobody has judged carries neither', ({ Given, When, Then }) => {
+      Given('a task nobody has judged', () => {
+        tasks = [aTask('Add due dates', 'project-1')]
+        publishTasks()
+      })
+      When('the agent lists the tasks', () => call('factory_task_list'))
+      // Absent, not zero. Every other optional key on a brief task reads the
+      // same way.
+      Then('the listed task carries no reliability', () =>
+        expect(listed()?.reliability).toBeUndefined(),
+      )
+    })
+  })
+
   Rule('what a project can run is what it is offered', ({ RuleScenario }) => {
     const workflows = (items: unknown[]): void => {
       factory.answer('/api/workflows?project=project-1', { items })

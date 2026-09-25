@@ -62,6 +62,17 @@ missing. An interpreter warns, names the measurement, and
 then lets you, because the risk is the repository owner's to take.
 [`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
 
+**A task row says how much to trust it.** The score and the evidence coverage, together — a 93 with
+41% coverage is not the same claim as a 93 with 96%, and a row showing only the first would be the
+flattery the reliability card was written to avoid. A task nobody has judged shows an em dash, never
+a zero: a zero reads as a verdict rather than as silence. In the table, on the kanban card, and on a
+task an agent lists over MCP.
+
+One query for the whole board rather than three per row. The card assembles the newest assessment,
+the drivers and the runs, which is right for one task and would be a hundred and twenty statements
+for a board of forty; a list reads a two-field projection of the newest row instead, and parses none
+of the JSON columns a row never draws.
+
 **An agent can order its own work.** MCP could create tasks and write workflows, and then only
 describe the order they should run in — prose nothing reads. `factory_task_depends_on` makes one task
 wait for another, and `factory_workflow_needs` says what a workflow that already exists waits for

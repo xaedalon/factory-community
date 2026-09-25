@@ -53,3 +53,18 @@ export const fillFor = (look: StateLook): string => look.fill ?? wash(look.tone)
 /** The colour a task's progress bar is drawn in, or the accent before it starts. */
 export const toneFor = (state: TaskState | undefined): string =>
   state === undefined ? 'var(--color-accent)' : STATE_LOOKS[state].tone
+
+/**
+ * The tone a reliability score is drawn in.
+ *
+ * Never the only signal — the number is beside it and the coverage beside that.
+ * This is emphasis, not information, and it lives here rather than in the card
+ * because the card and the task row both draw it: 90/75/60 is a *rule*, a 76 is
+ * not a 74, and three copies of a rule is how one of them ends up at 85.
+ */
+export const scoreTone = (score: number): string => {
+  if (score >= 90) return 'var(--color-ok)'
+  if (score >= 75) return 'var(--color-info)'
+  if (score >= 60) return 'var(--color-warn)'
+  return 'var(--color-danger)'
+}

@@ -275,6 +275,34 @@ Feature: The task board
       And I open "Add due dates"
       Then the workflows come before the steps
 
+  Rule: a row says how much to trust the task, in two numbers
+
+    A 93 with 41% coverage is not the same claim as a 93 with 96%, and a board
+    that showed only the first would be the flattery the reliability card was
+    written to avoid. Both numbers or neither — and neither is an em dash, never
+    a zero, because a zero on a row reads as a verdict rather than as silence.
+
+    Scenario: The row says the score and the coverage together
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      Then the row for "Add due dates" says 88 with 70% coverage
+
+    Scenario: A task nobody has judged shows an em dash rather than a zero
+      Given a task nobody has judged
+      When I open the tasks page
+      Then the row for "Add due dates" shows no score
+
+    Scenario: The card says them too
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      And I switch to the board view
+      Then the card for "Add due dates" says 88 with 70% coverage
+
+    Scenario: The table has a column for it
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      Then the table has a "Trust" column
+
   Rule: a count says what it counted
 
     "6/6 phases" on a task with five workflows reads as a miscount until you

@@ -1412,6 +1412,34 @@ Then('the evidence is above the steps', async ({ page }) => {
  * assertions measure against it and because a section that vanished would read
  * as a section that is missing.
  */
+Then(
+  'the row for {string} says {int} with {int}% coverage',
+  async ({ page }, name: string, score: number, coverage: number) => {
+    const cell = page.getByTestId(`reliability-${name}`)
+    await expect(cell).toContainText(String(score))
+    await expect(cell).toContainText(`${coverage}% evidence`)
+  },
+)
+
+Then('the row for {string} shows no score', async ({ page }, name: string) => {
+  // An em dash, not a zero. The testid is on both branches so this asserts what
+  // is drawn rather than that nothing could be found.
+  await expect(page.getByTestId(`reliability-${name}`)).toHaveText('—')
+})
+
+Then(
+  'the card for {string} says {int} with {int}% coverage',
+  async ({ page }, name: string, score: number, coverage: number) => {
+    const block = page.getByTestId(`card-reliability-${name}`)
+    await expect(block).toContainText(String(score))
+    await expect(block).toContainText(`${coverage}% evidence`)
+  },
+)
+
+Then('the table has a {string} column', async ({ page }, heading: string) => {
+  await expect(page.getByTestId('task-table').locator('th', { hasText: heading })).toBeVisible()
+})
+
 Then('the steps are folded away', async ({ page }) => {
   await expect(page.getByTestId('steps')).toBeVisible()
   await expect(page.getByTestId('steps').locator('ul')).toBeHidden()

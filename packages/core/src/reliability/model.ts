@@ -334,12 +334,32 @@ export interface ReliabilityAssessment {
 }
 
 /**
+ * The two numbers a list draws, and nothing else.
+ *
+ * A row wants the score and the evidence coverage. It does not want the
+ * dimensions, the caps, the explanation or who should deal with what — three
+ * JSON columns to parse and two more queries to run, per row.
+ *
+ * Both fields are required, which makes `state` derivable from presence: a task
+ * nobody has judged has no brief at all. That is deliberate. `unassessed` is a
+ * state and the honest shape for it in a list is nothing, because a `score: 0`
+ * on a row reads as a verdict.
+ */
+export interface ReliabilityBrief {
+  readonly score: number
+  readonly coverage: number
+}
+
+/**
  * What a task's reliability is right now.
  *
  * Assembled from the newest assessment and the drivers that are still active —
  * two indexed queries. It is deliberately not a stored row: a stored current
  * score is a second copy of something the history already says, and the two
  * disagree the first time an assessment is deleted or replayed.
+ *
+ * A list reads `ReliabilityBrief` from the same newest row through a narrower
+ * projection, so the number on a row and the number on the card cannot disagree.
  */
 export interface ReliabilitySummary {
   readonly taskId: string

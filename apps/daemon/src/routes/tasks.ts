@@ -235,15 +235,25 @@ export function registerTaskRoutes(
       })
       // One read for the whole board, not one per row.
       const blockers = dependencyView(tasks.dependencies())
+      // Likewise. `reliabilitySummary` is three queries and the arithmetic over
+      // every driver, which is right for the one task a card is drawn for and
+      // would be a hundred and twenty statements for a board of forty.
+      const scores = service.reliability.newestScores()
       return {
-        items: items.map((task) => ({
-          ...task,
-          actions: tasks.actions(task.id),
-          // Computed here rather than in the browser, which would need a
-          // request per row to do the same sum.
-          progress: progressOf(task),
-          blockers: blockers(task),
-        })),
+        items: items.map((task) => {
+          const brief = scores.get(task.id)
+          return {
+            ...task,
+            actions: tasks.actions(task.id),
+            // Computed here rather than in the browser, which would need a
+            // request per row to do the same sum.
+            progress: progressOf(task),
+            blockers: blockers(task),
+            // Absent for a task nobody has judged, never `score: 0` — a zero on
+            // a row reads as a verdict rather than as silence.
+            ...(brief === undefined ? {} : { reliability: brief }),
+          }
+        }),
       }
     },
   )

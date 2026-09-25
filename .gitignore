@@ -24,3 +24,19 @@ logs/
 # committed on purpose — those runbooks are the product — so this ignores the
 # one file rather than the directory.
 .claude/launch.json
+
+# Working notes, which are a maintainer's and not the product's.
+#
+# `PROJECT.md` is the decision record and `CHANGELOG.md` is the short version for
+# somebody deciding whether to upgrade; both are written to be read by strangers.
+# These three are neither — they are a running list of what was discovered, what
+# to fix later, and what to remember, written in the first person and about work
+# in progress. `improvements.md` was tracked here for eighteen increments before
+# anybody noticed, which is the reason this entry exists rather than a convention
+# somebody was supposed to follow.
+#
+# They are ignored rather than deleted: the files stay where whoever is working
+# can use them, and stop being published.
+improvements.md
+learnings.md
+memory.md

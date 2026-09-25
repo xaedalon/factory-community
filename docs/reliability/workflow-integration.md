@@ -79,8 +79,8 @@ Every agent step needs a provider. Factory ships three provider plugins and
 resolves one only when a step names it or exactly one is enabled, so on a stock
 installation the first run of any bundle — this one or `development` — refuses
 with *"3 are installed"* until the two you do not use are switched off on the
-plugins page. Recorded in [`../../improvements.md`](../../improvements.md): the
-daemon has no way to set a default provider, and it should.
+plugins page. A known gap: the daemon has no way to set a default provider, and
+it should.
 
 `validate` ends with the built-in `project-check` phase, which runs
 `{{ project.check }}` — the project's own check command, set on its page or

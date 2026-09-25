@@ -70,7 +70,23 @@ const OS_PATH_BAN = [
 ]
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/node_modules/**', '**/*.d.ts', '**/.features-gen/**'] },
+  // The two lists that must agree: anything `.gitignore` excludes is not ours to
+  // lint. `build/` and `release/` hold Pro's packaged desktop output — a working
+  // tree may hold both repositories — and `test-results/` and
+  // `playwright-report/` are a failed run's leftovers. Walking into any of them
+  // fails the gate on code that is not part of this repository.
+  {
+    ignores: [
+      '**/dist/**',
+      '**/node_modules/**',
+      '**/*.d.ts',
+      '**/.features-gen/**',
+      '**/build/**',
+      '**/release/**',
+      '**/test-results/**',
+      '**/playwright-report/**',
+    ],
+  },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {

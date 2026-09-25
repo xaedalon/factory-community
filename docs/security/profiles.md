@@ -88,6 +88,13 @@ factory run <workflow> --dry-run --profile build-tools
 The last one prints the argv the profile produces, which is the only way to see
 what it actually did without running anything.
 
-Then choose it on the project's page. A project naming a profile no scope
+Then choose it on the project's page. **Not on the settings page** — the
+installation-wide setting stays Default or Full Access on purpose. A profile is
+resolved through the chain of the project that names it, and a profile defined in
+one repository does not exist for any other; an installation-wide setting naming
+one would refuse to plan everywhere except where it was written. A profile
+belongs to the repository it is true of.
+
+ A project naming a profile no scope
 defines **refuses to plan** rather than falling back to Default, because falling
 back would quietly change what the run may do.

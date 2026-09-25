@@ -495,3 +495,19 @@ Feature: The definitions API
       # write the value it may have been about to refuse.
       Then the response is 400
       And the workflow "allowed" was not written
+
+  Rule: the installation-wide profile stays one of the two Factory ships
+
+    A custom profile is resolved through the chain of the project that names it,
+    and a profile written in one repository does not exist for any other. An
+    installation-wide setting naming one would refuse to plan everywhere except
+    where it was written — a footgun shaped exactly like a setting that works.
+
+    Scenario: A custom profile is refused as the installation's default
+      Given the user scope defines the profile "buildtools"
+      When I set the installation profile to "buildtools"
+      Then the response is 400
+
+    Scenario: The built-ins are still accepted
+      When I set the installation profile to "full-access"
+      Then the response is 200

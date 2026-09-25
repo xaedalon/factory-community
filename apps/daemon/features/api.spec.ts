@@ -1120,4 +1120,30 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the workflow "allowed" was not written', notWritten('allowed'))
     })
   })
+
+  Rule('the installation-wide profile stays one of the two Factory ships', ({ RuleScenario }) => {
+    RuleScenario('A custom profile is refused as the installation\'s default', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the user scope defines the profile "buildtools"', () => {
+        file(
+          join(userScope, 'profiles', 'buildtools.profile.yaml'),
+          'kind: factory.profile/v1\nname: buildtools\ncommands: [cargo]\n',
+        )
+      })
+      When('I set the installation profile to "buildtools"', () =>
+        call('PATCH', '/api/settings', { security: { profile: 'buildtools' } }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('The built-ins are still accepted', ({ When, Then }) => {
+      When('I set the installation profile to "full-access"', () =>
+        call('PATCH', '/api/settings', { security: { profile: 'full-access' } }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    })
+  })
 })

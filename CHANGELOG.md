@@ -62,6 +62,21 @@ missing. An interpreter warns, names the measurement, and
 then lets you, because the risk is the repository owner's to take.
 [`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
 
+**An agent can order its own work.** MCP could create tasks and write workflows, and then only
+describe the order they should run in — prose nothing reads. `factory_task_depends_on` makes one task
+wait for another, and `factory_workflow_needs` says what a workflow that already exists waits for
+(`factory_workflow_create` could always say it for one being written). Neither carries any rules: the
+store still refuses a ring, a task waiting for itself and a link across projects, and the sentence
+you get is the store's own. Writing `needs:` reads the workflow and writes it back against the etag,
+so a tool cannot overwrite an edit you made in your editor in between — it is told the file changed.
+
+The two dependency routes now read the initiator, as every other mutating task route already did.
+Not a new gate — an agent may order its own work — but a write recorded as coming from nobody is
+indistinguishable from yours, and MCP made an agent the caller.
+
+`docs/mcp.md`'s tool table is now checked against what is registered, in both directions. It said
+fifteen tools while there were twenty-two; a number nothing checks is a number that rots.
+
 **An API path the daemon does not serve is a 404, not the board.** The catch-all that lets
 `/tasks/abc` resolve in the app router was catching `/api/…` with it, so a page calling a route
 *this* daemon does not have got `index.html` with a **200** — and then failed on `undefined`

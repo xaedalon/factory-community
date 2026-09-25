@@ -176,6 +176,55 @@ export const mutationTools: readonly McpTool[] = [
   }),
 
   defineTool({
+    name: 'factory_workflow_needs',
+    title: 'Say what a workflow needs',
+    description:
+      'Record that a workflow cannot run on a task until another has finished — the way a ' +
+      'pipeline is chained. Use this on a workflow that already exists; factory_workflow_create ' +
+      'takes `needs` for one being written. Doctor reports a task whose workflows are out of ' +
+      'order, and the board offers to add a workflow that a chosen one needs.',
+    schema: z.object({
+      workflow: z.string().describe('The workflow to change.'),
+      needs: z
+        .array(z.string())
+        .describe('The workflows it waits for. Replaces what is there; pass [] to clear it.'),
+      project: PROJECT,
+    }),
+    run: async (input, context) => {
+      const found = await resolveProject({
+        api: context.api,
+        cwd: context.cwd,
+        given: input.project,
+      })
+      const inProject = `?project=${encodeURIComponent(found.project.id)}`
+      const at = `/api/workflows/${encodeURIComponent(input.workflow)}${inProject}`
+
+      // Read, change the one field, write it back against the etag that read
+      // returned. There is no patch-one-field route and that is deliberate: a
+      // definition is written whole, and an existing file is written only
+      // against the version it was read at. Sending the etag is what stops this
+      // tool overwriting an edit somebody made in their editor in between — a
+      // write without it is answered `exists` and changes nothing, which from
+      // here would look like a workflow that refused to be edited.
+      const current = await get<{ definition: Workflow; etag?: string }>(context, at)
+      const written = await put<{ status?: string; file?: string }>(context, at, {
+        definition: { ...current.definition, needs: input.needs },
+        ...(current.etag === undefined ? {} : { etag: current.etag }),
+      })
+      return {
+        workflow: input.workflow,
+        needs: input.needs,
+        project: { id: found.project.id, name: found.project.name },
+        ...(written.file === undefined ? {} : { file: written.file }),
+        next:
+          input.needs.length === 0
+            ? `"${input.workflow}" now waits for nothing.`
+            : `A task running "${input.workflow}" should run ${input.needs.join(', ')} first.`,
+      }
+    },
+  }),
+
+  defineTool({
     name: 'factory_task_depends_on',
     title: 'Make one task wait for another',
     description:
@@ -334,5 +383,7 @@ const post = <T>(context: ToolContext, path: string, body?: unknown): Promise<T>
   request<T>(context, path, 'POST', body)
 const del = <T>(context: ToolContext, path: string): Promise<T> =>
   request<T>(context, path, 'DELETE')
+const put = <T>(context: ToolContext, path: string, body?: unknown): Promise<T> =>
+  request<T>(context, path, 'PUT', body)
 const get = <T>(context: ToolContext, path: string): Promise<T> =>
   request<T>(context, path, 'GET')

@@ -1,7 +1,12 @@
 Feature: The tools an agent is given
-  Fifteen tools over one HTTP API. What matters is not that each one reaches a
+  Every tool over one HTTP API. What matters is not that each one reaches a
   route — that part is arithmetic — but what comes back, because the reader is a
   model deciding what to do next and it will act on whatever it is told.
+
+  The count used to be written here, and was wrong twice: fifteen while there
+  were twenty-two. A number nothing checks is a number that rots, so the tools
+  are counted by the scenario below instead, which fails when the documented
+  list and the registered one disagree.
 
   So three things are served rather than worked out here. What a task will
   accept right now comes from the daemon, which is the same list the board draws
@@ -18,6 +23,19 @@ Feature: The tools an agent is given
   Background:
     Given a Factory with the project "factory"
     And an agent working in that project
+
+  Rule: the documented tools are the registered tools
+
+    `docs/mcp.md` is how somebody decides whether Factory can do what they need
+    before installing anything, and it was hand-maintained against a list that
+    grew underneath it. A tool nobody documented is a tool nobody uses; a
+    documented tool that does not exist is worse.
+
+    Scenario: Every tool an agent is given is written down
+      Then every registered tool is listed in the documentation
+
+    Scenario: Nothing is documented that does not exist
+      Then every documented tool is registered
 
   Rule: a task carries the actions it will accept, never a guess
 
@@ -254,6 +272,40 @@ Feature: The tools an agent is given
       # the *read* route returns.
       When the agent writes a workflow "design" that needs "analysis"
       Then the reply names the file it wrote
+
+  Rule: what a workflow needs can be said after it was written
+
+    `factory_workflow_create` can say it, which covers the workflow an agent
+    writes itself and nothing else. The ordinary case is the pipeline a person
+    already has: five workflows that run in an order everybody knows and no file
+    records, so every task lists all five by hand and nothing checks the order.
+
+    There is no patch-one-field door in Factory, deliberately — a definition is
+    written whole, and an existing file is written only against the etag it was
+    read at. So this tool does what a person's editor does: read, change the one
+    field, write back with the etag. That round trip is the feature and not
+    overhead, because the thing it prevents is this tool overwriting an edit
+    made between the read and the write.
+
+    Scenario: A workflow that already exists can be told what it needs
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent says "development" needs "design"
+      Then Factory was asked to write "development"
+      And what was written needs "design"
+
+    Scenario: The write carries the etag the read returned
+      # Without it the write route answers `exists` and changes nothing, which
+      # would look from here like a workflow that refused to be edited.
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent says "development" needs "design"
+      Then the write carried the etag
+
+    Scenario: A workflow edited underneath the agent is not overwritten
+      Given the project has a workflow "development" that needs "analysis"
+      And somebody edits it before the write lands
+      When the agent says "development" needs "design"
+      Then it is refused
+      And the refusal says the file changed
 
   Rule: approving is a person's, and the surface says so by not offering it
 

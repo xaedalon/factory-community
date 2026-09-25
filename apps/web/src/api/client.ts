@@ -843,7 +843,15 @@ export const api = {
    */
   /** The bundles Factory ships, so a project can take one without a terminal. */
   exampleBundles: () =>
-    request<{ items: { name: string; description?: string; workflows: number; phases: number }[] }>(
+    request<{
+      items: {
+        name: string
+        description?: string
+        workflows: number
+        phases: number
+        profiles: number
+      }[]
+    }>(
       '/api/bundles/examples',
     ),
 

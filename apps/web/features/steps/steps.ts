@@ -2466,19 +2466,23 @@ Then('it offers to add the reliability workflows', async ({ page }) => {
   await expect(page.getByTestId('import-reliability')).toBeVisible()
 })
 
+Then('it offers to add the build tools profile', async ({ page }) => {
+  await expect(page.getByTestId('import-build-tools')).toBeVisible()
+})
+
 When('I add the reliability workflows', async ({ page }) => {
   await page.getByTestId('import-reliability').click()
 })
 
 Then('it says what was written', async ({ page }) => {
-  await expect(page.getByTestId('import-reliability-done')).toBeVisible()
+  await expect(page.getByTestId('import-bundle-done')).toBeVisible()
 })
 
 Then('the workflow {string} is in the project', async ({ page }, name: string) => {
   // Read off what the page says was written, not off the workflows list: the
   // list shows the daemon's own chain, and this landed in the project's scope —
   // which is the whole point of importing it against a project.
-  await expect(page.getByTestId('import-reliability-done')).toContainText(`${name}.workflow.yaml`)
+  await expect(page.getByTestId('import-bundle-done')).toContainText(`${name}.workflow.yaml`)
 })
 
 Then('no judging model is named', async ({ page }) => {
@@ -2534,20 +2538,20 @@ Given('the daemon refuses the next save', async ({ page }) => {
   )
 })
 
-Then('the reliability field says what went wrong', async ({ page }) => {
-  await expect(page.getByTestId('field-error-reliability')).toContainText('could not be read')
+Then('the field says what went wrong', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('could not be read')
 })
 
 Then("the form's banner says nothing", async ({ page }) => {
   await expect(page.getByTestId('error')).toHaveCount(0)
 })
 
-Then('the reliability field says the daemon was not understood', async ({ page }) => {
-  await expect(page.getByTestId('field-error-reliability')).toContainText('not JSON')
+Then('the field says the daemon was not understood', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('not JSON')
 })
 
 Then('it names the request that failed', async ({ page }) => {
-  await expect(page.getByTestId('field-error-reliability')).toContainText('/api/bundles/examples/')
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('/api/bundles/examples/')
 })
 
 When('I try to save the project', async ({ page }) => {
@@ -2648,4 +2652,12 @@ Then('it warns that the command runs whatever it is given', async ({ page }) => 
 
 Then('it does not warn', async ({ page }) => {
   await expect(page.getByTestId('profile-interpreter-warning')).toHaveCount(0)
+})
+
+When('I add the build tools profile', async ({ page }) => {
+  await page.getByTestId('import-build-tools').click()
+})
+
+Then('the profile {string} is in the project', async ({ page }, name: string) => {
+  await expect(page.getByTestId('import-bundle-done')).toContainText(`${name}.profile.yaml`)
 })

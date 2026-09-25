@@ -153,16 +153,27 @@ watch(cannotUseWorktrees, (blocked) => {
  * implementation of importing and one set of conflict rules. Only offered for a
  * project that exists: there is nowhere to write it until then.
  */
-const importing = ref(false)
+/** The bundle being imported, so only its own button says so. */
+const importing = ref('')
 const imported = ref<string[]>([])
 
-async function importReliability(): Promise<void> {
+/**
+ * The bundles Factory ships, offered by name rather than one hard-coded button.
+ *
+ * It was `importReliability()` and a button that said so, which worked until a
+ * second bundle shipped. Read from the daemon, so a bundle added later needs no
+ * change here — and so the counts beside each one are the file's rather than a
+ * sentence somebody remembered to update.
+ */
+const shipped = ref<{ name: string; description?: string; profiles: number }[]>([])
+
+async function importShipped(name: string): Promise<void> {
   if (isNew.value) return
-  importing.value = true
+  importing.value = name
   error.value = undefined
-  fieldErrors.value.reliability = undefined
+  fieldErrors.value.bundles = undefined
   try {
-    const bundle = await api.exampleBundle('reliability')
+    const bundle = await api.exampleBundle(name)
     const result = await api.importBundle(bundle.text, {
       scope: 'project',
       dryRun: false,
@@ -173,9 +184,9 @@ async function importReliability(): Promise<void> {
     // Against the control that caused it, not in the form's banner: this
     // failure is about one button, and a message at the other end of a long
     // form reads as unrelated to it.
-    fieldErrors.value.reliability = caught instanceof ApiError ? caught.message : String(caught)
+    fieldErrors.value.bundles = caught instanceof ApiError ? caught.message : String(caught)
   } finally {
-    importing.value = false
+    importing.value = ''
   }
 }
 
@@ -279,6 +290,11 @@ onMounted(async () => {
     definedProfiles.value = (await api.list('profile')).items.map((item) => item.name)
   } catch {
     definedProfiles.value = []
+  }
+  try {
+    shipped.value = (await api.exampleBundles()).items
+  } catch {
+    shipped.value = []
   }
 })
 </script>
@@ -388,22 +404,37 @@ onMounted(async () => {
       </FieldRow>
 
       <FieldRow
-        v-if="!isNew"
-        label="Reliability"
-        icon="check"
-        :error="fieldErrors.reliability"
-        hint="Factory judges every run whatever your workflows are. This adds the five-stage pipeline it was designed around — analysis, design, implementation, validation, verification — into this repository, where you can edit it."
+        v-if="!isNew && shipped.length > 0"
+        label="Add to this repo"
+        icon="import"
+        :error="fieldErrors.bundles"
+        hint="Definitions Factory ships, copied into this repository where you can edit them. They go in through the ordinary import, so what lands is what a preview would have shown."
       >
         <div>
-          <button
-            type="button"
-            class="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm text-[var(--color-ink)] hover:bg-[var(--color-raised)]"
-            data-testid="import-reliability"
-            :disabled="importing"
-            @click="importReliability"
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="bundle in shipped"
+              :key="bundle.name"
+              type="button"
+              class="rounded-lg border border-[var(--color-line)] px-3 py-1.5 text-sm text-[var(--color-ink)] hover:bg-[var(--color-raised)] disabled:opacity-60"
+              :data-testid="`import-${bundle.name}`"
+              :title="bundle.description"
+              :disabled="importing !== ''"
+              @click="importShipped(bundle.name)"
+            >
+              {{ importing === bundle.name ? 'Importing…' : bundle.name }}
+            </button>
+          </div>
+          <!-- A profile is not a workflow, and importing one does not make a
+               project use it: it has to be chosen below. Said here because the
+               button looks like it finished the job. -->
+          <p
+            v-if="shipped.some((bundle) => bundle.profiles > 0)"
+            class="mt-1.5 text-xs text-[var(--color-ink-faint)]"
           >
-            {{ importing ? 'Importing…' : 'Add the reliability workflows' }}
-          </button>
+            A bundle carrying a profile only writes the file. Choose it under
+            &ldquo;Runs under&rdquo; to use it.
+          </p>
           <!-- The files, not a count. Factory has just written into somebody's
                working copy, and the next thing that happens is a `git status`
                they were not expecting — the same reason the scaffold report
@@ -411,7 +442,7 @@ onMounted(async () => {
           <div
             v-if="imported.length > 0"
             class="mt-1.5 text-meta text-[var(--color-ink-muted)]"
-            data-testid="import-reliability-done"
+            data-testid="import-bundle-done"
           >
             <p>Written into this repository:</p>
             <ul class="mt-0.5 space-y-0.5">

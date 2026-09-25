@@ -101,10 +101,11 @@ Feature: Sharing a workflow with someone else
     It goes in through the ordinary import path, so what lands in the repository
     is what the preview screen would have shown — one door, one set of rules.
 
-    Scenario: The project page offers the reliability workflows
+    Scenario: The project page offers every bundle Factory ships
       Given a project
       When I open that project's settings
       Then it offers to add the reliability workflows
+      And it offers to add the build tools profile
 
     Scenario: Adding them writes them into the project
       Given a project
@@ -121,7 +122,7 @@ Feature: Sharing a workflow with someone else
       And the daemon refuses to hand over the bundle
       When I open that project's settings
       And I add the reliability workflows
-      Then the reliability field says what went wrong
+      Then the field says what went wrong
       And the form's banner says nothing
 
     Scenario: An answer that is not JSON says so, rather than failing on nothing
@@ -133,7 +134,7 @@ Feature: Sharing a workflow with someone else
       And the daemon answers that request with a page instead of JSON
       When I open that project's settings
       And I add the reliability workflows
-      Then the reliability field says the daemon was not understood
+      Then the field says the daemon was not understood
       And it names the request that failed
 
   Rule: an error is shown where it was caused
@@ -149,6 +150,15 @@ Feature: Sharing a workflow with someone else
       And I try to save the project
       Then the form says what went wrong
       And it says so above the first field
+
+    Scenario: Importing a profile bundle writes the profile and says to choose it
+      # The button looks like it finished the job, and it did not: a profile is
+      # a file until a project points at it.
+      Given a project
+      When I open that project's settings
+      And I add the build tools profile
+      Then it says what was written
+      And the profile "build-tools" is in the project
 
   Rule: a project says which model reads its work
 

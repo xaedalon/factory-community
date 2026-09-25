@@ -65,6 +65,7 @@ export function registerBundleRoutes(
           : { description: read.bundle.metadata.description }),
         workflows: read.bundle?.workflows?.length ?? 0,
         phases: read.bundle?.phases?.length ?? 0,
+        profiles: read.bundle?.profiles?.length ?? 0,
       }
     })
     return { items }

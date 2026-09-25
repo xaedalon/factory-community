@@ -74,6 +74,15 @@ describeFeature(feature, ({ Background, Rule, Scenario, ScenarioOutline, BeforeE
     )
   })
 
+  Scenario("Copilot dots a model's minor version rather than hyphenating it", ({ Then, And }) => {
+    Then('"fast" resolves to "claude-haiku-4.5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('fast')).toBe('claude-haiku-4.5'),
+    )
+    And('"balanced" resolves to "claude-sonnet-5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('balanced')).toBe('claude-sonnet-5'),
+    )
+  })
+
   Scenario('A literal model identifier passes through untouched', ({ Then }) => {
     Then('"claude-fable-5" resolves to "claude-fable-5" for "claude"', () =>
       expect(provider('claude').resolveModel('claude-fable-5')).toBe('claude-fable-5'),

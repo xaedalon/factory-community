@@ -68,7 +68,29 @@ almost nothing reads.
 by `problems[].field`, falling back to the banner; the routes that refuse a
 field send `field` with the message. Then `placeError`'s string matching goes.
 
-## 4. `git.feature` fails under a saturated machine, and it is the deadline
+## 4. `factory bundle import --scope project` crashes outside a project
+
+`writeTarget` throws a written-out sentence when the chain has no scope of the
+kind asked for, and the CLI's dispatch does not catch it — so importing into a
+project scope from a directory that has none prints a Node stack trace:
+
+```
+Error: No project scope in this chain. Available: user, builtin
+    at writeTarget (packages/config/dist/store.js:137:15)
+```
+
+The sentence inside is the right one. It is the delivery that is wrong: a
+mistyped `--scope` reads as a crash in Factory rather than as a thing the person
+did.
+
+**Found by:** importing the profile bundle from the wrong directory while
+verifying custom profiles end to end.
+
+**Shape of the fix:** catch it where the other command failures are caught and
+return it as a `failed([...])` like every other refusal. One `try` in the
+dispatch, or a `writeTargetOrProblem` beside the throwing one.
+
+## 5. `git.feature` fails under a saturated machine, and it is the deadline
 
 Seen twice on 2026-09-24, both times in a full `pnpm test` (59 workers), both
 times passing when the file is run alone:
@@ -93,7 +115,7 @@ deadline being measured by a test that cannot control the load.
 *classifying* git's answers, not about how fast git is, and the timeout path has
 a scenario of its own that sets it deliberately.
 
-## 5. `needs:` describes an order nothing acts on
+## 6. `needs:` describes an order nothing acts on
 
 A workflow's `needs:` is read by doctor (to report a task whose workflows are out
 of order) and by the bundle exporter (to gather the closure). Assigning `verify`
@@ -107,7 +129,7 @@ the board has the information to offer better.
 `needs` one that is not on the task, offer to add it. An offer, not an
 expansion: `verify` alone is a legitimate thing to want.
 
-## 6. Coverage credit for a declaration is asymmetric
+## 7. Coverage credit for a declaration is asymmetric
 
 `observationsFrom` credits a declaration's *first* expected-evidence key against
 an artifact actually arriving, and the rest on the run completing. A workflow

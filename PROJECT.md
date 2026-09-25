@@ -1403,6 +1403,87 @@ become a gate. What they are is *explainable*, which a hidden model would not be
 [`docs/reliability/implementation-summary.md`](docs/reliability/implementation-summary.md)
 says what was built, what was left, and what is uncalibrated.
 
+## After 0.1.0 — a profile between Default and Full Access
+
+The Default profile launches Claude Code with an allow-list of four package
+managers. A Node project is served; a Rust one is not, and neither is a Makefile,
+a Go module or anything that reaches for `docker`. The only lever was Full
+Access, which removes the workspace boundary to buy one command.
+
+So: a third position, and it is a **definition** rather than a setting —
+`.xaedalon/.factory/profiles/`, layered, editable, shareable in a bundle.
+`docs/proposals/execution-profiles.md` specified this in §2, §26 and §27 and
+called it Phase 7; this is that, built at the level Factory can actually enforce.
+
+```yaml
+kind: factory.profile/v1
+name: build-tools
+extends: default
+commands: [cargo, make, go]
+```
+
+**It widens which commands may run and never where they may write.** A custom
+profile is confined by construction: `isConfined` answers by exception, so every
+name that is not `full-access` keeps the boundary, the credential filter and the
+directory grants. There is no key that turns those off.
+
+**It cannot reach Full Access.** A profile passing what Full Access passes is
+refused when it is saved, derived from each installed provider's own flags rather
+than listed, so it stays true as descriptors change — and derived against
+*Default*, because the subtraction filters out what the profile itself passes and
+checking it against its own arguments would let it delete the token that would
+have caught it.
+
+**A project naming a profile no scope defines refuses to plan.** Falling back to
+Default would quietly change what the run may do, which is the failure the
+stored-profile guard already exists to stop, one layer up.
+
+**Only one of the three CLIs can honour it.** Claude Code has `--allowedTools`
+and `--disallowedTools`; Copilot has four coarse switches; Codex expresses
+nothing and its descriptor says so. A profile's commands reach Claude Code and
+change nothing under the others — and Factory reports that, because an absence
+nobody is told about is a flag that reads correctly and does nothing.
+
+**The measurements that shaped it**, taken against Claude Code 2.1.281 while
+planning:
+
+| | |
+|---|---|
+| `git status`, `git log`, `cat`, `find` | **already allowed** under Default |
+| `git -C <path> status`, and `git -C .` | refused — the *flag*, wherever it points |
+| `make check`, Default list | refused |
+| `make check`, with the profile | allowed |
+| a write outside the workspace, either way | refused |
+
+Read-only commands are auto-approved whatever an allow-list says. That is why
+the shipped example lists `cargo`, `make`, `go`, `gradle`, `mvn` and `docker` and
+no read-only tool at all: an entry that changes nothing is an entry that misleads
+whoever wrote it.
+
+It also disproved the feature's first justification. A blocked task's refusals
+looked like a missing allow-list and were not — `git -C` is the boundary working,
+and the fix was a prompt change costing nothing. The feature stands on the owner's
+reasoning instead: the two shipped profiles are untouched, and a third position
+exists for the owner of a repository to take a risk deliberately. The obligation
+that follows is informedness, which is why every surface says what a profile
+widens and what it cannot.
+
+**What the mutations taught this time.** Three, all of them one word wide:
+
+- **A dropped flag has to take its value with it.** Folding a profile's commands
+  into the existing `--allowedTools` means removing the old flag, and a value
+  left behind becomes a positional argument — which for a CLI that takes its
+  prompt positionally *is* the prompt. The agent would have been asked to do
+  `Bash(pnpm *)` instead of the work.
+- **A scenario that does not reach the branch it names.** "The same flag with an
+  equals sign is refused" passed against the whole token and never exercised the
+  split. The mutation survived, and the replacement makes the value half the only
+  thing that can match — which is the real Claude case, where Default and Full
+  Access share the flag and differ only in its value.
+- **`warn` and `refuse` are one word apart.** An interpreter in a profile is a
+  warning on purpose. Making it an error is in the round, because the difference
+  between informing somebody and deciding for them is a single string literal.
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -1423,6 +1504,7 @@ The vocabulary is deliberately small, and it is the vocabulary in the code.
 | **Bundle** | One self-contained YAML file holding a workflow plus every definition it needs. Its inner definitions are written by the same writers that produce definition files, so a bundle contains exactly what would sit on disk. |
 | **Run** | One execution attempt of a workflow. It records where it came from and how deep it is, so work that starts work can be bounded. |
 | **Initiator** | Who asked for a piece of work, when it was not a person. The run and task come from the environment Factory stamped into the agent it launched; the label the client gives for itself is read by people and by no rule. |
+| **Profile** | How much authority a run gets. Two ship — Default and Full Access — and a third kind is a *definition* somebody writes, widening which commands an agent may run and nothing else. |
 | **Reliability** | How much to trust a task's current solution, given the evidence available. A number, its coverage, and the findings behind both. Never a probability — see `docs/reliability/`. |
 | **Evidence coverage** | How much of the evidence a sufficiently verified solution would have has actually been collected. Read beside reliability, never instead of it. |
 | **Driver** | A named reason reliability is lower than it might be — a regression, an ambiguity, something refused. Owned by an agent or a person, and the thing the score exists to point at. |
@@ -1568,6 +1650,7 @@ this repository does not contain.
 | `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, the dependency picker, what an installation with no repository is told, and the settings page — theme, scale, and what agents may reach |
 | `packages/core/features/run.feature` | Running a plan: order, failure, deadlines, approval gates |
 | `packages/core/features/execution-profiles.feature` | Which profile applies: project over installation over `default`, and one name for each |
+| `packages/core/features/custom-profiles.feature` | A profile somebody wrote: still confined, cannot reach Full Access, and what a provider that cannot honour it says |
 | `packages/core/features/workspace-boundary.feature` | What counts as inside the workspace, including `..`, a prefix sibling and a real symlink |
 | `packages/core/features/agent-environment.feature` | What a step's process can see: credentials withheld, a provider's own kept, and every name said |
 | `packages/core/features/processes.feature` | Stopping what Factory started: the group not the process, proved on a real grandchild |

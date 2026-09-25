@@ -32,6 +32,34 @@ five-stage pipeline it was designed around ships as a bundle with one click on t
 [`docs/reliability/`](docs/reliability/) is the whole of it, and says plainly that these are
 heuristics rather than calibrated odds.
 
+**A profile of your own, between Default and Full Access.** A Rust project's agent could not run
+`cargo test`; a Makefile project's could not run `make check`. The only lever was Full Access, which
+answers a question nobody asked. Now a repository can write down which commands its agents may run:
+
+```yaml
+kind: factory.profile/v1
+name: build-tools
+extends: default
+commands: [cargo, make, go]
+```
+
+It is a definition like any other — `.xaedalon/.factory/profiles/`, layered, editable on the board
+with the YAML preview, shareable in a bundle, and `factory run --dry-run --profile <name>` shows
+the argv it produces before you commit to it. Factory ships `build-tools.bundle.yaml` as a
+worked example.
+
+*What it cannot do:* a profile **widens which commands may run and never where they may write**. It
+is confined by construction, `extends: default` is the only base, and one that passes what Full
+Access passes is refused when it is saved — derived from each provider's own flags, so it stays true
+as they change. A project naming a profile no scope defines refuses to plan rather than falling
+back.
+
+*What it is honest about:* read-only commands are already allowed, so listing `cat` buys nothing.
+Only Claude Code can honour a command list — Copilot and Codex have no per-command concept, and
+Factory says so rather than letting you assume. An interpreter warns, names the measurement, and
+then lets you, because the risk is the repository owner's to take.
+[`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
+
 **An API path the daemon does not serve is a 404, not the board.** The catch-all that lets
 `/tasks/abc` resolve in the app router was catching `/api/…` with it, so a page calling a route
 *this* daemon does not have got `index.html` with a **200** — and then failed on `undefined`

@@ -37,6 +37,11 @@ the repository and `find` its way around. What the list governs is commands with
 which is why `cargo`, `make`, `go` and `docker` are refused and `pnpm` is not.
 [`providers.md`](providers.md) has the measurements.
 
+**If this list is not enough, write a profile rather than reaching for Full
+Access.** A custom profile adds commands to this one and changes nothing else —
+the boundary, the credential filter and the directory grants all still apply.
+[`profiles.md`](profiles.md) is how.
+
 It is worth being exact about what the list costs. `pnpm test` runs your
 project's own code and `pnpm exec` runs anything, so **inside those commands the
 workspace boundary does not hold.** That is why the list is package managers and

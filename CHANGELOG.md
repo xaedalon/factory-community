@@ -6,7 +6,7 @@ What changed, per release. The reasoning behind each decision lives in
 Versions follow [semantic versioning](https://semver.org). Until 1.0.0 the public surface — the
 plugin SDK, the scope layout, the HTTP API — may still move, and a minor bump is where it will move.
 
-## Unreleased
+## 0.2.0 — 2026-09-25
 
 **A task now says how much to trust it.** Factory could tell you a task was `done`. It could not
 tell you what that was worth. Every run is judged from what Factory observed — exit codes, refused

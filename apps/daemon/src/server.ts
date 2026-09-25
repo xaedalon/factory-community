@@ -40,7 +40,7 @@ export function buildServer(
 
   app.get('/api/health', async () => ({
     ok: true,
-    version: '0.1.0',
+    version: '0.2.0',
     // What the boot had to correct. Silence here would hide the one thing a
     // person most wants to know after a crash: what was lost.
     ...(service === undefined

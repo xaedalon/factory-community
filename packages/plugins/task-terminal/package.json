@@ -1,6 +1,6 @@
 {
   "name": "@factory/task-terminal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Opens a terminal where a task's work is.",

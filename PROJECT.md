@@ -15,13 +15,17 @@ This document is the source of truth, written as the project is built.
 
 ## Status
 
-**Eighteen increments in, and the whole loop works**: author a workflow in the browser or by hand,
-point a task at a repository, queue it, and the daemon gives it a worktree, runs the agents, keeps
-what they printed and what they produced, stops at the gate you asked for, and continues when you
-approve. From a terminal, from the board, or from Pro's desktop app — the same API either way.
-**6,981 Gherkin steps green below the browser** across 51 feature files, 185 of them in a real
-browser, and smoke runs against the real agent CLIs. Every one of those runs in CI, on macOS and
-Linux, alongside a job that installs from a clean clone and asks the daemon for a page.
+**Eighteen increments and a release in, and the whole loop works**: author a workflow in the browser
+or by hand, point a task at a repository, queue it, and the daemon gives it a worktree, runs the
+agents, keeps what they printed and what they produced, stops at the gate you asked for, and
+continues when you approve. From a terminal, from the board, or from Pro's desktop app — the same API
+either way. Since 0.1.0 it also says how much to trust what came back, runs under a profile the
+repository wrote, and can be driven over MCP.
+
+**8,660 Gherkin steps green below the browser** across 62 feature files, and **235 scenarios in a
+real browser** across five more, plus smoke runs against the real agent CLIs. Every one of those runs
+in CI, on macOS and Linux, alongside a job that installs from a clean clone and asks the daemon for a
+page.
 
 Since increment 17 an agent is also **confined to the workspace it was given**, handed an
 environment with the credentials taken out, and stoppable — process tree and all. What that

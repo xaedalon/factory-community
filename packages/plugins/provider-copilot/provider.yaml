@@ -19,8 +19,13 @@ supports:
 # Copilot's `--model` takes a concrete id, not a tier alias, so these need
 # checking when GitHub retires one — the CLI validates the value and exits
 # immediately, which at least fails fast and clearly.
+#
+# `claude-opus-5` was retired by GitHub and reported on 2026-09-25. The CLI has
+# no way to list what it accepts — there is no `models` subcommand and `--help`
+# only says `--model <model>` — so this is the one field here that cannot be
+# checked from a terminal and is changed on a report instead.
 models:
-  strong: claude-opus-5
+  strong: claude-opus-5-5
   balanced: claude-sonnet-5
   fast: claude-haiku-4-5
 

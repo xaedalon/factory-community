@@ -167,6 +167,22 @@ Feature: Sharing a workflow with someone else
       When I open that project's settings
       Then no judging model is named
 
+    Scenario: A profile the project defines is offered as its authority
+      # It was not. The picker listed profiles from the *daemon's* scopes rather
+      # than the project's, so a profile written into a repository — valid,
+      # selected in the database, visible on the Profiles page — was missing
+      # from the one control that exists to choose it.
+      Given a project
+      And that project defines the profile "development"
+      When I open that project's settings
+      Then "development" can be chosen as the authority
+
+    Scenario: The built-ins are offered whatever a project defines
+      Given a project
+      When I open that project's settings
+      Then "default" can be chosen as the authority
+      And "full-access" can be chosen as the authority
+
     Scenario: A model can be named and it stays named
       Given a project
       When I open that project's settings

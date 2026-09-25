@@ -283,11 +283,21 @@ const canSave = computed(
 
 onMounted(async () => {
   await load()
+  // **Asked of this project's chain**, not the daemon's. A profile written into
+  // a repository lives in that repository's scope, so listing without the
+  // project id finds the daemon's own scopes and reports nothing — which is
+  // exactly what happened: a profile sitting in the project's `profiles/`
+  // directory, valid, selected in the database, and absent from the picker that
+  // is supposed to offer it.
+  //
   // Never fatal: the picker still offers the two built-ins, which is what every
   // installation has. A profile list that could not be read is a smaller
   // problem than a page that will not open.
   try {
-    definedProfiles.value = (await api.list('profile')).items.map((item) => item.name)
+    const listed = isNew.value
+      ? await api.list('profile')
+      : await api.list('profile', id.value as string)
+    definedProfiles.value = listed.items.map((item) => item.name)
   } catch {
     definedProfiles.value = []
   }

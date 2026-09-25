@@ -2451,10 +2451,13 @@ Then('the drivers list is not drawn', async ({ page }) => {
 
 /** The project these scenarios open. Registered, not the suite's default one. */
 let settingsProject = ''
+/** Its directory, so a definition can be written into that repository's own scope. */
+let settingsRepo = ''
 
 Given('a project', async ({ world }) => {
   await world.startDaemon()
-  settingsProject = await world.addProject('judged', world.makeRepository('judged'))
+  settingsRepo = world.makeRepository('judged')
+  settingsProject = await world.addProject('judged', settingsRepo)
 })
 
 When("I open that project's settings", async ({ page }) => {
@@ -2666,4 +2669,19 @@ Then('it says a profile is chosen on a project', async ({ page }) => {
   const said = page.getByTestId('profile-how-to-use')
   await expect(said).toBeVisible()
   await expect(said).toContainText('Authority')
+})
+
+Given('that project defines the profile {string}', async ({ world }, name: string) => {
+  // Into the *project's* own scope, which is the whole point of the scenario:
+  // a profile in the daemon's scopes would pass for the wrong reason.
+  world.profile(
+    `${settingsRepo}/.xaedalon/.factory`,
+    name,
+    `kind: factory.profile/v1\nname: ${name}\ncommands: [cargo]\n`,
+  )
+})
+
+Then('{string} can be chosen as the authority', async ({ page }, name: string) => {
+  const options = page.locator('[data-testid="project-profile"] option')
+  await expect(options.filter({ hasText: name }).first()).toHaveCount(1)
 })

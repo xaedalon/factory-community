@@ -165,3 +165,40 @@ why their one declared key earned nothing.
 **Shape of the fix:** credit every declared key on a completed run, and let the
 artifact carry the *first* key only when there is an artifact to carry it. Or
 keep the rule and say it in `evidence-coverage.md`, which currently does not.
+
+## 9. The interpreter list is written twice, and only one copy is enforced
+
+`packages/core/src/schema/profile.ts` exports `INTERPRETERS`, which the parser
+uses to warn on `commands: [node]`. `apps/web/src/pages/ProfileEditPage.vue`
+declares the same fourteen names again as a literal, to warn while the list is
+being typed.
+
+Both copies are right today. They are two copies of a security judgement, and
+the board's is the one a profile author actually reads — so if core's list grows,
+the warning the author sees goes stale silently, which is the failure this
+project already refuses elsewhere (a flag that reads correctly and does nothing).
+
+The board deliberately does not depend on `@factory/core` — only on
+`@factory/store` — so the fix is not an import.
+
+**Shape of the fix:** serve the list. `/api/registries/providers` already carries
+`commandAllowFlag` and `commandDenyFlag` so the editor can be honest about what
+a CLI cannot honour; the interpreter names belong in a registry route beside
+them, with the board's literal deleted. Failing that, a test that reads both
+files and diffs the lists — the same guard-on-the-guard shape as
+`serializer-exhaustiveness`.
+
+## 10. `lint` reads directories `.gitignore` excludes
+
+`build/` and `release/` are in `.gitignore` because a working tree may hold
+Factory Pro's packaged desktop output and neither belongs in a commit. ESLint has
+its own ignore list and does not read `.gitignore`, so `pnpm lint` walks into
+them: a `build/` directory produced by Pro — or a scratch file left in one —
+fails the gate with errors in code that is not part of this repository.
+
+Found by leaving a one-off script in `build/`, which failed `pnpm lint` with
+thirteen `no-undef` errors about `console` and `process` while every source file
+was clean.
+
+**Shape of the fix:** add `build/`, `release/` and `test-results/` to the ESLint
+config's `ignores`, so the two ignore lists agree about what is not ours.

@@ -103,6 +103,32 @@ Feature: Seeing what is installed
       And I allow the command "node"
       Then it warns that the command runs whatever it is given
 
+    Scenario: A provider that cannot allow one command is named
+      # The Rule above promises this honesty and nothing tested it. Codex
+      # expresses no command list at all, so an Allow entry never reaches it —
+      # invisibly, unless the page says which providers are missing it.
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "cargo"
+      Then it names a provider that cannot allow one command
+
+    Scenario: A provider that cannot forbid one command is named too
+      # Denying is a separate question with a separate answer, and the page had
+      # no note for it: a denial written for a CLI with no deny-list was taken in
+      # silence. The denial is the half somebody writes *because* they are being
+      # careful, so it is the worse one to lose quietly.
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "git"
+      And I deny the command "git push"
+      Then it names a provider that cannot forbid one command
+
+    Scenario: Denying nothing says nothing about deny-lists
+      When I open the new profile page
+      And I name it "buildtools"
+      And I allow the command "git"
+      Then it says nothing about deny-lists
+
     Scenario: An ordinary build tool does not warn
       When I open the new profile page
       And I name it "buildtools"

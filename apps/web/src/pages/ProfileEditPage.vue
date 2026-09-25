@@ -73,6 +73,19 @@ const cannotHonour = computed(() =>
     : providers.value.filter((entry) => entry.commandAllowFlag === undefined),
 )
 
+/**
+ * And the same question for the other half, asked separately because the answer
+ * is different: Claude has both flags, Copilot and Codex have neither, and a CLI
+ * with an allow-list and no deny-list would take these entries in silence. The
+ * denial is the half somebody writes *because* they are being careful, so it is
+ * the worse one to lose quietly.
+ */
+const cannotForbid = computed(() =>
+  denyCommands.value.length === 0
+    ? []
+    : providers.value.filter((entry) => entry.commandDenyFlag === undefined),
+)
+
 onMounted(async () => {
   await editor.load(name.value)
   providers.value = (await api.providers()).items
@@ -188,6 +201,15 @@ onMounted(async () => {
           placeholder="git push"
           testid="profile-deny-commands"
         />
+        <p
+          v-if="cannotForbid.length > 0"
+          class="mt-2 text-xs text-[var(--color-ink-muted)]"
+          data-testid="profile-deny-unsupported"
+        >
+          {{ cannotForbid.map((entry) => entry.displayName).join(', ') }}
+          {{ cannotForbid.length === 1 ? 'has' : 'have' }} no deny-list, so these are not taken back
+          out of {{ cannotForbid.length === 1 ? 'its' : 'their' }} runs.
+        </p>
       </FieldRow>
     </template>
 

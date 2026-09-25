@@ -63,6 +63,13 @@ and as a warning on the run. An absence that is not reported is a flag that
 reads correctly and does nothing, which is the mistake this project has already
 made once.
 
+`deny_commands:` is asked separately, because the answer can differ: a CLI may
+have an allow-list and no deny-list, and then the allowing half of a profile
+lands while the forbidding half does not. Claude Code has both. The profile page
+names the providers missing each half under the field it belongs to, rather than
+one note for both — a denial is the half somebody writes *because* they are being
+careful, so it is the worse one to lose quietly.
+
 `providers.<id>.args` is the way out: raw arguments, appended verbatim, for what
 the portable vocabulary cannot express. They are never "unsupported", because
 there is nothing to translate.

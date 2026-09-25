@@ -95,6 +95,13 @@ export function registerInspectionRoutes(
       ...(entry.capability.descriptor.commandAllowFlag === undefined
         ? {}
         : { commandAllowFlag: entry.capability.descriptor.commandAllowFlag }),
+      // And whether it can be told that one command is *forbidden*. A separate
+      // question with a separate answer: Claude has both flags, and a CLI with
+      // an allow-list and no deny-list would otherwise take a profile's
+      // denials in silence. The editor needs both to say which half is lost.
+      ...(entry.capability.descriptor.commandDenyFlag === undefined
+        ? {}
+        : { commandDenyFlag: entry.capability.descriptor.commandDenyFlag }),
     })),
   }))
 

@@ -56,7 +56,9 @@ back.
 
 *What it is honest about:* read-only commands are already allowed, so listing `cat` buys nothing.
 Only Claude Code can honour a command list — Copilot and Codex have no per-command concept, and
-Factory says so rather than letting you assume. An interpreter warns, names the measurement, and
+Factory says so rather than letting you assume, for allowing and forbidding separately: a CLI can
+have an allow-list and no deny-list, and then the careful half of a profile is the half that goes
+missing. An interpreter warns, names the measurement, and
 then lets you, because the risk is the repository owner's to take.
 [`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
 

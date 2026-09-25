@@ -192,6 +192,14 @@ export interface ProviderEntry {
    * there is nothing in the YAML that would reveal it.
    */
   commandAllowFlag?: string
+  /**
+   * The flag that forbids one command, if this CLI has one.
+   *
+   * A separate question from the one above with a separate answer — Claude has
+   * both, and a CLI with an allow-list and no deny-list would take a profile's
+   * denials in silence. The editor needs both to say which half is lost.
+   */
+  commandDenyFlag?: string
 }
 
 export type TaskState =

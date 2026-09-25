@@ -472,6 +472,25 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
+  Scenario('The provider registry says which half of a profile a CLI can honour', ({ When, Then, And }) => {
+    When('I GET "/api/registries/providers"', () => call('GET', '/api/registries/providers'))
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    const flagged = (id: string) =>
+      (response.body.items as { id: string; commandAllowFlag?: string; commandDenyFlag?: string }[]).find(
+        (item) => item.id === id,
+      )
+    And('"claude" can be told one command is allowed', () =>
+      expect(flagged('claude')?.commandAllowFlag).toBe('--allowedTools'),
+    )
+    And('"claude" can be told one command is forbidden', () =>
+      expect(flagged('claude')?.commandDenyFlag).toBe('--disallowedTools'),
+    )
+    And('"codex" can be told neither', () => {
+      expect(flagged('codex')?.commandAllowFlag).toBeUndefined()
+      expect(flagged('codex')?.commandDenyFlag).toBeUndefined()
+    })
+  })
+
   Scenario('Doctor reports findings in the body, not the status', ({ Given, When, Then, And }) => {
     Given('the project defines a workflow naming a missing phase', () =>
       file(workflowFile(projectScope, 'dangling'), 'name: dangling\nphases: [nowhere]\n'),

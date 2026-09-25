@@ -2657,6 +2657,23 @@ Then('it does not warn', async ({ page }) => {
   await expect(page.getByTestId('profile-interpreter-warning')).toHaveCount(0)
 })
 
+When('I deny the command {string}', async ({ page }, command: string) => {
+  await page.getByTestId('profile-deny-commands-input').fill(command)
+  await page.getByTestId('profile-deny-commands-add').click()
+})
+
+Then('it names a provider that cannot allow one command', async ({ page }) => {
+  await expect(page.getByTestId('profile-unsupported')).toBeVisible()
+})
+
+Then('it names a provider that cannot forbid one command', async ({ page }) => {
+  await expect(page.getByTestId('profile-deny-unsupported')).toBeVisible()
+})
+
+Then('it says nothing about deny-lists', async ({ page }) => {
+  await expect(page.getByTestId('profile-deny-unsupported')).toHaveCount(0)
+})
+
 When('I add the build tools profile', async ({ page }) => {
   await page.getByTestId('import-build-tools').click()
 })

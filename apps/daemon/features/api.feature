@@ -180,6 +180,17 @@ Feature: The definitions API
     Then the response is 200
     And "claude" is listed
 
+  Scenario: The provider registry says which half of a profile a CLI can honour
+    # The profile editor's two honesty notes are computed from these flags, so a
+    # projection that carries one and drops the other leaves a gap the editor
+    # cannot mention. Allowing and forbidding are separate questions with
+    # separate answers: Claude answers both, Codex neither.
+    When I GET "/api/registries/providers"
+    Then the response is 200
+    And "claude" can be told one command is allowed
+    And "claude" can be told one command is forbidden
+    And "codex" can be told neither
+
   Scenario: Doctor reports findings in the body, not the status
     Given the project defines a workflow naming a missing phase
     When I GET "/api/doctor"

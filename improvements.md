@@ -114,8 +114,10 @@ came up" from "it came up too slowly" without re-running anything.
 
 ## 6. `git.feature` fails under a saturated machine, and it is the deadline
 
-Seen twice on 2026-09-24, both times in a full `pnpm test` (59 workers), both
-times passing when the file is run alone:
+Seen four times — twice on 2026-09-24 and twice more on 2026-09-25, each time in
+a full `pnpm test` (60 workers) and each time passing when the file is run alone.
+The two later sightings both came in the run immediately after a six-minute
+Playwright suite, which is the load this deadline cannot survive:
 
 ```
 FAIL  packages/core/features/git.spec.ts > A question with an answer

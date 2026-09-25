@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 import { createBdd } from 'playwright-bdd'
 import { test } from './fixtures.js'
 
@@ -975,6 +975,22 @@ Then('{string} shows the project {string}', async ({ page }, task: string, proje
 /* -------------------------------------------------------------- evidence */
 
 Given(
+  'the project defines the workflow {string} with two phases',
+  async ({ world }, name: string) => {
+    // Two phases in one workflow is how a task ends up with more phases than
+    // workflows — the thing "6/6 phases" on five workflows was hiding.
+    world.workflow(world.projectScope, name, `name: ${name}\nphases: [first, second]\n`)
+    for (const phase of ['first', 'second']) {
+      world.phase(
+        world.projectScope,
+        phase,
+        `name: ${phase}\nsteps: [{uses: shell, run: echo ${phase}}]\n`,
+      )
+    }
+  },
+)
+
+Given(
   'the project defines the workflow {string} that writes a report and asks for approval',
   async ({ world }, name: string) => {
     world.workflow(world.projectScope, name, `name: ${name}\nphases: [report]\n`)
@@ -1386,6 +1402,63 @@ Then('the evidence is above the steps', async ({ page }) => {
   expect(evidence).not.toBeNull()
   expect(steps).not.toBeNull()
   expect((evidence as { y: number }).y).toBeLessThan((steps as { y: number }).y)
+})
+
+/**
+ * Folded, not gone.
+ *
+ * `toBeHidden()` on the content, the way the token-list scenario reads a closed
+ * `<details>` — the heading stays rendered on purpose, because the geometry
+ * assertions measure against it and because a section that vanished would read
+ * as a section that is missing.
+ */
+Then('the steps are folded away', async ({ page }) => {
+  await expect(page.getByTestId('steps')).toBeVisible()
+  await expect(page.getByTestId('steps').locator('ul')).toBeHidden()
+})
+
+When('I unfold the steps', async ({ page }) => {
+  await page.getByTestId('steps-toggle').click()
+  await expect(page.getByTestId('steps').locator('ul')).toBeVisible()
+})
+
+Then('I can unfold them', async ({ page }) => {
+  await page.getByTestId('steps-toggle').click()
+  await expect(page.getByTestId('steps').locator('ul')).toBeVisible()
+})
+
+Then('the steps are not folded away', async ({ page }) => {
+  await expect(page.getByTestId('steps').locator('ul')).toBeVisible()
+})
+
+Then('the evidence is not folded away', async ({ page }) => {
+  await expect(page.getByTestId('evidence').locator('pre').first()).toBeVisible()
+})
+
+Given('that task has a finished run', async ({ world }) => {
+  await world.finishedRun(judged, 'validate')
+})
+
+const topOf = async (page: Page, testid: string): Promise<number> => {
+  const box = await page.getByTestId(testid).boundingBox()
+  expect(box, `${testid} is not on the page`).not.toBeNull()
+  return (box as { y: number }).y
+}
+
+Then('how it got here comes before the steps', async ({ page }) => {
+  expect(await topOf(page, 'reliability-graph')).toBeLessThan(await topOf(page, 'steps'))
+})
+
+Then('the workflows come before the steps', async ({ page }) => {
+  expect(await topOf(page, 'task-plan')).toBeLessThan(await topOf(page, 'steps'))
+})
+
+Then('the progress does not say how many workflows it counted', async ({ page }) => {
+  await expect(page.getByTestId('task-progress-text')).not.toContainText('across')
+})
+
+Then('the progress says it counted {int} workflow', async ({ page }, count: number) => {
+  await expect(page.getByTestId('task-progress-text')).toContainText(`across ${count} workflow`)
 })
 
 Then("the failing step's output is already open", async ({ page }) => {

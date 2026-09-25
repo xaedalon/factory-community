@@ -2661,3 +2661,9 @@ When('I add the build tools profile', async ({ page }) => {
 Then('the profile {string} is in the project', async ({ page }, name: string) => {
   await expect(page.getByTestId('import-bundle-done')).toContainText(`${name}.profile.yaml`)
 })
+
+Then('it says a profile is chosen on a project', async ({ page }) => {
+  const said = page.getByTestId('profile-how-to-use')
+  await expect(said).toBeVisible()
+  await expect(said).toContainText('Authority')
+})

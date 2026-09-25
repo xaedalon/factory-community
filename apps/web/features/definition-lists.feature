@@ -72,6 +72,14 @@ Feature: Seeing what is installed
       When I open the profiles page
       Then the profile "development" is listed
 
+    Scenario: The page says where a profile is used
+      # Somebody wrote one and looked for a way to attach it to an agent or a
+      # phase. There is none, on purpose — so the page that writes a profile has
+      # to say where it is chosen, or the feature is unreachable by anyone who
+      # has not read the docs.
+      When I open the new profile page
+      Then it says a profile is chosen on a project
+
     Scenario: A profile can be written from the page
       When I open the new profile page
       And I name it "buildtools"

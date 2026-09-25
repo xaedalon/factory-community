@@ -77,6 +77,22 @@ that ends in an interpreter hands that entry the whole filesystem.
 A profile may still allow one. That is the point of a profile — the risk is the
 owner's to take. Factory warns, names the measurement, and saves it.
 
+## Where it is chosen
+
+**On a project, under "Authority".** Not on an agent, a workflow or a phase, and
+that absence is the point: a definition that could name its own authority would
+be a definition that grants itself authority, and the repository is exactly what
+an agent can edit. An agent file saying `profile: anything-goes` would be the
+same hole as `args: ['--permission-mode', 'bypassPermissions']`, which is refused
+at plan time — spelled more politely and just as wide.
+
+So authority comes from outside the definitions: the project row, or the
+installation setting. That is also what lets a workflow be shared, imported,
+forked and edited freely — none of it can change what the work may reach.
+
+Two tasks in one repository needing different authority means **two projects**
+pointed at the same path, which Factory allows; only the name has to be unique.
+
 ## Trying one
 
 ```bash

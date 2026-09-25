@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { api, type Definition, type ProviderEntry } from '../api/client.js'
 import { useEditor } from '../composables/useEditor.js'
 import EditorLayout from '../components/form/EditorLayout.vue'
@@ -110,6 +110,22 @@ onMounted(async () => {
           @fork="editor.fork()"
         />
       </FieldRow>
+
+      <!-- Where a profile is *used*, said on the page that writes one.
+           Somebody wrote a profile, looked for a way to attach it to an agent or
+           a phase, and found none — because a definition naming its own
+           authority is the hole `plan.argsWidenProfile` exists to close. The
+           answer is one sentence and it belongs here rather than in the docs. -->
+      <p
+        class="mb-4 rounded-lg border border-[var(--color-line)] bg-[var(--color-base)] px-4 py-3 text-xs leading-relaxed text-[var(--color-ink-muted)]"
+        data-testid="profile-how-to-use"
+      >
+        A profile is chosen on a <RouterLink to="/projects" class="underline">project</RouterLink>,
+        under <span class="text-[var(--color-ink)]">Authority</span> — not on an agent, a workflow or
+        a phase. A definition that could name its own authority would be a definition that grants
+        itself authority, and the repository is what an agent can edit. Two tasks needing different
+        authority means two projects, not two phases.
+      </p>
 
       <FieldRow label="Name" for="pr-name">
         <TextInput id="pr-name" v-model="nameField" mono placeholder="development" />

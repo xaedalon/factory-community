@@ -312,6 +312,59 @@ function sessionArgs(
  * by `doctor`, not discovered when the second step arrives with no memory of
  * the first.
  */
+/**
+ * Whether this CLI takes the settings it is being handed.
+ *
+ * Extracted from `checkAgentStep` because a step is no longer the only thing
+ * that carries a model and an effort: a project names them for the agent that
+ * judges its work, and that answer has to be the same answer. One
+ * implementation of "does this CLI take these settings", so a descriptor gaining
+ * a flag cannot make one caller right and the other wrong.
+ *
+ * Warnings, never errors. An ignored setting is a setting that does nothing,
+ * which is worth saying and is not worth refusing a run over.
+ */
+export function checkProviderSettings(
+  provider: ProviderCapability,
+  settings: {
+    readonly model?: string | undefined
+    readonly effort?: string | undefined
+    readonly subagent?: string | undefined
+  },
+): Problem[] {
+  const problems: Problem[] = []
+  const { descriptor } = provider
+
+  if (settings.effort !== undefined && descriptor.effortFlag === undefined) {
+    problems.push({
+      severity: 'warning',
+      message: `"${provider.id}" has no effort setting, so "effort: ${settings.effort}" is ignored.`,
+      field: 'effort',
+      rule: 'provider.effortUnsupported',
+    })
+  }
+
+  if (settings.subagent !== undefined && descriptor.subagentFlag === undefined) {
+    problems.push({
+      severity: 'warning',
+      message: `"${provider.id}" has no sub-agent setting, so "subagent: ${settings.subagent}" is ignored.`,
+      field: 'subagent',
+      rule: 'provider.subagentUnsupported',
+    })
+  }
+
+  if (settings.model !== undefined && descriptor.modelFlag === undefined) {
+    problems.push({
+      severity: 'warning',
+      message: `"${provider.id}" has no model setting, so "model: ${settings.model}" is ignored.`,
+      field: 'model',
+      rule: 'provider.modelUnsupported',
+    })
+  }
+
+  return problems
+}
+
 export function checkAgentStep(provider: ProviderCapability, step: AgentStep): Problem[] {
   const problems: Problem[] = []
   const { descriptor } = provider
@@ -327,33 +380,13 @@ export function checkAgentStep(provider: ProviderCapability, step: AgentStep): P
     })
   }
 
-  if (step.effort !== undefined && descriptor.effortFlag === undefined) {
-    problems.push({
-      severity: 'warning',
-      message: `"${provider.id}" has no effort setting, so "effort: ${step.effort}" is ignored.`,
-      field: 'effort',
-      rule: 'provider.effortUnsupported',
-    })
-  }
-
-  if (step.subagent !== undefined && descriptor.subagentFlag === undefined) {
-    problems.push({
-      severity: 'warning',
-      message: `"${provider.id}" has no sub-agent setting, so "subagent: ${step.subagent}" is ignored.`,
-      field: 'subagent',
-      rule: 'provider.subagentUnsupported',
-    })
-  }
-
-  const model = step.model
-  if (model !== undefined && descriptor.modelFlag === undefined) {
-    problems.push({
-      severity: 'warning',
-      message: `"${provider.id}" has no model setting, so "model: ${model}" is ignored.`,
-      field: 'model',
-      rule: 'provider.modelUnsupported',
-    })
-  }
+  problems.push(
+    ...checkProviderSettings(provider, {
+      ...(step.effort === undefined ? {} : { effort: step.effort }),
+      ...(step.subagent === undefined ? {} : { subagent: step.subagent }),
+      ...(step.model === undefined ? {} : { model: step.model }),
+    }),
+  )
 
   if (descriptor.provisional) {
     problems.push({

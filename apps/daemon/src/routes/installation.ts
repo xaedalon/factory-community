@@ -6,6 +6,8 @@ import {
   EXECUTION_PROFILES,
   hasAccepted,
   isExecutionProfile,
+  PROVIDER_KIND,
+  type ProviderCapability,
 } from '@factory/core'
 import type { Runtime } from '@factory/runtime'
 
@@ -154,15 +156,26 @@ export function registerInstallationRoutes(app: FastifyInstance, runtime: Runtim
    * rather than as a save that quietly did nothing.
    */
   app.patch<{
-    Body: { ui?: { scale?: unknown; theme?: unknown }; security?: { profile?: unknown } }
+    Body: {
+      ui?: { scale?: unknown; theme?: unknown }
+      security?: { profile?: unknown }
+      reliability?: { provider?: unknown; model?: unknown; effort?: unknown }
+    }
   }>('/api/settings', async (request, reply) => {
     const scale = request.body?.ui?.scale
     const theme = request.body?.ui?.theme
     const profile = request.body?.security?.profile
-    if (scale === undefined && theme === undefined && profile === undefined) {
-      return reply
-        .code(400)
-        .send({ error: 'Send { ui: { scale } }, { ui: { theme } }, or { security: { profile } }.' })
+    // `null` clears one; `undefined` leaves it alone. This is the only group
+    // whose values have no default, so it is the only one that can be un-set —
+    // and a default nobody can un-set is a default they cannot stop paying for.
+    const judge = request.body?.reliability
+    const judging = judge !== undefined && Object.keys(judge).length > 0
+    if (scale === undefined && theme === undefined && profile === undefined && !judging) {
+      return reply.code(400).send({
+        error:
+          'Send { ui: { scale } }, { ui: { theme } }, { security: { profile } }, or ' +
+          '{ reliability: { provider, model, effort } } to say what reads the work.',
+      })
     }
     if (scale !== undefined) {
       if (typeof scale !== 'number' || !Number.isFinite(scale)) {
@@ -182,6 +195,29 @@ export function registerInstallationRoutes(app: FastifyInstance, runtime: Runtim
         .code(400)
         .send({ error: `profile is one of ${EXECUTION_PROFILES.join(', ')}.` })
     }
+    if (judging) {
+      for (const [field, value] of Object.entries(judge ?? {})) {
+        if (value !== null && typeof value !== 'string') {
+          return reply.code(400).send({
+            error: `reliability.${field} is text, or null to name nothing.`,
+          })
+        }
+      }
+      // Registered, not installed: a machine is configured before its CLIs are.
+      // A name nobody registered is refused, because read back later it reads as
+      // "nobody has said" and falls through to whatever is installed.
+      const named = judge?.provider
+      if (typeof named === 'string' && named.trim() !== '') {
+        const known = runtime.host
+          .list<ProviderCapability>(PROVIDER_KIND)
+          .map((entry) => entry.capability.id)
+        if (!known.includes(named.trim())) {
+          return reply.code(400).send({
+            error: `No provider called "${named.trim()}" is registered. It has to be one Factory knows: ${known.join(', ')}.`,
+          })
+        }
+      }
+    }
 
     // One update, so a patch carrying all three cannot half-apply — and so the
     // read-back through the schema happens once.
@@ -195,6 +231,18 @@ export function registerInstallationRoutes(app: FastifyInstance, runtime: Runtim
             },
           }),
       ...(profile === undefined ? {} : { security: { profile } }),
+      ...(judging
+        ? {
+            reliability: Object.fromEntries(
+              Object.entries(judge ?? {}).map(([field, value]) => [
+                field,
+                value === null || (typeof value === 'string' && value.trim() === '')
+                  ? null
+                  : (value as string).trim(),
+              ]),
+            ),
+          }
+        : {}),
     })
     if (saved.problems.length > 0) {
       return reply.code(500).send({ error: saved.problems[0]?.message, problems: saved.problems })

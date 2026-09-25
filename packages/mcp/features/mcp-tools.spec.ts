@@ -1,7 +1,8 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { DISCLAIMER, type Project, type Task, type TaskState } from '@factory/core'
+import { DISCLAIMER, type Project, type Task, type TaskState, type Workflow } from '@factory/core'
 import {
   AGENT_ACTIONS,
   TOOL_ERROR_CODES,
@@ -95,6 +96,40 @@ describeFeature(feature, ({ Background, Rule }) => {
   const listedNames = () =>
     (answer.tasks as { name: string }[] | undefined)?.map((task) => task.name) ?? []
 
+  Rule('the documented tools are the registered tools', ({ RuleScenario }) => {
+    // Read from disk rather than imported, because the claim is about the file
+    // somebody actually reads before they install anything.
+    const docs = readFileSync(
+      fileURLToPath(new URL('../../../docs/mcp.md', import.meta.url)),
+      'utf8',
+    )
+    // The table only. Prose elsewhere names tools that are deliberately *not*
+    // built — `proposals/mcp.md` lists `factory_delegate` among them — and a
+    // guard that read those would demand Factory grow whatever the roadmap
+    // mentions.
+    const documented = new Set(
+      docs
+        .split('\n')
+        .filter((line) => line.startsWith('| `factory_'))
+        .flatMap((line) => [...line.matchAll(/`(factory_[a-z_]+)`/g)].map((m) => m[1] as string)),
+    )
+
+    RuleScenario('Every tool an agent is given is written down', ({ Then }) => {
+      Then('every registered tool is listed in the documentation', () => {
+        const missing = factoryTools.map((tool) => tool.name).filter((name) => !documented.has(name))
+        expect(missing, `undocumented: ${missing.join(', ')}`).toEqual([])
+      })
+    })
+
+    RuleScenario('Nothing is documented that does not exist', ({ Then }) => {
+      Then('every documented tool is registered', () => {
+        const names = new Set(factoryTools.map((tool) => tool.name))
+        const ghosts = [...documented].filter((name) => !names.has(name))
+        expect(ghosts, `documented but not registered: ${ghosts.join(', ')}`).toEqual([])
+      })
+    })
+  })
+
   Rule('a task carries the actions it will accept, never a guess', ({ RuleScenario }) => {
     const detail = (task: Task, actions: string[], extra: Record<string, unknown> = {}) => {
       factory.answer(`/api/tasks/${task.id}`, {
@@ -185,6 +220,35 @@ describeFeature(feature, ({ Background, Rule }) => {
       })
       When('the agent lists only the active tasks', () => call('factory_task_list', { active: true }))
       Then('only "Add due dates" is listed', () => expect(listedNames()).toEqual(['Add due dates']))
+    })
+  })
+
+  Rule('a listed task says how much to trust it', ({ RuleScenario }) => {
+    const listed = () =>
+      (answer.tasks as { reliability?: { score: number; coverage: number } }[] | undefined)?.[0]
+
+    RuleScenario('A listed task carries the score and the coverage', ({ Given, When, Then }) => {
+      Given('a task judged at 88 with 70% coverage', () => {
+        tasks = [aTask('Add due dates', 'project-1')]
+        publishTasks({ reliability: { score: 88, coverage: 70 } })
+      })
+      When('the agent lists the tasks', () => call('factory_task_list'))
+      Then('the listed task is 88 with 70% coverage', () =>
+        expect(listed()?.reliability).toEqual({ score: 88, coverage: 70 }),
+      )
+    })
+
+    RuleScenario('A task nobody has judged carries neither', ({ Given, When, Then }) => {
+      Given('a task nobody has judged', () => {
+        tasks = [aTask('Add due dates', 'project-1')]
+        publishTasks()
+      })
+      When('the agent lists the tasks', () => call('factory_task_list'))
+      // Absent, not zero. Every other optional key on a brief task reads the
+      // same way.
+      Then('the listed task carries no reliability', () =>
+        expect(listed()?.reliability).toBeUndefined(),
+      )
     })
   })
 
@@ -583,6 +647,62 @@ describeFeature(feature, ({ Background, Rule }) => {
     })
   })
 
+  Rule('an agent can say one task waits for another', ({ RuleScenario }) => {
+    const waiting = (): void => {
+      const task = aTask('Ship it', 'project-1')
+      const reply = {
+        task: { ...task, dependsOn: ['task-groundwork'] },
+        actions: [{ action: 'queue', label: 'Queue', to: 'queued' }],
+        blockers: [],
+      }
+      factory.answer(`/api/tasks/${task.id}/dependencies`, reply)
+      factory.answer(`/api/tasks/${task.id}/dependencies/task-groundwork`, reply)
+    }
+    const depend = (remove?: boolean) =>
+      call('factory_task_depends_on', {
+        task: 'task-ship-it',
+        dependsOn: 'task-groundwork',
+        ...(remove === undefined ? {} : { remove }),
+      }).catch((error: unknown) => {
+        failure = error as ToolError
+      })
+
+    RuleScenario('A task is made to wait for another', ({ Given, When, Then }) => {
+      Given('a task "Ship it" that can be queued', waiting)
+      When('the agent makes "Ship it" wait for "task-groundwork"', () => depend())
+      Then('Factory was asked to make it wait for "task-groundwork"', () => {
+        expect(factory.asked).toContain('POST /api/tasks/task-ship-it/dependencies')
+        expect(sentTo('POST /api/tasks/task-ship-it/dependencies')).toMatchObject({
+          dependsOn: 'task-groundwork',
+        })
+      })
+    })
+
+    RuleScenario('The waiting can be taken back off', ({ Given, When, Then }) => {
+      Given('a task "Ship it" that can be queued', waiting)
+      When('the agent stops "Ship it" waiting for "task-groundwork"', () => depend(true))
+      Then('Factory was asked to remove that dependency', () =>
+        expect(factory.asked).toContain(
+          'DELETE /api/tasks/task-ship-it/dependencies/task-groundwork',
+        ),
+      )
+    })
+
+    RuleScenario('A ring comes back in the store\'s own words', ({ Given, And, When, Then }) => {
+      Given('a task "Ship it" that can be queued', waiting)
+      And('Factory refuses the dependency as "Groundwork already waits for Ship it."', () => {
+        factory.answer('/api/tasks/task-ship-it/dependencies', {
+          status: 400,
+          message: 'Groundwork already waits for Ship it.',
+        })
+      })
+      When('the agent makes "Ship it" wait for "task-groundwork"', () => depend())
+      Then('the refusal says "Groundwork already waits for Ship it."', () =>
+        expect(failure?.message).toContain('Groundwork already waits for Ship it.'),
+      )
+    })
+  })
+
   Rule('a workflow is copied rather than assembled', ({ RuleScenario }) => {
     const original = (): void => {
       factory.answer('/api/workflows/development?project=project-1', {
@@ -711,6 +831,83 @@ describeFeature(feature, ({ Background, Rule }) => {
       )
     })
   })
+  Rule('what a workflow needs can be said after it was written', ({ RuleScenario }) => {
+    const at = '/api/workflows/development?project=project-1'
+    const definition = () => ({
+      kind: 'factory.workflow/v1',
+      name: 'development',
+      description: 'Build it',
+      mode: 'once',
+      scheduling: 'sequential',
+      phases: ['work', 'verify'],
+      needs: ['analysis'],
+      variables: {},
+      extensions: {},
+    })
+    const existing = (): void => {
+      factory.answer(at, {
+        definition: definition(),
+        ref: {
+          scope: 'project',
+          file: '/repos/factory/.xaedalon/.factory/workflows/development.workflow.yaml',
+        },
+        problems: [],
+        etag: 'abc123def4567890',
+      })
+    }
+    const say = () =>
+      call('factory_workflow_needs', { workflow: 'development', needs: ['design'] }).catch(
+        (error: unknown) => {
+          failure = error as ToolError
+        },
+      )
+    const sent = () => sentTo(`PUT ${at}`) as { definition: Workflow; etag?: string } | undefined
+
+    RuleScenario('A workflow that already exists can be told what it needs', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the project has a workflow "development" that needs "analysis"', existing)
+      When('the agent says "development" needs "design"', say)
+      Then('Factory was asked to write "development"', () =>
+        expect(factory.asked).toContain(`PUT ${at}`),
+      )
+      And('what was written needs "design"', () =>
+        expect(sent()?.definition.needs).toEqual(['design']),
+      )
+    })
+
+    RuleScenario('The write carries the etag the read returned', ({ Given, When, Then }) => {
+      Given('the project has a workflow "development" that needs "analysis"', existing)
+      When('the agent says "development" needs "design"', say)
+      Then('the write carried the etag', () => expect(sent()?.etag).toBe('abc123def4567890'))
+    })
+
+    RuleScenario('A workflow edited underneath the agent is not overwritten', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project has a workflow "development" that needs "analysis"', existing)
+      And('somebody edits it before the write lands', () => {
+        // The read still answered; the write is what refuses, which is exactly
+        // the race the etag exists for.
+        factory.answer(at, {
+          status: 409,
+          message: 'This file changed on disk since you opened it.',
+        })
+      })
+      When('the agent says "development" needs "design"', say)
+      Then('it is refused', () => expect(failure).toBeDefined())
+      And('the refusal says the file changed', () =>
+        expect(failure?.message).toContain('changed on disk'),
+      )
+    })
+  })
+
   Rule("approving is a person's, and the surface says so by not offering it", ({
     RuleScenario,
   }) => {

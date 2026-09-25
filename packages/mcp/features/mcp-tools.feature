@@ -1,7 +1,12 @@
 Feature: The tools an agent is given
-  Fifteen tools over one HTTP API. What matters is not that each one reaches a
+  Every tool over one HTTP API. What matters is not that each one reaches a
   route — that part is arithmetic — but what comes back, because the reader is a
   model deciding what to do next and it will act on whatever it is told.
+
+  The count used to be written here, and was wrong twice: fifteen while there
+  were twenty-two. A number nothing checks is a number that rots, so the tools
+  are counted by the scenario below instead, which fails when the documented
+  list and the registered one disagree.
 
   So three things are served rather than worked out here. What a task will
   accept right now comes from the daemon, which is the same list the board draws
@@ -18,6 +23,19 @@ Feature: The tools an agent is given
   Background:
     Given a Factory with the project "factory"
     And an agent working in that project
+
+  Rule: the documented tools are the registered tools
+
+    `docs/mcp.md` is how somebody decides whether Factory can do what they need
+    before installing anything, and it was hand-maintained against a list that
+    grew underneath it. A tool nobody documented is a tool nobody uses; a
+    documented tool that does not exist is worse.
+
+    Scenario: Every tool an agent is given is written down
+      Then every registered tool is listed in the documentation
+
+    Scenario: Nothing is documented that does not exist
+      Then every documented tool is registered
 
   Rule: a task carries the actions it will accept, never a guess
 
@@ -52,6 +70,22 @@ Feature: The tools an agent is given
       And a finished task "Ship it" in "factory"
       When the agent lists only the active tasks
       Then only "Add due dates" is listed
+
+  Rule: a listed task says how much to trust it
+
+    An agent choosing what to pick up wants the score and how hard anybody
+    looked, and asking `factory_reliability_get` per task to find out is a
+    request per row for something the list already read once.
+
+    Scenario: A listed task carries the score and the coverage
+      Given a task judged at 88 with 70% coverage
+      When the agent lists the tasks
+      Then the listed task is 88 with 70% coverage
+
+    Scenario: A task nobody has judged carries neither
+      Given a task nobody has judged
+      When the agent lists the tasks
+      Then the listed task carries no reliability
 
   Rule: what a project can run is what it is offered
 
@@ -181,6 +215,38 @@ Feature: The tools an agent is given
       Then it is refused as ACTION_NOT_AVAILABLE
       And the refusal lists the actions it does offer
 
+  Rule: an agent can say one task waits for another
+
+    An agent that plans three pieces of work can already create all three, and
+    until now could only describe their order in prose nobody enforces. The
+    ordering is a fact about the work, so it belongs beside the work rather than
+    in a description — the scheduler reads it, doctor reports on it, and the
+    board draws it.
+
+    None of the rules are here. The store refuses a ring, a task waiting for
+    itself, and a link across projects, and it says why in its own words; this
+    tool carries the sentence rather than composing a second one that could
+    drift from it.
+
+    Scenario: A task is made to wait for another
+      Given a task "Ship it" that can be queued
+      When the agent makes "Ship it" wait for "task-groundwork"
+      Then Factory was asked to make it wait for "task-groundwork"
+
+    Scenario: The waiting can be taken back off
+      Given a task "Ship it" that can be queued
+      When the agent stops "Ship it" waiting for "task-groundwork"
+      Then Factory was asked to remove that dependency
+
+    Scenario: A ring comes back in the store's own words
+      # Not "a cycle was detected". The store already writes the sentence a
+      # person reads on the board, and two wordings for one refusal is one
+      # wording that goes stale.
+      Given a task "Ship it" that can be queued
+      And Factory refuses the dependency as "Groundwork already waits for Ship it."
+      When the agent makes "Ship it" wait for "task-groundwork"
+      Then the refusal says "Groundwork already waits for Ship it."
+
   Rule: a workflow is copied rather than assembled
 
     Assembling one out of phase names is how an agent produces a workflow that
@@ -222,6 +288,40 @@ Feature: The tools an agent is given
       # the *read* route returns.
       When the agent writes a workflow "design" that needs "analysis"
       Then the reply names the file it wrote
+
+  Rule: what a workflow needs can be said after it was written
+
+    `factory_workflow_create` can say it, which covers the workflow an agent
+    writes itself and nothing else. The ordinary case is the pipeline a person
+    already has: five workflows that run in an order everybody knows and no file
+    records, so every task lists all five by hand and nothing checks the order.
+
+    There is no patch-one-field door in Factory, deliberately — a definition is
+    written whole, and an existing file is written only against the etag it was
+    read at. So this tool does what a person's editor does: read, change the one
+    field, write back with the etag. That round trip is the feature and not
+    overhead, because the thing it prevents is this tool overwriting an edit
+    made between the read and the write.
+
+    Scenario: A workflow that already exists can be told what it needs
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent says "development" needs "design"
+      Then Factory was asked to write "development"
+      And what was written needs "design"
+
+    Scenario: The write carries the etag the read returned
+      # Without it the write route answers `exists` and changes nothing, which
+      # would look from here like a workflow that refused to be edited.
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent says "development" needs "design"
+      Then the write carried the etag
+
+    Scenario: A workflow edited underneath the agent is not overwritten
+      Given the project has a workflow "development" that needs "analysis"
+      And somebody edits it before the write lands
+      When the agent says "development" needs "design"
+      Then it is refused
+      And the refusal says the file changed
 
   Rule: approving is a person's, and the surface says so by not offering it
 

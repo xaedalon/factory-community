@@ -176,6 +176,88 @@ export const mutationTools: readonly McpTool[] = [
   }),
 
   defineTool({
+    name: 'factory_workflow_needs',
+    title: 'Say what a workflow needs',
+    description:
+      'Record that a workflow cannot run on a task until another has finished — the way a ' +
+      'pipeline is chained. Use this on a workflow that already exists; factory_workflow_create ' +
+      'takes `needs` for one being written. Doctor reports a task whose workflows are out of ' +
+      'order, and the board offers to add a workflow that a chosen one needs.',
+    schema: z.object({
+      workflow: z.string().describe('The workflow to change.'),
+      needs: z
+        .array(z.string())
+        .describe('The workflows it waits for. Replaces what is there; pass [] to clear it.'),
+      project: PROJECT,
+    }),
+    run: async (input, context) => {
+      const found = await resolveProject({
+        api: context.api,
+        cwd: context.cwd,
+        given: input.project,
+      })
+      const inProject = `?project=${encodeURIComponent(found.project.id)}`
+      const at = `/api/workflows/${encodeURIComponent(input.workflow)}${inProject}`
+
+      // Read, change the one field, write it back against the etag that read
+      // returned. There is no patch-one-field route and that is deliberate: a
+      // definition is written whole, and an existing file is written only
+      // against the version it was read at. Sending the etag is what stops this
+      // tool overwriting an edit somebody made in their editor in between — a
+      // write without it is answered `exists` and changes nothing, which from
+      // here would look like a workflow that refused to be edited.
+      const current = await get<{ definition: Workflow; etag?: string }>(context, at)
+      const written = await put<{ status?: string; file?: string }>(context, at, {
+        definition: { ...current.definition, needs: input.needs },
+        ...(current.etag === undefined ? {} : { etag: current.etag }),
+      })
+      return {
+        workflow: input.workflow,
+        needs: input.needs,
+        project: { id: found.project.id, name: found.project.name },
+        ...(written.file === undefined ? {} : { file: written.file }),
+        next:
+          input.needs.length === 0
+            ? `"${input.workflow}" now waits for nothing.`
+            : `A task running "${input.workflow}" should run ${input.needs.join(', ')} first.`,
+      }
+    },
+  }),
+
+  defineTool({
+    name: 'factory_task_depends_on',
+    title: 'Make one task wait for another',
+    description:
+      'Say that a task cannot start until another one is done. This is how an agent that planned ' +
+      'several pieces of work records their order — the scheduler passes over a task whose ' +
+      'blocker is not finished, so the ordering is enforced rather than described. Pass ' +
+      '`remove: true` to take the waiting back off. Both tasks must be in the same project.',
+    schema: z.object({
+      task: z.string().describe('The task that waits.'),
+      dependsOn: z.string().describe('The task id it waits for.'),
+      remove: z
+        .boolean()
+        .optional()
+        .describe('Take the dependency off instead of putting it on.'),
+    }),
+    run: async (input, context) => {
+      // The store refuses a ring, a task waiting for itself and a link across
+      // projects, and the route already carries its sentence out. Repeating any
+      // of that here would be a second copy of a rule to keep in step with the
+      // first.
+      const path = `/api/tasks/${encodeURIComponent(input.task)}/dependencies`
+      const reply =
+        input.remove === true
+          ? await del<TaskReply>(context, `${path}/${encodeURIComponent(input.dependsOn)}`)
+          : await post<TaskReply>(context, path, { dependsOn: input.dependsOn })
+      return {
+        ...(input.remove === true ? { stoppedWaitingFor: input.dependsOn } : { waitsFor: input.dependsOn }),
+        ...shape(reply),
+      }
+    },
+  }),
+
+  defineTool({
     name: 'factory_workflow_create',
     title: 'Write a workflow',
     description:
@@ -299,5 +381,9 @@ const request = async <T>(
 }
 const post = <T>(context: ToolContext, path: string, body?: unknown): Promise<T> =>
   request<T>(context, path, 'POST', body)
+const del = <T>(context: ToolContext, path: string): Promise<T> =>
+  request<T>(context, path, 'DELETE')
+const put = <T>(context: ToolContext, path: string, body?: unknown): Promise<T> =>
+  request<T>(context, path, 'PUT', body)
 const get = <T>(context: ToolContext, path: string): Promise<T> =>
   request<T>(context, path, 'GET')

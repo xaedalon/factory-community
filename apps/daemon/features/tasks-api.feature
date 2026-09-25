@@ -857,6 +857,66 @@ Feature: Tasks, runs and live updates over HTTP
       Then the response is 400
       And the response says what a profile can be
 
+  Rule: a project names the agent that judges it, not only the model
+
+    Scenario: A judging provider can be chosen for a project
+      Given a project to work in
+      When I set the project's judging provider to "claude"
+      Then the response is 200
+      And the project's judging provider is "claude"
+
+    Scenario: A provider nobody registered is refused, and the refusal names the field
+      Given a project to work in
+      When I set the project's judging provider to "nonesuch"
+      Then the response is 400
+      And the refusal names "nonesuch"
+
+    Scenario: An effort that is not text is refused
+      Given a project to work in
+      When I set the project's judging effort to a number
+      Then the response is 400
+
+    Scenario: Clearing the provider returns the project to following the installation
+      Given a project to work in
+      And its judging provider is "claude"
+      When I clear the project's judging provider
+      Then the response is 200
+      And the project names no judging provider
+
+  Rule: a list says how much to trust each task, in two numbers
+
+    The card on a task page assembles three queries; a board of forty rows asking
+    the same three would be a hundred and twenty statements to draw one column.
+    So the list reads a projection of the newest assessment — the score and the
+    evidence coverage — in one statement, and carries both or neither.
+
+    Both, because a 93 with 41% coverage is not the same claim as a 93 with 96%,
+    and a list that showed only the first would be exactly the flattery the card
+    was written to avoid.
+
+    Scenario: The list carries the score and the coverage together
+      Given the task "Add due dates" exists
+      And it has been assessed
+      When I ask for every task
+      Then the response is 200
+      And the row carries a score and a coverage
+
+    Scenario: A task nobody has judged carries no reliability at all
+      Given the task "Add due dates" exists
+      When I ask for every task
+      Then the response is 200
+      And the row carries no reliability
+
+    Scenario: The list and the task agree about the score
+      # Two projections of one row. If they could disagree, the number somebody
+      # scanned a board for would not be the number they opened the task to read.
+      Given the task "Add due dates" exists
+      And it has been assessed
+      When I ask for every task
+      And I read the task
+      Then both say the same score
+      And both say the same coverage
+
   Rule: a task says what it is waiting for
 
     Derived per request rather than stored, the way progress is. The scheduler
@@ -871,6 +931,24 @@ Feature: Tasks, runs and live updates over HTTP
       When I create the task "Add due dates"
       And I ask for the task
       Then it waits for nothing
+
+    Scenario: A dependency written with a half-read initiator is refused
+      # Every other mutating task route reads the initiator, and these two did
+      # not — which was harmless while only a person could reach them. An MCP
+      # tool makes an agent the caller, and a request whose initiator went
+      # missing is the one shape the guards elsewhere exist to catch, so it is
+      # refused here rather than recorded as having come from nobody.
+      Given the task "Scaffold" exists
+      And the task "The model" exists
+      When "The model" is made to wait for "Scaffold" with an initiator of "yes please"
+      Then the response is 400
+
+    Scenario: Undoing a dependency reads the initiator too
+      Given the task "Scaffold" exists
+      And the task "The model" exists
+      And "The model" is made to wait for "Scaffold"
+      When the wait is removed with an initiator of "yes please"
+      Then the response is 400
 
     Scenario: A dependency is written and read back
       Given the task "Scaffold" exists

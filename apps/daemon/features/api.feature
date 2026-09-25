@@ -522,3 +522,27 @@ Feature: The definitions API
     Scenario: The built-ins are still accepted
       When I set the installation profile to "full-access"
       Then the response is 200
+
+  Rule: the installation can name the judge a project inherits
+
+    The agent evaluator costs tokens, so the model is a project's decision — but
+    setting the same one on every new project is work nobody should repeat. The
+    installation carries a default and a project overrides it.
+
+    Scenario: A judge can be named for the installation
+      When I PATCH "/api/settings" with a judge of "claude" using "strong"
+      Then the response is 200
+      And the installation's judging provider is "claude"
+
+    Scenario: A provider nobody registered is refused
+      # Read back later it would look like "nobody has said" and fall through to
+      # whatever is installed, judging with a CLI nobody chose.
+      When I PATCH "/api/settings" with a judge of "nonesuch"
+      Then the response is 400
+
+    Scenario: Clearing the model returns the installation to naming nothing
+      Given the installation judges with "claude" using "strong"
+      When I PATCH "/api/settings" clearing the judging model
+      Then the response is 200
+      And the installation names no judging model
+      And the installation's judging provider is "claude"

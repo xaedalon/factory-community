@@ -38,6 +38,8 @@ interface ProjectRow {
   initials: string | null
   check_command: string | null
   reliability_model: string | null
+  reliability_provider: string | null
+  reliability_effort: string | null
   reliability_enabled: number
   created_at: string
 }
@@ -446,13 +448,47 @@ export class ProjectRepository {
    * somebody's tokens on a decision they never made.
    */
   setReliabilityModel(id: string, model: string | undefined): Project {
+    return this.setJudge(id, { model })
+  }
+
+  /**
+   * Set, or clear, any part of the agent that judges this project.
+   *
+   * One setter over three columns, keyed on presence the way `setAppearance` is:
+   * a key that is there means "change this", and an `undefined` value means
+   * "clear it". So saving the three controls on a page is one `UPDATE` and one
+   * `project.changed` rather than three of each — which matters because each
+   * event costs the board a refetch.
+   *
+   * Per field, never as a trio. A project that named a model before a provider
+   * could be named keeps that model and inherits the provider, and a rule that
+   * took the three together would have quietly stopped judging it.
+   */
+  setJudge(
+    id: string,
+    judge: {
+      provider?: string | undefined
+      model?: string | undefined
+      effort?: string | undefined
+    },
+  ): Project {
     if (this.get(id) === undefined) throw new Error(`No project ${id}.`)
-    const trimmed = model?.trim()
-    this.#db.run(
-      'UPDATE projects SET reliability_model = ? WHERE id = ?',
-      trimmed === undefined || trimmed === '' ? null : trimmed,
-      id,
-    )
+    const columns: Record<string, string> = {
+      provider: 'reliability_provider',
+      model: 'reliability_model',
+      effort: 'reliability_effort',
+    }
+    const sets: string[] = []
+    const values: (string | null)[] = []
+    for (const [key, column] of Object.entries(columns)) {
+      if (!(key in judge)) continue
+      const trimmed = judge[key as keyof typeof judge]?.trim()
+      sets.push(`${column} = ?`)
+      values.push(trimmed === undefined || trimmed === '' ? null : trimmed)
+    }
+    if (sets.length > 0) {
+      this.#db.run(`UPDATE projects SET ${sets.join(', ')} WHERE id = ?`, ...values, id)
+    }
     return this.#changed(id)
   }
 
@@ -623,6 +659,12 @@ function hydrate(row: ProjectRow): Project {
     // is the reading that costs nothing.
     ...(row.reliability_model !== null && row.reliability_model.trim() !== ''
       ? { reliabilityModel: row.reliability_model.trim() }
+      : {}),
+    ...(row.reliability_provider !== null && row.reliability_provider.trim() !== ''
+      ? { reliabilityProvider: row.reliability_provider.trim() }
+      : {}),
+    ...(row.reliability_effort !== null && row.reliability_effort.trim() !== ''
+      ? { reliabilityEffort: row.reliability_effort.trim() }
       : {}),
     // Anything that is not an explicit 0 is on. The column defaults to 1, and a
     // hand-edited row degrades towards judging rather than towards silence.

@@ -129,6 +129,13 @@ export interface Project {
    */
   readonly reliabilityModel?: string
   /**
+   * Which agent CLI reads the work. Absent follows the installation's choice,
+   * and absent there too means whichever provider is installed.
+   */
+  readonly reliabilityProvider?: string
+  /** How hard it should think. Absent follows the installation, then nothing. */
+  readonly reliabilityEffort?: string
+  /**
    * Whether this project's work is judged at all.
    *
    * On by default: a task that says how much to trust it is the feature, and a

@@ -1011,4 +1011,129 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Then('the project\'s judging model is "claude-opus-5-5"', is('claude-opus-5-5'))
     })
   })
+
+  Rule('a project names the agent that judges it, not only the model', ({ RuleScenario }) => {
+    const exists = (): void => add('factory')
+    const set = (judge: { provider?: string | undefined; model?: string | undefined; effort?: string | undefined }) => (): void =>
+      attempt(() => {
+        project = projects.setJudge((project as Project).id, judge)
+      })
+    const changes = (): number =>
+      events.filter((event) => event.name === 'project.changed').length
+
+    RuleScenario('A new project names no judging provider or effort', ({ When, Then, And }) => {
+      When('I add the project "factory" at that directory', exists)
+      Then('the project names no judging provider', () =>
+        expect(project?.reliabilityProvider).toBeUndefined(),
+      )
+      And('the project names no judging effort', () =>
+        expect(project?.reliabilityEffort).toBeUndefined(),
+      )
+    })
+
+    RuleScenario('A judging provider can be chosen', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its judging provider to "codex"', set({ provider: 'codex' }))
+      Then('the project\'s judging provider is "codex"', () =>
+        expect(project?.reliabilityProvider).toBe('codex'),
+      )
+    })
+
+    RuleScenario('A judging effort can be chosen', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its judging effort to "high"', set({ effort: 'high' }))
+      Then('the project\'s judging effort is "high"', () =>
+        expect(project?.reliabilityEffort).toBe('high'),
+      )
+    })
+
+    RuleScenario('Whitespace around the provider is not part of it', ({ Given, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      When('I set its judging provider to "  codex  "', set({ provider: '  codex  ' }))
+      Then('the project\'s judging provider is "codex"', () =>
+        expect(project?.reliabilityProvider).toBe('codex'),
+      )
+    })
+
+    RuleScenario('A blank provider returns the project to following the installation', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging provider is "codex"', set({ provider: 'codex' }))
+      When('I set its judging provider to ""', set({ provider: '' }))
+      Then('the project names no judging provider', () =>
+        expect(project?.reliabilityProvider).toBeUndefined(),
+      )
+    })
+
+    RuleScenario('Naming the judge is one change, not three', ({ Given, When, Then, And }) => {
+      Given('the project "factory" exists', exists)
+      When('I name the judge "codex" "strong" "high" at once', () => {
+        events.length = 0
+        set({ provider: 'codex', model: 'strong', effort: 'high' })()
+      })
+      Then('the project\'s judging provider is "codex"', () =>
+        expect(project?.reliabilityProvider).toBe('codex'),
+      )
+      And('the project\'s judging model is "strong"', () =>
+        expect(project?.reliabilityModel).toBe('strong'),
+      )
+      And('the project\'s judging effort is "high"', () =>
+        expect(project?.reliabilityEffort).toBe('high'),
+      )
+      And('exactly 1 "project.changed" event was announced', () => expect(changes()).toBe(1))
+    })
+
+    RuleScenario('A cleared provider is a null column, not a blank one', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging provider is "codex"', set({ provider: 'codex' }))
+      When('I set its judging provider to ""', set({ provider: '' }))
+      Then('the provider column holds nothing at all', () => {
+        const row = store.db.get<{ reliability_provider: string | null }>(
+          'SELECT reliability_provider FROM projects WHERE id = ?',
+          (project as Project).id,
+        )
+        expect(row?.reliability_provider).toBeNull()
+      })
+    })
+
+    RuleScenario('The whole judge survives a rename', ({ Given, And, When, Then }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging provider is "codex"', set({ provider: 'codex' }))
+      When('I rename it to "factory-core"', () =>
+        attempt(() => {
+          project = projects.rename((project as Project).id, 'factory-core')
+        }),
+      )
+      Then('the project\'s judging provider is "codex"', () =>
+        expect(project?.reliabilityProvider).toBe('codex'),
+      )
+    })
+
+    RuleScenario('Turning judging off keeps the provider that was chosen', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project "factory" exists', exists)
+      And('its judging provider is "codex"', set({ provider: 'codex' }))
+      When('I stop its work being judged', () =>
+        attempt(() => {
+          project = projects.setReliabilityEnabled((project as Project).id, false)
+        }),
+      )
+      Then('the project\'s judging provider is "codex"', () =>
+        expect(project?.reliabilityProvider).toBe('codex'),
+      )
+    })
+  })
 })

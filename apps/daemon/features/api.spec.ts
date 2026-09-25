@@ -472,6 +472,50 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
+  Rule('the installation can name the judge a project inherits', ({ RuleScenario }) => {
+    const judgeOf = (): Record<string, unknown> =>
+      (response.body.settings as { reliability: Record<string, unknown> }).reliability
+
+    RuleScenario('A judge can be named for the installation', ({ When, Then, And }) => {
+      When('I PATCH "/api/settings" with a judge of "claude" using "strong"', () =>
+        call('PATCH', '/api/settings', { reliability: { provider: 'claude', model: 'strong' } }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And("the installation's judging provider is \"claude\"", () =>
+        expect(judgeOf()['provider']).toBe('claude'),
+      )
+    })
+
+    RuleScenario('A provider nobody registered is refused', ({ When, Then }) => {
+      When('I PATCH "/api/settings" with a judge of "nonesuch"', () =>
+        call('PATCH', '/api/settings', { reliability: { provider: 'nonesuch' } }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('Clearing the model returns the installation to naming nothing', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the installation judges with "claude" using "strong"', () =>
+        call('PATCH', '/api/settings', { reliability: { provider: 'claude', model: 'strong' } }),
+      )
+      When('I PATCH "/api/settings" clearing the judging model', () =>
+        call('PATCH', '/api/settings', { reliability: { model: null } }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the installation names no judging model', () =>
+        expect(judgeOf()['model']).toBeUndefined(),
+      )
+      // Clearing one is not clearing the group.
+      And("the installation's judging provider is \"claude\"", () =>
+        expect(judgeOf()['provider']).toBe('claude'),
+      )
+    })
+  })
+
   Scenario('The provider registry says which half of a profile a CLI can honour', ({ When, Then, And }) => {
     When('I GET "/api/registries/providers"', () => call('GET', '/api/registries/providers'))
     Then('the response is 200', () => expect(response.statusCode).toBe(200))

@@ -76,32 +76,47 @@ A failure here is loud in the plugin and quiet downstream: `assessReliability`
 turns a failed evaluator into a warning on the run, and the deterministic one's
 judgement still stands.
 
-### Which model
+### Which agent, which model, how hard
 
-A project setting. A weekend project and a payments service do not want the same
-model, and neither wants one named in Factory's source spending their tokens.
+Three settings, and the same three an agent definition carries — because it is the
+same question asked of the same CLIs.
 
 ```text
-Project page → Judged by → claude-opus-5-5
+Settings page  → What reads the work → claude · strong · high
+Project page   → Judged by           → codex  · o3     · (follows the installation)
 ```
 
-Empty means nothing reads the work. That is not the same as switching judging
-off: the free evaluator runs either way, and naming a model is what adds one that
-can read. Switching judging off keeps the model, so turning it back on is one
-click rather than two decisions.
+**A project's answer beats the installation's, field by field.** Not as a trio: a
+project that named a model before a provider could be named keeps that model and
+inherits the provider, and a rule that took the three together would have quietly
+stopped judging exactly those projects. `resolveJudge` in `@factory/core` is the
+one place that decides, so the board and the daemon cannot disagree.
 
-The string is passed to the provider as `RenderRequest.model`, so a role
-(`strong`, `balanced`, `fast`) or a literal model id both work.
+Empty everywhere means nothing reads the work. That is not the same as switching
+judging off: the free evaluator runs either way, and naming a model is what adds
+one that can read. Switching judging off keeps the trio, so turning it back on is
+one click rather than three decisions.
 
-### Which CLI asks it
+The model is passed as `RenderRequest.model`, so a role (`strong`, `balanced`,
+`fast`) or a literal id both work; the effort is passed as `RenderRequest.effort`.
 
-The first provider whose binary is actually on this machine, in registration
-order — Claude, Codex, Copilot. Registered is not the question; runnable is.
-Factory ships three provider plugins and almost nobody has three CLIs installed.
+### When it cannot be asked
 
-Two installed CLIs means the first is used rather than a planning error on a run
-that succeeded. It matters only in that the model a project names has to be one
-that provider understands.
+| | |
+|---|---|
+| nothing named anywhere | the first provider whose binary is on this machine, silently — nobody stated anything, so nothing was disappointed |
+| a named provider whose command is missing | **no judgement, and one warning** (`reliability.judgeUnavailable`). Factory does **not** ask a different one |
+| a named provider nobody registered | the same rule, saying which of the two it was |
+| an effort the provider has no flag for | it still asks, and says the effort was ignored (`provider.effortUnsupported`, the same warning an agent step gets) |
+
+**No fallback is deliberate.** The trio is one decision; honouring two thirds of
+it means asking Claude for a Codex model id and billing somebody for a pairing
+they never chose. Refusing the *run* would be worse — the workflow succeeded, and
+only the reading of it did not happen.
+
+The warning a person is most likely to see is on the project page, the moment the
+provider is chosen: that is where the absence is created. The run-time problem is
+the backstop for a CLI uninstalled later.
 
 ### How it is asked
 

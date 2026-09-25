@@ -3,8 +3,11 @@ import { openSync, closeSync } from 'node:fs'
 import {
   PROVIDER_KIND,
   agentEnvironment,
+  checkProviderSettings,
+  resolveJudge,
   type EvaluatorAgent,
   type ExecutionProfile,
+  type Problem,
   type Project,
   type ProviderCapability,
 } from '@factory/core'
@@ -39,25 +42,110 @@ export interface AgentForOptions {
   readonly cwd: string | undefined
 }
 
-export function agentFor(options: AgentForOptions): EvaluatorAgent | undefined {
+/**
+ * The judge, and anything worth saying about why there is not one.
+ *
+ * `agent` absent is still not an error — the deterministic evaluator runs, the
+ * task is judged, and the only difference is that nobody read the work. But
+ * absent *because somebody named a CLI that is not installed* is worth a
+ * sentence: an absence that is not reported is a flag that reads correctly and
+ * does nothing.
+ */
+export interface JudgeFor {
+  readonly agent?: EvaluatorAgent
+  readonly problems: readonly Problem[]
+}
+
+export function agentFor(options: AgentForOptions): JudgeFor {
   const { runtime, project, profile, cwd } = options
-  if (project === undefined) return undefined
-  if (!project.reliabilityEnabled) return undefined
+  if (project === undefined) return { problems: [] }
+  if (!project.reliabilityEnabled) return { problems: [] }
+
+  // The project's choice, then the installation's, then nothing — decided in
+  // `resolveJudge` rather than here, because the board has to show the same
+  // answer and two implementations of a precedence rule is one that is wrong.
+  const installation = runtime.settings.current().reliability
+  const chosen = resolveJudge({
+    project: {
+      ...(project.reliabilityProvider === undefined ? {} : { provider: project.reliabilityProvider }),
+      ...(project.reliabilityModel === undefined ? {} : { model: project.reliabilityModel }),
+      ...(project.reliabilityEffort === undefined ? {} : { effort: project.reliabilityEffort }),
+    },
+    installation,
+  })
 
   // No model chosen is not "use a default". Falling back to a model named in
   // Factory's own source would spend somebody's tokens on a decision they never
   // made, and the whole point of the setting is that the choice is theirs.
-  const model = project.reliabilityModel
-  if (model === undefined) return undefined
+  const model = chosen.model
+  if (model === undefined) return { problems: [] }
 
-  const provider = chooseProvider(runtime)
-  if (provider === undefined) return undefined
-  if (cwd === undefined) return undefined
+  const named = chosen.provider
+  const provider = named === undefined ? chooseProvider(runtime) : providerNamed(runtime, named)
+  if (provider === undefined) {
+    // Named and missing is reported; nothing named and nothing installed is not.
+    // Nobody stated anything in the second case, so nothing was disappointed.
+    if (named === undefined) return { problems: [] }
+    return {
+      problems: [
+        {
+          severity: 'warning',
+          message:
+            `"${named}" is this project's judge, and ${reasonFor(runtime, named)} — so nothing ` +
+            `read the work. The deterministic evaluator still ran.`,
+          rule: 'reliability.judgeUnavailable',
+        },
+      ],
+    }
+  }
+  if (cwd === undefined) return { problems: [] }
+
+  // An effort the CLI has no flag for is ignored rather than refused, which is
+  // exactly what an agent step's own effort does — same function, same words.
+  const problems = checkProviderSettings(provider, {
+    model,
+    ...(chosen.effort === undefined ? {} : { effort: chosen.effort }),
+  })
 
   return {
-    model,
-    ask: (prompt) => ask({ runtime, provider, model, prompt, profile, cwd }),
+    agent: {
+      model,
+      ask: (prompt) =>
+        ask({
+          runtime,
+          provider,
+          model,
+          prompt,
+          profile,
+          cwd,
+          ...(chosen.effort === undefined ? {} : { effort: chosen.effort }),
+        }),
+    },
+    problems,
   }
+}
+
+/** The provider somebody named, whether or not its command can be run. */
+function providerNamed(runtime: Runtime, id: string): ProviderCapability | undefined {
+  const found = runtime.host
+    .list<ProviderCapability>(PROVIDER_KIND)
+    .map((entry) => entry.capability)
+    .find((candidate) => candidate.id === id)
+  if (found === undefined) return undefined
+  return found.availability(runtime.env).available ? found : undefined
+}
+
+/**
+ * Why a named provider is not the judge, in words that distinguish the two
+ * causes: nobody registered it, or it is registered and its command is missing.
+ */
+function reasonFor(runtime: Runtime, id: string): string {
+  const registered = runtime.host
+    .list<ProviderCapability>(PROVIDER_KIND)
+    .some((entry) => entry.capability.id === id)
+  return registered
+    ? 'its command was not found on this machine'
+    : 'no such provider is registered'
 }
 
 /**
@@ -89,12 +177,19 @@ function ask(options: {
   prompt: string
   profile: ExecutionProfile
   cwd: string
+  effort?: string
 }): Promise<string> {
-  const { runtime, provider, model, prompt, profile, cwd } = options
+  const { runtime, provider, model, prompt, profile, cwd, effort } = options
   // `session: none` throughout: a judgement is a question asked once, and a
   // session id would make the second assessment of a task continue the first
   // one's conversation — which is how an evaluator learns to agree with itself.
-  const rendered = provider.render({ prompt, model, profile, session: 'none' })
+  const rendered = provider.render({
+    prompt,
+    model,
+    profile,
+    session: 'none',
+    ...(effort === undefined ? {} : { effort }),
+  })
   const filtered = agentEnvironment(runtime.env, {
     profile,
     ...(rendered.passEnv === undefined ? {} : { keep: rendered.passEnv }),

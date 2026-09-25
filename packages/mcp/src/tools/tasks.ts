@@ -18,6 +18,8 @@ export interface TaskListItem extends Task {
   readonly actions?: readonly AvailableAction[]
   readonly progress?: { readonly completed: number; readonly total: number }
   readonly blockers?: readonly { readonly id: string; readonly name: string; readonly status: string }[]
+  /** Absent when nobody has judged it, the way every other optional key here is. */
+  readonly reliability?: { readonly score: number; readonly coverage: number }
 }
 
 interface TaskDetail {
@@ -51,6 +53,10 @@ export const briefTask = (item: TaskListItem) => ({
     ran: entry.ran,
   })),
   ...(item.progress === undefined ? {} : { progress: item.progress }),
+  // Both numbers or neither. An agent choosing what to pick up wants to know
+  // how much a task is trusted *and* how hard anybody looked, and getting it
+  // here saves a `factory_reliability_get` per task.
+  ...(item.reliability === undefined ? {} : { reliability: item.reliability }),
   ...(item.blockers === undefined || item.blockers.length === 0
     ? {}
     : { waitingFor: item.blockers }),

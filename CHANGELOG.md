@@ -62,6 +62,51 @@ missing. An interpreter warns, names the measurement, and
 then lets you, because the risk is the repository owner's to take.
 [`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
 
+**You choose the agent that judges your work, not just its model.** Factory used whichever provider
+CLI happened to be registered first and available, and passed no effort at all — the one place that
+did not honour bring-your-own-AI. Now the installation names an agent, a model and an effort, and a
+project overrides any of the three on its own page.
+
+Inherited **field by field**, never as a trio: a project that had named a model keeps it and inherits
+the provider, which a whole-trio rule would have quietly stopped judging. Nothing is defaulted in
+Factory's source at either level, because a model named there would spend your tokens on a decision
+you never made.
+
+*If it cannot be asked:* a named CLI whose command is missing means no judgement and one warning, and
+Factory does **not** quietly ask a different one — honouring two thirds of the trio would ask Claude
+for a Codex model id. An effort a CLI has no flag for is ignored and says so, the same warning an
+agent step already gets. Nothing named anywhere behaves exactly as before.
+
+**A setting can now be cleared.** `null` in a settings patch removes a value; `undefined` still
+leaves it alone. Until now every setting had a default so there was nothing to un-set — an
+installation default nobody can un-set is a default they cannot stop paying for.
+
+**A task row says how much to trust it.** The score and the evidence coverage, together — a 93 with
+41% coverage is not the same claim as a 93 with 96%, and a row showing only the first would be the
+flattery the reliability card was written to avoid. A task nobody has judged shows an em dash, never
+a zero: a zero reads as a verdict rather than as silence. In the table, on the kanban card, and on a
+task an agent lists over MCP.
+
+One query for the whole board rather than three per row. The card assembles the newest assessment,
+the drivers and the runs, which is right for one task and would be a hundred and twenty statements
+for a board of forty; a list reads a two-field projection of the newest row instead, and parses none
+of the JSON columns a row never draws.
+
+**An agent can order its own work.** MCP could create tasks and write workflows, and then only
+describe the order they should run in — prose nothing reads. `factory_task_depends_on` makes one task
+wait for another, and `factory_workflow_needs` says what a workflow that already exists waits for
+(`factory_workflow_create` could always say it for one being written). Neither carries any rules: the
+store still refuses a ring, a task waiting for itself and a link across projects, and the sentence
+you get is the store's own. Writing `needs:` reads the workflow and writes it back against the etag,
+so a tool cannot overwrite an edit you made in your editor in between — it is told the file changed.
+
+The two dependency routes now read the initiator, as every other mutating task route already did.
+Not a new gate — an agent may order its own work — but a write recorded as coming from nobody is
+indistinguishable from yours, and MCP made an agent the caller.
+
+`docs/mcp.md`'s tool table is now checked against what is registered, in both directions. It said
+fifteen tools while there were twenty-two; a number nothing checks is a number that rots.
+
 **An API path the daemon does not serve is a 404, not the board.** The catch-all that lets
 `/tasks/abc` resolve in the app router was catching `/api/…` with it, so a page calling a route
 *this* daemon does not have got `index.html` with a **200** — and then failed on `undefined`

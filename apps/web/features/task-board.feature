@@ -95,6 +95,9 @@ Feature: The task board
     And I queue "Add due dates"
     And "Add due dates" becomes "done" without me reloading
     And I open "Add due dates"
+    # Nothing failed, so the steps arrive folded. Unfolding is the ordinary
+    # way to read a finished run.
+    And I unfold the steps
     Then the run for "hello" is listed
     And the step "echo hello" is listed
     And opening the step shows "hello"
@@ -204,6 +207,125 @@ Feature: The task board
       When I open the tasks page
       And I open "Add due dates"
       Then the facts sit beside the work
+
+  Rule: the long sections are folded away until they are the reason you came
+
+    Steps and Evidence are the two that grow without limit — a phase's whole
+    log, a report somebody wrote — and on a finished task they pushed the
+    reliability drivers and the graph off the screen entirely. Both now start
+    folded.
+
+    Folded is not hidden, and the exception is the point: a failed step opens
+    itself, because "a step nobody expanded is a step nobody read" is why the
+    failing log was auto-opened in the first place, and a task waiting on a
+    decision opens its evidence, because that is the one moment the evidence is
+    what you came for.
+
+    Scenario: A finished task folds its steps away
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the steps are folded away
+      And I can unfold them
+
+    Scenario: A failure unfolds itself
+      Given the project defines the workflow "doomed" that fails
+      And the task "Will fail" exists on "doomed"
+      When I open the tasks page
+      And I queue "Will fail"
+      And "Will fail" becomes "blocked" without me reloading
+      And I open "Will fail"
+      Then the steps are not folded away
+      And the failing step's output is already open
+
+    Scenario: A decision unfolds its evidence
+      Given the project defines the workflow "review" that writes a report and asks for approval
+      And the task "Check it" exists on "review"
+      When I open the tasks page
+      And I queue "Check it"
+      And "Check it" becomes "awaiting_approval" without me reloading
+      And I open "Check it"
+      Then the evidence is not folded away
+      And the evidence is above the steps
+
+  Rule: the task page is read in the order the questions are asked
+
+    What is it doing, what is stopping it, how did it get here, what did it
+    produce, and only then the machinery. The sections are ranked by CSS rather
+    than by where they sit in the markup, so the reading order is a property of
+    the page and not of how it happened to be written.
+
+    Scenario: How it got here comes before the machinery
+      # The discriminating pair. Under the old ranking the steps sat third and
+      # the graph fifth, so a task with both put the log above the history.
+      Given a task judged four times, the third lower than the second
+      And that task has a finished run
+      When I open that task
+      Then how it got here comes before the steps
+
+    Scenario: The workflows still come first
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the workflows come before the steps
+
+  Rule: a row says how much to trust the task, in two numbers
+
+    A 93 with 41% coverage is not the same claim as a 93 with 96%, and a board
+    that showed only the first would be the flattery the reliability card was
+    written to avoid. Both numbers or neither — and neither is an em dash, never
+    a zero, because a zero on a row reads as a verdict rather than as silence.
+
+    Scenario: The row says the score and the coverage together
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      Then the row for "Add due dates" says 88 with 70% coverage
+
+    Scenario: A task nobody has judged shows an em dash rather than a zero
+      Given a task nobody has judged
+      When I open the tasks page
+      Then the row for "Add due dates" shows no score
+
+    Scenario: The card says them too
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      And I switch to the board view
+      Then the card for "Add due dates" says 88 with 70% coverage
+
+    Scenario: The table has a column for it
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      Then the table has a "Trust" column
+
+  Rule: a count says what it counted
+
+    "6/6 phases" on a task with five workflows reads as a miscount until you
+    know that one workflow carries two phases. The page has the room to say
+    which, and the row in the list does not.
+
+    Scenario: The task page says how many workflows the phases came from
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the progress does not say how many workflows it counted
+
+    Scenario: A task with more phases than workflows says so
+      Given the project defines the workflow "twostep" with two phases
+      And the task "Add due dates" exists on "twostep"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the progress says it counted 1 workflow
 
   Rule: a project is created and edited on a page, not in the row it lives in
 

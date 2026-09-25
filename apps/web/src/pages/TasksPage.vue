@@ -10,7 +10,7 @@ import TaskActions from '../components/TaskActions.vue'
 import AppButton from '../components/AppButton.vue'
 import AppIcon from '../components/AppIcon.vue'
 import Tooltip from '../components/Tooltip.vue'
-import { toneFor } from '../states.js'
+import { toneFor, scoreTone } from '../states.js'
 import type { TaskListItem, TaskState } from '../api/client.js'
 
 /**
@@ -328,12 +328,12 @@ onUnmounted(() => store.disconnect())
 
     <!-- List: the default, because most questions are answered by reading down
          a column rather than by looking at where things sit. -->
-    <!-- Scrolls sideways rather than hiding the right-hand columns. Eight
-         columns need about a thousand pixels, and `main` clips rather than
+    <!-- Scrolls sideways rather than hiding the right-hand columns. Nine
+         columns need about eleven hundred pixels, and `main` clips rather than
          scrolls, so under a window of roughly 1270 the status, progress and
          actions were simply unreachable — no scrollbar, no hint they existed. -->
     <div v-else-if="view === 'list'" class="min-w-0 overflow-x-auto">
-      <table class="w-full min-w-[56rem] text-sm" data-testid="task-table">
+      <table class="w-full min-w-[60rem] text-sm" data-testid="task-table">
         <thead>
           <tr class="border-b border-[var(--color-line)] text-left font-mono text-label text-[var(--color-ink-faint)] uppercase">
             <th class="py-2 pr-4">Ticket</th>
@@ -342,6 +342,7 @@ onUnmounted(() => store.disconnect())
             <th class="py-2 pr-4">Workflow</th>
             <th class="py-2 pr-4">Status</th>
             <th class="py-2 pr-4">Progress</th>
+            <th class="py-2 pr-4">Trust</th>
             <th class="py-2 pr-4">Updated</th>
             <th class="py-2" />
           </tr>
@@ -432,6 +433,25 @@ onUnmounted(() => store.disconnect())
               </div>
               <span v-else class="text-xs text-[var(--color-ink-faint)]">—</span>
             </td>
+            <!-- Two numbers, never one: a 93 with 41% coverage is not the same
+                 claim as a 93 with 96%. The testid is on both branches, so a
+                 task nobody judged can be asserted to show an em dash rather
+                 than the row simply having nothing to find. -->
+            <td class="py-3 pr-4">
+              <span
+                v-if="task.reliability"
+                class="font-mono text-meta tabular-nums"
+                :data-testid="`reliability-${task.name}`"
+              >
+                <span :style="{ color: scoreTone(task.reliability.score) }">{{ task.reliability.score }}</span>
+                <span class="text-[var(--color-ink-faint)]"> · {{ task.reliability.coverage }}% evidence</span>
+              </span>
+              <span
+                v-else
+                class="text-xs text-[var(--color-ink-faint)]"
+                :data-testid="`reliability-${task.name}`"
+              >—</span>
+            </td>
             <td class="py-3 pr-4 text-xs text-[var(--color-ink-muted)]">{{ ago(task.updatedAt) }}</td>
             <td class="py-3">
               <TaskActions
@@ -500,6 +520,23 @@ onUnmounted(() => store.disconnect())
                 {{ percent(task) }}%
               </span>
             </div>
+          </div>
+          <!-- Outside the progress block on purpose: a task can be judged
+               before it has a plan to show progress for, and an unjudged one
+               still says so. -->
+          <div
+            class="mt-1 flex items-center justify-between"
+            :data-testid="`card-reliability-${task.name}`"
+          >
+            <template v-if="task.reliability">
+              <span class="font-mono text-meta" :style="{ color: scoreTone(task.reliability.score) }">
+                {{ task.reliability.score }}
+              </span>
+              <span class="font-mono text-meta text-[var(--color-ink-faint)]">
+                {{ task.reliability.coverage }}% evidence
+              </span>
+            </template>
+            <span v-else class="font-mono text-meta text-[var(--color-ink-faint)]">—</span>
           </div>
         </RouterLink>
       </section>

@@ -307,6 +307,15 @@ export interface TaskListItem extends Task {
   actions: AvailableAction[]
   progress?: { completed: number; total: number }
   blockers: TaskBlocker[]
+  /**
+   * The two numbers a row draws, or nothing.
+   *
+   * Absent when nobody has judged the task — an em dash on the row, never a
+   * zero, because a zero reads as a verdict rather than as silence. Read from
+   * the same newest assessment the card reads, through a narrower projection, so
+   * the row and the card cannot disagree about the number.
+   */
+  reliability?: { score: number; coverage: number }
 }
 
 export interface TaskHistoryEntry {
@@ -451,6 +460,8 @@ export interface FactorySettings {
   ui: { scale: number; theme: UiTheme }
   plugins: { disabled: string[] }
   security: { acceptedVersion?: number; profile: ExecutionProfile }
+  /** What reads the work, for a project that has not said. All three optional. */
+  reliability: { provider?: string; model?: string; effort?: string }
 }
 
 /** One plugin Factory knows about, whether or not it is loaded. */
@@ -660,6 +671,8 @@ export interface Project {
    * adds one that can read.
    */
   reliabilityModel?: string
+  reliabilityProvider?: string
+  reliabilityEffort?: string
   /** Whether this project's runs are judged at all. On until somebody says otherwise. */
   reliabilityEnabled?: boolean
   /** Directories its agents may reach beyond the workspace, granted for good. */
@@ -974,6 +987,8 @@ export const api = {
       check?: string | null
       /** `null` clears the model, which means no agent reads this project's work. */
       reliabilityModel?: string | null
+      reliabilityProvider?: string | null
+      reliabilityEffort?: string | null
       reliabilityEnabled?: boolean
     },
   ) =>
@@ -1096,6 +1111,8 @@ export const api = {
   saveSettings: (patch: {
     ui?: { scale?: number; theme?: UiTheme }
     security?: { profile?: ExecutionProfile }
+    /** `null` clears one; leaving it out leaves it alone. */
+    reliability?: { provider?: string | null; model?: string | null; effort?: string | null }
   }) =>
     request<{ settings: FactorySettings; file?: string }>('/api/settings', {
       method: 'PATCH',

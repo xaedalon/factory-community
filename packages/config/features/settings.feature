@@ -138,6 +138,55 @@ Feature: Settings Factory owns
       Then the profile is still "full-access"
       And the scale is 2
 
+  Rule: what reads the work is an installation preference a project may override
+
+    The agent evaluator costs tokens, and the model worth spending them on is a
+    project's decision — but setting the same strong judge on every new project
+    is work nobody should have to repeat. So the installation carries a default
+    and a project overrides it.
+
+    Nothing is defaulted here. A model named in the source would spend somebody's
+    tokens on a decision nobody made, and the free deterministic evaluator always
+    runs regardless.
+
+    Scenario: A fresh installation names no judge
+      Given an installation with the default settings
+      Then no judging provider is named
+      And no judging model is named
+
+    Scenario: A judge can be named
+      Given an installation with the default settings
+      When the judge is set to "codex" using "strong" at "high"
+      Then the judging provider is "codex"
+      And the judging model is "strong"
+      And the judging effort is "high"
+
+    Scenario: Naming the judge leaves the interface alone
+      Given the interface scale is 2
+      When the judge is set to "codex" using "strong" at "high"
+      Then the scale is 2
+
+  Rule: a setting can be cleared, not only changed
+
+    `undefined` inside a group has always meant "not mentioned", so that a caller
+    spreading an optional field in could not erase what was already there. That
+    left no way to take a value back *out*, which did not matter while every
+    setting had a default — and matters now, because an installation default
+    nobody can un-set is a default they cannot stop paying for.
+
+    Scenario: Null takes a value back out of the file
+      Given an installation with the default settings
+      And the judge is set to "codex" using "strong" at "high"
+      When the judging model is cleared
+      Then no judging model is named
+      And the judging provider is "codex"
+
+    Scenario: Undefined still leaves a value alone
+      Given an installation with the default settings
+      And the judge is set to "codex" using "strong" at "high"
+      When a patch mentions the judge but names no model
+      Then the judging model is "strong"
+
   Rule: how far work may start work is a setting
 
     Factory can now be driven by an agent, and an agent Factory launched can

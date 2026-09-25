@@ -1,10 +1,13 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import PageHeader from '../components/PageHeader.vue'
 import AppButton from '../components/AppButton.vue'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import Tooltip from '../components/Tooltip.vue'
 import { useClipboard } from '../composables/useClipboard.js'
+import SelectInput from '../components/form/SelectInput.vue'
+import ComboInput from '../components/form/ComboInput.vue'
+import { api, type ProviderEntry } from '../api/client.js'
 import { SCALES, useSettings } from '../stores/settings.js'
 import type { ExecutionProfile, UiTheme } from '../api/client.js'
 
@@ -16,6 +19,43 @@ import type { ExecutionProfile, UiTheme } from '../api/client.js'
  * and is therefore per-repository rather than per-person.
  */
 const settings = useSettings()
+
+// Bound to refs rather than written straight through, so typing a model id does
+// not PATCH the file on every keystroke. Saved when the control settles.
+const providers = ref<ProviderEntry[]>([])
+const judgeProvider = ref('')
+const judgeModel = ref('')
+const judgeEffort = ref('')
+const providerIds = computed(() => providers.value.map((entry) => entry.id))
+const chosenJudge = computed(() => providers.value.find((entry) => entry.id === judgeProvider.value))
+const judgeModelOptions = computed(() => [
+  'strong',
+  'balanced',
+  'fast',
+  ...Object.values(chosenJudge.value?.models ?? {}),
+])
+const judgeEffortOptions = computed(() => chosenJudge.value?.effortValues ?? [])
+
+// Seeded once the settings arrive, then the person's edits win — the same
+// reasoning `CollapsibleSection` uses for its fold.
+watch(
+  () => settings.judge,
+  (value) => {
+    judgeProvider.value = value.provider ?? ''
+    judgeModel.value = value.model ?? ''
+    judgeEffort.value = value.effort ?? ''
+  },
+  { immediate: true },
+)
+
+const saveJudge = (): void => {
+  void settings.setJudge({
+    provider: judgeProvider.value === '' ? null : judgeProvider.value,
+    model: judgeModel.value.trim() === '' ? null : judgeModel.value.trim(),
+    effort: judgeEffort.value === '' ? null : judgeEffort.value,
+  })
+}
+watch([judgeProvider, judgeEffort], saveJudge)
 
 /**
  * The three choices, with the names a person reads.
@@ -202,6 +242,58 @@ onMounted(() => {
         <AppIcon name="alert" :size="13" class="mr-1 inline-block align-[-2px]" />
         Full Access removes the workspace boundary and passes every credential
         through to the agent. Use it where you can restore the machine.
+      </p>
+    </section>
+
+    <!-- Beside the profile because it is the other setting with a cost: one
+         decides what an agent may reach, this one decides what gets paid for. -->
+    <section
+      class="rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5"
+      data-testid="judging"
+    >
+      <h2 class="mb-3 flex items-center gap-2 text-title">
+        <AppIcon name="check" :size="15" class="text-[var(--color-ink-muted)]" />
+        What reads the work
+      </h2>
+      <div class="grid gap-3 sm:grid-cols-3">
+        <label class="block">
+          <span class="mb-1 block font-mono text-label text-[var(--color-ink-faint)] uppercase">Agent</span>
+          <SelectInput
+            v-model="judgeProvider"
+            :options="providerIds"
+            allow-empty
+            data-testid="settings-judge-provider"
+          />
+        </label>
+        <label class="block">
+          <span class="mb-1 block font-mono text-label text-[var(--color-ink-faint)] uppercase">Model</span>
+          <!-- Saved when the field is left rather than on every keystroke: this
+               writes a file, and `focusout` bubbles from the native input
+               whatever the component chooses to emit. -->
+          <span @focusout="saveJudge">
+            <ComboInput
+              v-model="judgeModel"
+              :options="judgeModelOptions"
+              placeholder="strong"
+              testid="settings-judge-model"
+            />
+          </span>
+        </label>
+        <label class="block">
+          <span class="mb-1 block font-mono text-label text-[var(--color-ink-faint)] uppercase">Effort</span>
+          <SelectInput
+            v-model="judgeEffort"
+            :options="judgeEffortOptions"
+            allow-empty
+            data-testid="settings-judge-effort"
+          />
+        </label>
+      </div>
+      <p class="mt-2 text-xs text-[var(--color-ink-faint)]">
+        What a project gets when it has not chosen for itself. A project can
+        override any of the three on its own page. Left empty, nothing reads the
+        work — Factory still judges every run from what it observed, which costs
+        nothing.
       </p>
     </section>
 

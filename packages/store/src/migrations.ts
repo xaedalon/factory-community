@@ -742,4 +742,27 @@ export const MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    version: 22,
+    describe: 'a project can name the agent that judges it, not only the model',
+    up: (db) => {
+      // What the comment above already promised and nothing implemented: nullable
+      // means "nobody has said", and what fills that silence is the
+      // installation's choice.
+      //
+      // Which CLI reads the work was never a choice at all — Factory used
+      // whichever provider happened to be registered first and available, which
+      // is the one place that does not honour "bring your own AI". And effort was
+      // never passed, though the seam for it has always been there.
+      //
+      // Two columns rather than one JSON blob, because each inherits separately
+      // and each is separately refused: a project that named a model before this
+      // existed keeps that model and inherits a provider, which a whole-trio rule
+      // would have silently stopped judging.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN reliability_provider TEXT;
+        ALTER TABLE projects ADD COLUMN reliability_effort TEXT;
+      `)
+    },
+  },
 ]

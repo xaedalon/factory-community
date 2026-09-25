@@ -583,3 +583,73 @@ Feature: Projects — the repositories Factory works in
       And its judging model is "claude-opus-5-5"
       When I rename it to "factory-core"
       Then the project's judging model is "claude-opus-5-5"
+
+  Rule: a project names the agent that judges it, not only the model
+
+    Which CLI read the work was never a choice: Factory used whichever provider
+    happened to be registered first and available. "Bring your own AI" is a
+    product principle, and this was the one place that did not honour it — so the
+    provider is named beside the model, and the effort beside that.
+
+    Three columns and not one blob, because each inherits separately. A project
+    that named a model before a provider could be named keeps its model and
+    inherits a provider, and a rule that took the three together would have
+    quietly stopped judging exactly those projects.
+
+    Scenario: A new project names no judging provider or effort
+      When I add the project "factory" at that directory
+      Then the project names no judging provider
+      And the project names no judging effort
+
+    Scenario: A judging provider can be chosen
+      Given the project "factory" exists
+      When I set its judging provider to "codex"
+      Then the project's judging provider is "codex"
+
+    Scenario: A judging effort can be chosen
+      Given the project "factory" exists
+      When I set its judging effort to "high"
+      Then the project's judging effort is "high"
+
+    Scenario: Whitespace around the provider is not part of it
+      Given the project "factory" exists
+      When I set its judging provider to "  codex  "
+      Then the project's judging provider is "codex"
+
+    Scenario: A blank provider returns the project to following the installation
+      Given the project "factory" exists
+      And its judging provider is "codex"
+      When I set its judging provider to ""
+      Then the project names no judging provider
+
+    Scenario: Naming the judge is one change, not three
+      # Three columns, one UPDATE and one event. Each event costs the board a
+      # refetch, and saving one page should not cost three.
+      Given the project "factory" exists
+      When I name the judge "codex" "strong" "high" at once
+      Then the project's judging provider is "codex"
+      And the project's judging model is "strong"
+      And the project's judging effort is "high"
+      And exactly 1 "project.changed" event was announced
+
+    Scenario: A cleared provider is a null column, not a blank one
+      # Every reader normalises a blank to "unset", so this is invisible through
+      # the repository — which is exactly why it is asserted against the column.
+      # A blank that still looks set is the shape the check command's own comment
+      # warns about.
+      Given the project "factory" exists
+      And its judging provider is "codex"
+      When I set its judging provider to ""
+      Then the provider column holds nothing at all
+
+    Scenario: The whole judge survives a rename
+      Given the project "factory" exists
+      And its judging provider is "codex"
+      When I rename it to "factory-core"
+      Then the project's judging provider is "codex"
+
+    Scenario: Turning judging off keeps the provider that was chosen
+      Given the project "factory" exists
+      And its judging provider is "codex"
+      When I stop its work being judged
+      Then the project's judging provider is "codex"

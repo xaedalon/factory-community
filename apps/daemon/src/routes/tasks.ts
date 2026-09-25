@@ -235,15 +235,25 @@ export function registerTaskRoutes(
       })
       // One read for the whole board, not one per row.
       const blockers = dependencyView(tasks.dependencies())
+      // Likewise. `reliabilitySummary` is three queries and the arithmetic over
+      // every driver, which is right for the one task a card is drawn for and
+      // would be a hundred and twenty statements for a board of forty.
+      const scores = service.reliability.newestScores()
       return {
-        items: items.map((task) => ({
-          ...task,
-          actions: tasks.actions(task.id),
-          // Computed here rather than in the browser, which would need a
-          // request per row to do the same sum.
-          progress: progressOf(task),
-          blockers: blockers(task),
-        })),
+        items: items.map((task) => {
+          const brief = scores.get(task.id)
+          return {
+            ...task,
+            actions: tasks.actions(task.id),
+            // Computed here rather than in the browser, which would need a
+            // request per row to do the same sum.
+            progress: progressOf(task),
+            blockers: blockers(task),
+            // Absent for a task nobody has judged, never `score: 0` — a zero on
+            // a row reads as a verdict rather than as silence.
+            ...(brief === undefined ? {} : { reliability: brief }),
+          }
+        }),
       }
     },
   )
@@ -722,11 +732,17 @@ export function registerTaskRoutes(
    * here would mean two explanations of one rule, and the one nobody reads
    * would be the one in the interface.
    */
-  app.post<{ Params: { id: string }; Body: { dependsOn?: string } }>(
+  app.post<{ Params: { id: string }; Body: { dependsOn?: string; initiator?: unknown } }>(
     '/api/tasks/:id/dependencies',
     async (request, reply) => {
       const task = tasks.get(request.params.id)
       if (task === undefined) return notFound(reply, request.params.id)
+      // Read for the same reason every other mutating task route reads it: a
+      // half-read initiator is one whose `taskId` went missing, and a write
+      // recorded as coming from nobody is indistinguishable from a person's.
+      // Not a gate — an agent may order its own work — but the trail must not
+      // have a hole in it where MCP writes land.
+      if (initiatorOf(request.body, reply) === REFUSED) return reply
       const blockerId = request.body?.dependsOn
       if (typeof blockerId !== 'string' || blockerId.trim() === '') {
         return reply.code(400).send({ error: 'Which task should it wait for?' })
@@ -744,11 +760,12 @@ export function registerTaskRoutes(
     },
   )
 
-  app.delete<{ Params: { id: string; blockerId: string } }>(
+  app.delete<{ Params: { id: string; blockerId: string }; Body: { initiator?: unknown } }>(
     '/api/tasks/:id/dependencies/:blockerId',
     async (request, reply) => {
       const task = tasks.get(request.params.id)
       if (task === undefined) return notFound(reply, request.params.id)
+      if (initiatorOf(request.body, reply) === REFUSED) return reply
       const updated = tasks.independ(task.id, request.params.blockerId)
       return {
         task: updated,

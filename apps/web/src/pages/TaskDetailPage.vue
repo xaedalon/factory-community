@@ -22,6 +22,7 @@ import TaskStateBadge from '../components/TaskStateBadge.vue'
 import TaskActions from '../components/TaskActions.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
+import CollapsibleSection from '../components/CollapsibleSection.vue'
 import ReliabilityCard from '../components/reliability/ReliabilityCard.vue'
 import ReliabilityDrivers from '../components/reliability/ReliabilityDrivers.vue'
 import ReliabilityGraph from '../components/reliability/ReliabilityGraph.vue'
@@ -185,6 +186,40 @@ const percent = computed(() => {
     ? 0
     : Math.round((progress.completed / progress.total) * 100)
 })
+
+/**
+ * How many workflows the phases were counted across.
+ *
+ * "6/6 phases" on a task with five workflows reads as a miscount until you know
+ * that one of them carries two. Said only when the two numbers differ — "across
+ * 1 workflows" explains nothing and "across 6 workflows" beside 6 phases is
+ * noise.
+ */
+const acrossWorkflows = computed(() => {
+  const total = detail.value?.progress?.total
+  const count = detail.value?.task.workflows.length ?? 0
+  if (total === undefined || count === 0 || total === count) return ''
+  return ` across ${count} workflow${count === 1 ? '' : 's'}`
+})
+
+/**
+ * Whether the steps are the reason this page was opened.
+ *
+ * Seeds the fold, and only that: a step that failed, timed out or is still
+ * running is something somebody came to read, and `openTheRun` has already
+ * opened its log. A folded section would hide the log it just opened.
+ */
+const stepsWantAttention = computed(() =>
+  // `undefined` until the steps are actually here. `openTheRun` sets `openRun`
+  // and only then awaits the run, so the section renders once with an empty
+  // list — seeding from that would fold a failed run's log away for good, which
+  // is the opposite of what this is for.
+  steps.value.length === 0
+    ? undefined
+    : steps.value.some(
+        (step) => step.state === 'failed' || step.state === 'timed-out' || step.state === 'running',
+      ),
+)
 
 /** Nothing left to run, so the Queue button is withheld and this offers a way back. */
 const nothingTicked = computed(
@@ -794,14 +829,13 @@ const stepTone: Record<string, string> = {
                sequence the state calls for. -->
           <!-- Evidence above history: it is why someone opens a run they did not
                watch, and an approval gate is decided on it. -->
-          <section
+          <CollapsibleSection
             v-if="evidence.length > 0"
-            data-testid="evidence"
-            :style="{ order: decisionPending ? 0 : 2 }"
+            title="Evidence"
+            testid="evidence"
+            :open="decisionPending"
+            :style="{ order: decisionPending ? 0 : 4 }"
           >
-            <h2 class="mb-2 text-title">
-              Evidence
-            </h2>
             <div
               v-for="item in evidence"
               :key="item.id"
@@ -837,7 +871,7 @@ const stepTone: Record<string, string> = {
                 Showing the first part; the file on disk is {{ item.bytes }} bytes.
               </p>
             </div>
-          </section>
+          </CollapsibleSection>
           <section data-testid="task-plan" :style="{ order: 1 }">
             <div class="mb-2 flex items-baseline gap-3">
               <h2 class="text-title">Workflows</h2>
@@ -854,8 +888,8 @@ const stepTone: Record<string, string> = {
                     :style="{ width: `${percent}%` }"
                   />
                 </span>
-                <span class="font-mono text-meta text-[var(--color-ink-muted)]">
-                  {{ detail.progress.completed }}/{{ detail.progress.total }} phases · {{ percent }}%
+                <span class="font-mono text-meta text-[var(--color-ink-muted)]" data-testid="task-progress-text">
+                  {{ detail.progress.completed }}/{{ detail.progress.total }} phases{{ acrossWorkflows }} · {{ percent }}%
                 </span>
               </span>
             </div>
@@ -910,10 +944,13 @@ const stepTone: Record<string, string> = {
               </button>
             </div>
           </section>
-          <section v-if="openRun" :style="{ order: 3 }">
-            <h2 class="mb-2 text-title">
-              Steps
-            </h2>
+          <CollapsibleSection
+            v-if="openRun"
+            title="Steps"
+            testid="steps"
+            :open="stepsWantAttention"
+            :style="{ order: 5 }"
+          >
             <ul class="divide-y divide-[var(--color-line)] rounded-lg border border-[var(--color-line)]">
               <li v-for="step in steps" :key="step.id" class="px-3 py-2">
                 <button
@@ -965,17 +1002,17 @@ const stepTone: Record<string, string> = {
                 </div>
               </li>
             </ul>
-          </section>
+          </CollapsibleSection>
 
           <ReliabilityDrivers
             v-if="drivers.length > 0"
-            :style="{ order: 4 }"
+            :style="{ order: 2 }"
             :drivers="drivers"
             :busy="actingOn"
             @act="actOnDriver"
           />
 
-          <ReliabilityGraph v-if="history.length > 1" :style="{ order: 5 }" :history="history" />
+          <ReliabilityGraph v-if="history.length > 1" :style="{ order: 3 }" :history="history" />
         </div>
 
         <aside class="flex w-full shrink-0 flex-col gap-4 xl:w-[21rem]" data-testid="task-rail">

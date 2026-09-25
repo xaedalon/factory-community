@@ -19,7 +19,15 @@ Feature: Agent providers
 
   Scenario: A model role resolves to the provider's own identifier
     Then "strong" resolves to "opus" for "claude"
-    And "strong" resolves to "claude-opus-5-5" for "copilot"
+    And "strong" resolves to "claude-opus-5.5" for "copilot"
+
+  Scenario: Copilot dots a model's minor version rather than hyphenating it
+    # Both of these were once hyphenated. `claude-opus-5-5` was refused outright
+    # — "Model ... from --model flag is not available" — and `claude-haiku-4-5`
+    # would have been, the first time anybody asked for the fast role. GitHub's
+    # own SDK documents the form: `e.g. "claude-haiku-4.5"`.
+    Then "fast" resolves to "claude-haiku-4.5" for "copilot"
+    And "balanced" resolves to "claude-sonnet-5" for "copilot"
 
   Scenario: A literal model identifier passes through untouched
     Then "claude-fable-5" resolves to "claude-fable-5" for "claude"

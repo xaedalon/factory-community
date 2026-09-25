@@ -69,8 +69,17 @@ describeFeature(feature, ({ Background, Rule, Scenario, ScenarioOutline, BeforeE
     Then('"strong" resolves to "opus" for "claude"', () =>
       expect(provider('claude').resolveModel('strong')).toBe('opus'),
     )
-    And('"strong" resolves to "claude-opus-5-5" for "copilot"', () =>
-      expect(provider('copilot').resolveModel('strong')).toBe('claude-opus-5-5'),
+    And('"strong" resolves to "claude-opus-5.5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('strong')).toBe('claude-opus-5.5'),
+    )
+  })
+
+  Scenario("Copilot dots a model's minor version rather than hyphenating it", ({ Then, And }) => {
+    Then('"fast" resolves to "claude-haiku-4.5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('fast')).toBe('claude-haiku-4.5'),
+    )
+    And('"balanced" resolves to "claude-sonnet-5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('balanced')).toBe('claude-sonnet-5'),
     )
   })
 

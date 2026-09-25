@@ -156,6 +156,10 @@ export function buildBundle(options: ExportOptions): ExportResult {
       workflows: [...workflows.values()],
       phases: [...phases.values()],
       agents: [...agents.values()],
+    // Nothing references a profile, so an export never pulls one in. Carried as
+    // an empty list so the envelope is complete and a hand-written bundle can
+    // still fill it.
+    profiles: [],
     },
     problems,
   }

@@ -1,5 +1,6 @@
 import type { Problem } from '../problems.js'
 import type { Agent } from '../schema/agent.js'
+import type { Profile } from '../schema/profile.js'
 import type { Phase } from '../schema/phase.js'
 import type { Workflow } from '../schema/workflow.js'
 import type { Bundle } from './schema.js'
@@ -21,7 +22,7 @@ export type ConflictPolicy = 'fail' | 'skip' | 'overwrite'
  * depend on config, and this union was previously written out inline at six
  * separate sites, so a third kind meant finding all six.
  */
-export type BundledKind = 'workflow' | 'phase' | 'agent'
+export type BundledKind = 'workflow' | 'phase' | 'agent' | 'profile'
 
 export interface ImportTargetLookup {
   /** Does a definition of this name already exist in the *target* scope? */
@@ -64,13 +65,15 @@ export interface ImportItem {
 }
 
 export interface ImportPlan {
-  readonly entry: string
+  /** The renamed entry workflow, when the bundle named one. */
+  readonly entry?: string
   readonly items: readonly ImportItem[]
   readonly problems: readonly Problem[]
   /** Definitions rewritten to the target names, ready to serialize. */
   readonly workflows: readonly Workflow[]
   readonly phases: readonly Phase[]
   readonly agents: readonly Agent[]
+  readonly profiles: readonly Profile[]
 }
 
 export function planImport(options: ImportOptions): ImportPlan {
@@ -84,6 +87,7 @@ export function planImport(options: ImportOptions): ImportPlan {
     ...bundle.workflows.map((workflow) => workflow.name),
     ...bundle.phases.map((phase) => phase.name),
     ...bundle.agents.map((agent) => agent.name),
+    ...bundle.profiles.map((profile) => profile.name),
   ])
   const rename = (name: string): string => (owned.has(name) ? `${prefix}${name}` : name)
 
@@ -105,6 +109,12 @@ export function planImport(options: ImportOptions): ImportPlan {
     }),
   }))
   const agents = bundle.agents.map((agent) => ({ ...agent, name: rename(agent.name) }))
+  // Only the name: a profile refers to providers and commands, and neither is a
+  // definition the bundle carries, so there is nothing else a prefix could
+  // rewrite. A project naming the profile is the recipient's own row and is
+  // deliberately left alone — an import must not repoint a project at something
+  // it did not choose.
+  const profiles = bundle.profiles.map((profile) => ({ ...profile, name: rename(profile.name) }))
 
   const items: ImportItem[] = []
   const problems: Problem[] = []
@@ -150,11 +160,15 @@ export function planImport(options: ImportOptions): ImportPlan {
   bundle.agents.forEach((agent, index) =>
     consider('agent', agent.name, agents[index]?.name ?? agent.name),
   )
+  bundle.profiles.forEach((profile, index) =>
+    consider('profile', profile.name, profiles[index]?.name ?? profile.name),
+  )
 
   return {
-    entry: rename(bundle.entry.workflow),
+    ...(bundle.entry === undefined ? {} : { entry: rename(bundle.entry.workflow) }),
     items,
     problems,
+    profiles,
     workflows,
     phases,
     agents,

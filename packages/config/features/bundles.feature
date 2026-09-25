@@ -133,3 +133,29 @@ Feature: Sharing a workflow as one file
     And the user scope has the workflow "development"
     And the user scope has the phase "review"
     And nothing it wrote fails to validate
+
+  Rule: a bundle can carry a profile, and need not carry a workflow
+
+    Nothing references a profile the way a step references an agent — a project
+    chooses one — so a profile never arrives by being pulled in. It travels
+    because somebody put it in the bundle, which is how the shipped example
+    ships. That also means a bundle with no workflow at all is a real thing, and
+    requiring an entry workflow would have meant naming one that is not in the
+    file.
+
+    Scenario: A bundle of only a profile reads
+      Given the bundle Factory ships for build tools
+      When it is read
+      Then reading succeeds
+      And it carries the profile "build-tools"
+      And it names no entry workflow
+
+    Scenario: Importing it writes the profile into the scope
+      Given the bundle Factory ships for build tools
+      When I import it into the user scope
+      Then the profile "build-tools" is in the user scope
+
+    Scenario: A prefix renames the profile on the way in
+      Given the bundle Factory ships for build tools
+      When I import it into the user scope with the prefix "acme-"
+      Then the profile "acme-build-tools" is in the user scope

@@ -3,6 +3,7 @@ import { closedWithExtensions, problemsFromZod, slug } from '../schema/common.js
 import type { Problem } from '../problems.js'
 import type { Phase } from '../schema/phase.js'
 import type { Agent } from '../schema/agent.js'
+import type { Profile } from '../schema/profile.js'
 import type { Workflow } from '../schema/workflow.js'
 
 /**
@@ -36,7 +37,14 @@ const bundleShape = {
       unresolved: z.array(z.string()).default([]),
     })
     .optional(),
-  entry: z.object({ workflow: slug('entry workflow') }),
+  /**
+   * The workflow this bundle is *for*, when it is for one.
+   *
+   * Optional since profiles could travel: a bundle carrying only a profile has
+   * no entry workflow, and requiring one would mean naming a workflow that is
+   * not in the file. Absent is a real answer; an empty string would not be.
+   */
+  entry: z.object({ workflow: slug('entry workflow') }).optional(),
   workflows: z.array(z.unknown()).default([]),
   phases: z.array(z.unknown()).default([]),
   /**
@@ -47,6 +55,16 @@ const bundleShape = {
    * phases" failure this format exists to prevent, one level down.
    */
   agents: z.array(z.unknown()).default([]),
+  /**
+   * Defaulted, for the same reason `agents` is: a bundle written before
+   * profiles existed still reads.
+   *
+   * Nothing *references* a profile the way a step references an agent — a
+   * project chooses one — so a profile never arrives by being pulled in. It
+   * travels because somebody put it in the bundle on purpose, which is how the
+   * shipped example ships.
+   */
+  profiles: z.array(z.unknown()).default([]),
 }
 
 const bundleSchema = closedWithExtensions(bundleShape)
@@ -61,10 +79,11 @@ export interface Bundle {
     readonly sourceScope: string
     readonly unresolved: readonly string[]
   }
-  readonly entry: { readonly workflow: string }
+  readonly entry?: { readonly workflow: string }
   readonly workflows: readonly Workflow[]
   readonly phases: readonly Phase[]
   readonly agents: readonly Agent[]
+  readonly profiles: readonly Profile[]
 }
 
 /** Validate the envelope. The definitions inside are validated by their own schemas. */

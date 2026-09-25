@@ -90,7 +90,29 @@ verifying custom profiles end to end.
 return it as a `failed([...])` like every other refusal. One `try` in the
 dispatch, or a `writeTargetOrProblem` beside the throwing one.
 
-## 5. `git.feature` fails under a saturated machine, and it is the deadline
+## 5. "The daemon did not start" — the browser suite's own flake
+
+One scenario in a full `pnpm --filter @factory/web test:e2e` failed with
+
+```
+Error: The daemon did not start.
+```
+
+— an infrastructure failure rather than an assertion, in a scenario about phase
+variables that has nothing to do with what was being changed. It passed alone
+and passed on a re-run of the whole suite.
+
+`startDaemon` spawns a daemon per scenario and polls `/api/health` a hundred
+times, and `refuseIfTaken` checks the port first with a 1 s timeout. Two hundred
+daemon starts in one run on a machine also running vitest is enough for one of
+them to lose that race.
+
+**Shape of the fix:** the wait is already bounded and the failure message is
+already good; what is missing is what it waited for. Report the elapsed time and
+the last health response with the refusal, so the next person can tell "it never
+came up" from "it came up too slowly" without re-running anything.
+
+## 6. `git.feature` fails under a saturated machine, and it is the deadline
 
 Seen twice on 2026-09-24, both times in a full `pnpm test` (59 workers), both
 times passing when the file is run alone:
@@ -115,7 +137,7 @@ deadline being measured by a test that cannot control the load.
 *classifying* git's answers, not about how fast git is, and the timeout path has
 a scenario of its own that sets it deliberately.
 
-## 6. `needs:` describes an order nothing acts on
+## 7. `needs:` describes an order nothing acts on
 
 A workflow's `needs:` is read by doctor (to report a task whose workflows are out
 of order) and by the bundle exporter (to gather the closure). Assigning `verify`
@@ -129,7 +151,7 @@ the board has the information to offer better.
 `needs` one that is not on the task, offer to add it. An offer, not an
 expansion: `verify` alone is a legitimate thing to want.
 
-## 7. Coverage credit for a declaration is asymmetric
+## 8. Coverage credit for a declaration is asymmetric
 
 `observationsFrom` credits a declaration's *first* expected-evidence key against
 an artifact actually arriving, and the rest on the run completing. A workflow

@@ -69,6 +69,24 @@ Feature: The factory command
     When I run "doctor"
     Then the output reports the number of rules run
 
+  Scenario: doctor says what it could not check without a daemon
+    When I run "doctor"
+    # Half the rules need a database this process does not own — the ones about
+    # tasks, worktrees, and what git can see of a project. They were registered
+    # nowhere this command could reach, so nothing printed them at all.
+    Then the output says the running checks were not run
+
+  Scenario: doctor adds what the daemon found
+    Given a daemon reporting a problem of its own
+    When I run "doctor"
+    Then the output carries the daemon's problem
+    And it does not say the running checks were missed
+
+  Scenario: a problem both halves found is reported once
+    Given a daemon reporting a problem this installation also has
+    When I run "doctor"
+    Then the problem appears once
+
   Scenario: doctor reports a definition that does not validate
     Given the project scope defines a broken workflow "oops"
     When I run "doctor"
@@ -182,6 +200,39 @@ Feature: The factory command
     Then the daemon was asked to create a task with workflows "worktree-create, development"
     And the output says how to start it
 
+  Scenario: a task is moved to another project
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task move task-1 elsewhere"
+    Then the daemon was asked to move it to "elsewhere"
+    And the output says where it is now
+
+  Scenario: moving to a project that is not there says which exist
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task move task-1 nowhere"
+    Then it fails
+    And the output names both projects
+
+  Scenario: a task lands in the only project there is
+    Given a daemon with one project "work"
+    When I run "task new Add due dates"
+    # Not typed, because there is nothing to choose between. A task needs a
+    # project, and asking which of one is busywork.
+    Then the daemon was asked to create it in "work"
+
+  Scenario: with no project there is nowhere to put a task
+    Given a daemon with no projects
+    When I run "task new Add due dates"
+    Then it fails
+    And the output contains "needs a project"
+    And the output says how to add one
+
+  Scenario: with more than one project the task says which
+    Given a daemon with the projects "work" and "elsewhere"
+    When I run "task new Add due dates"
+    Then it fails
+    And the output contains "--project"
+    And the output names both projects
+
   Scenario: showing a task lists what it can do next
     Given a daemon with a task "Add due dates" that is queued
     When I run "task show task-1"
@@ -199,6 +250,32 @@ Feature: The factory command
     Then the command fails
     And the output contains "Cannot reach the Factory daemon"
     And the output contains "factory-daemon"
+
+  Scenario: a run can be tried under a profile before it is chosen for a project
+    # A foreground run has no project to read a profile from, so naming one is
+    # how somebody checks what a profile they just wrote actually does — with
+    # --dry-run, before it is set on anything.
+    Given the project defines the profile "buildtools" allowing "cargo"
+    And a workflow whose step runs an agent
+    When I run "run build --dry-run --profile buildtools"
+    Then the command succeeds
+    And the printed command allows "Bash(cargo *)"
+
+  Scenario: a run under a profile nobody wrote is refused
+    Given a workflow whose step runs an agent
+    When I run "run build --dry-run --profile nowhere"
+    Then the command fails
+    And the output says no scope defines that profile
+
+  Scenario: an answer that is not JSON is explained rather than failing on nothing
+    # A daemon older than this CLI answers a route it does not know with the
+    # board's own HTML and a 200. Read as a result, that produced a crash about
+    # a property of `undefined` — naming neither the request nor the cause.
+    Given a daemon that answers with a page instead of JSON
+    When I run "task list"
+    Then the command fails
+    And the output says the answer was not JSON
+    And the output names the request
 
   Scenario: the short id the listing prints is enough to act on
     Given a daemon with a task "Add due dates" that is queued
@@ -241,6 +318,29 @@ Feature: The factory command
       Then it succeeds
       And the first phase starts a session
       And the second phase resumes the same one
+
+  Rule: a foreground run says what the agent was refused, and does not call it success
+
+    The engine parks a task whose agent was refused a command. `factory run` has
+    nowhere to park, so its exit code is the whole of what it can say — and it
+    was saying "Completed" in green on a run where the install did not happen.
+    It collected the refusals and printed none of them, which made the one
+    surface somebody watches the quietest one.
+
+    Scenario: A refused command is named, and the run does not succeed
+      Given an agent whose transcript reports "pnpm install" denied
+      And the project defines a workflow with one agent phase
+      When I run "run probe --yes"
+      Then it fails
+      And one line says that command did not run, and names it
+      And the output does not say the run completed
+
+    Scenario: A run with nothing refused still succeeds
+      Given an agent whose transcript reports no refusal
+      And the project defines a workflow with one agent phase
+      When I run "run probe --yes"
+      Then it succeeds
+      And the output says the run completed
 
   Rule: the plugin switches are reachable when the board is not
 
@@ -498,4 +598,124 @@ Feature: The factory command
       When I run "project add work"
       Then the exit code is 2
       And the output mentions "<path>"
+
+
+  Rule: `factory mcp` serves the protocol and says nothing else
+
+    One command owns its streams rather than returning lines, because every
+    other command's lines are printed to stdout — and a printed line here lands
+    in the middle of a JSON-RPC stream and ends the session with an error the
+    person reads as "Factory is broken".
+
+    It is also the one command nobody types. A terminal on stdin means a person
+    typed it and no client is coming, so it says what it is for instead of
+    waiting on a pipe that will never speak.
+
+    That distinction used to be made in `bin.ts`, which handed the streams over
+    unconditionally — so the explanation was unreachable from the real binary
+    and a person who typed `factory mcp` got a hang. The scenario for it passed
+    because a spec can leave the streams out, which the product never did. The
+    process fact is reported now and the command decides, which is where every
+    other one of them is decided.
+
+    Scenario: It answers a client over the pipe it was given
+      Given a client that initializes and lists the tools
+      When I run "mcp"
+      Then it succeeds
+      And two frames were written to the pipe
+      And nothing was printed
+      And the tools include "factory_project_current"
+
+    Scenario: At a terminal it explains itself rather than waiting
+      Given a person typing it, with a terminal on stdin
+      When I run "mcp"
+      Then it fails
+      And the output says an MCP client starts it
+      And the output shows what to put in a client's configuration
+      # The assertion that would have caught the hang: not "it printed
+      # something" but "it never went looking for a frame".
+      And nothing was read from stdin
+
+    Scenario: Given no streams at all it says the same thing
+      # An embedder that called `run` without handing any over. Same answer,
+      # and the one the spec could already reach.
+      When I run "mcp" with no pipe at all
+      Then it fails
+      And the output says an MCP client starts it
+
+    Scenario: It is in the help
+      When I run "--help"
+      Then the output mentions "factory mcp"
+
+  Rule: how much to trust a task, from a terminal
+
+    The same numbers the board draws, through the same API. Nothing here decides
+    anything — the score, the drivers and the next actions all arrive judged.
+
+    There is no `factory reliability set`. The score is not something a person
+    types either.
+
+    Scenario: A task nobody has judged says so, and how to fix that
+      Given a daemon that says the task is unassessed
+      When I run "reliability abc123"
+      Then it succeeds
+      And the output says it is not assessed
+      And the output names the command that would assess it
+
+    Scenario: A judged task shows the score and the coverage together
+      # Either number alone is misleading: a 93 with 20% coverage is not the
+      # same claim as a 93 with 96%.
+      Given a daemon that says the task scores 88
+      When I run "reliability abc123"
+      Then it succeeds
+      And the output says 88
+      And the output says the coverage
+
+    Scenario: A fall is shown with an arrow, not with colour alone
+      Given a daemon that says the task scores 88
+      When I run "reliability abc123"
+      Then the output shows a downward movement
+
+    Scenario: A cap is explained where it is applied
+      Given a daemon that says the task is capped
+      When I run "reliability abc123"
+      Then the output says what capped it
+
+    Scenario: A stale assessment says so
+      Given a daemon that says the assessment is stale
+      When I run "reliability abc123"
+      Then the output says it is stale
+
+    Scenario: The drivers are listed with their owner
+      Given a daemon with one driver on the task
+      When I run "reliability abc123 drivers"
+      Then it succeeds
+      And the output names the driver
+      And the output says who should resolve it
+
+    Scenario: A task with nothing outstanding says so
+      Given a daemon with no drivers on the task
+      When I run "reliability abc123 drivers"
+      Then the output says nothing is holding it back
+
+    Scenario: The next actions are estimates and say so
+      Given a daemon offering one next action
+      When I run "reliability abc123 next"
+      Then it succeeds
+      And the output says they are estimates
+
+    Scenario: History reads oldest first
+      Given a daemon with two assessments on the task
+      When I run "reliability abc123 history"
+      Then it succeeds
+      And the output reads 82 before 88
+
+    Scenario: A task nobody can find is refused clearly
+      Given a daemon with no such task
+      When I run "reliability nope"
+      Then it fails
+
+    Scenario: There is no way to set a score
+      When I run "reliability abc123 set 100"
+      Then it is a usage error
 

@@ -82,6 +82,7 @@ factory task list
 factory task queue 3f9a1c20
 factory task show 3f9a1c20      # state, runs, and what it will accept next
 factory task logs 3f9a1c20      # every step of the newest run, and its output
+factory task move 3f9a1c20 other-project   # created in the wrong one
 ```
 
 `factory task` talks to the daemon over the same API the board uses. The eight characters the
@@ -92,7 +93,8 @@ guessed at.
 
 Open the task. The review note is there as evidence, next to every step that ran and everything it
 printed. **Approve** continues from the phase after the gate — the phases before it do not run
-again. **Reject** blocks the task with the reason. From the terminal:
+again. **Reject** blocks the task with the reason and ends the run it was asked about — a retry
+afterwards starts the workflow again rather than continuing past the gate. From the terminal:
 `factory task approve 3f9a1c20`.
 
 If a step fails instead, `on_fail` runs the diagnosis workflow first, so the blocked task already

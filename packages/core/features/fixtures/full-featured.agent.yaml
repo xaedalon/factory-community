@@ -1,0 +1,9 @@
+# The agent the implementation phases name.
+kind: factory.agent/v1
+name: developer
+description: Code implementation.
+provider: claude
+model: haiku
+effort: medium
+session: task
+args: ['--allowedTools', 'Bash(pnpm *)']

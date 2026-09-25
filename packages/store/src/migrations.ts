@@ -430,4 +430,339 @@ export const MIGRATIONS: readonly Migration[] = [
       `)
     },
   },
+  {
+    version: 16,
+    describe: "a project's own square: a chosen hue and chosen letters",
+    up: (db) => {
+      // Both nullable, and null keeps exactly the behaviour that was here
+      // before: the square is derived from the name. `identity.ts` argues for
+      // that derivation and the argument still holds — adding a project should
+      // need no decision from anybody, and a name is enough to be consistent
+      // everywhere without storing a thing.
+      //
+      // What it cannot do is survive a rename, which changes the hash and so
+      // changes the colour of a square somebody had already learned. And with
+      // six hues, two projects collide often enough to matter. So this is an
+      // override, not a replacement: unset means derived, set means chosen.
+      //
+      // `tone` is an index into the six `--color-project-N` hues rather than a
+      // hex. The palette is deliberately closed — tokens.css says a seventh
+      // meaning for colour does not go there — and storing a free colour would
+      // let a project sit outside it.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN tone INTEGER;
+        ALTER TABLE projects ADD COLUMN initials TEXT;
+      `)
+    },
+  },
+  {
+    version: 17,
+    describe: 'a task cannot exist without a project',
+    // The rebuild below drops `tasks`, which every run, step, log, evidence row,
+    // history row, workflow entry and dependency edge points at with ON DELETE
+    // CASCADE. See `rebuildsForeignKeys` in migrate.ts: without this, the drop
+    // takes all of them.
+    rebuildsForeignKeys: true,
+    up: (db) => {
+      // Migration 5 made `project_id` nullable with ON DELETE SET NULL,
+      // reasoning that removing a project is bookkeeping and must not delete the
+      // record of work. Right about the record, wrong about the remedy:
+      // orphaning a task does not keep it usable. It ran wherever the daemon
+      // happened to be started, wrote its artifacts beside it, could not be
+      // queued as a batch or given a worktree, and vanished from the board the
+      // moment any project was selected. Removal is refused now instead, which
+      // keeps the record by keeping the project.
+      //
+      // Foreign keys are off for this whole transaction, so ON DELETE CASCADE
+      // does not fire and the orphans' children are deleted by hand — exactly
+      // what the cascade would have done. The ids go into a temp table first,
+      // which is what makes the order below irrelevant: every delete reads the
+      // captured list rather than `tasks`, so removing the tasks early would
+      // not strand anything. `PRAGMA foreign_key_check` at the end is what
+      // proves no table was forgotten — `task_flags` was, once.
+      const orphans =
+        db.get<{ n: number }>('SELECT count(*) AS n FROM tasks WHERE project_id IS NULL')?.n ?? 0
+
+      db.exec(`
+        CREATE TEMP TABLE orphan_tasks AS SELECT id FROM tasks WHERE project_id IS NULL;
+
+        DELETE FROM run_logs WHERE run_id IN
+          (SELECT id FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks));
+        DELETE FROM run_evidence WHERE run_id IN
+          (SELECT id FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks));
+        DELETE FROM run_steps WHERE run_id IN
+          (SELECT id FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks));
+        DELETE FROM runs WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_workflows WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_flags WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_history WHERE task_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM task_dependencies
+          WHERE task_id IN (SELECT id FROM orphan_tasks)
+             OR depends_on_id IN (SELECT id FROM orphan_tasks);
+        DELETE FROM tasks WHERE id IN (SELECT id FROM orphan_tasks);
+        DROP TABLE orphan_tasks;
+      `)
+
+      // ON DELETE RESTRICT rather than CASCADE: a project is removable only
+      // while nothing is left in it, and `ProjectRepository.remove` refuses
+      // first so the message can name the count. This is the backstop for
+      // anything that goes round the repository — belt to NOT NULL's braces,
+      // which refuses a SET NULL action on its own.
+      db.exec(`
+        CREATE TABLE tasks_new (
+          id                TEXT PRIMARY KEY,
+          name              TEXT NOT NULL,
+          description       TEXT NOT NULL DEFAULT '',
+          project_id        TEXT NOT NULL REFERENCES projects(id) ON DELETE RESTRICT,
+          ticket_id         TEXT,
+          branch            TEXT,
+          directory         TEXT,
+          state             TEXT NOT NULL,
+          queue_position    INTEGER,
+          blocked_reason    TEXT,
+          created_at        TEXT NOT NULL,
+          updated_at        TEXT NOT NULL,
+          completed_at      TEXT,
+          runnable_at       TEXT,
+          session_id        TEXT,
+          session_provider  TEXT
+        );
+
+        INSERT INTO tasks_new (
+          id, name, description, project_id, ticket_id, branch, directory, state,
+          queue_position, blocked_reason, created_at, updated_at, completed_at,
+          runnable_at, session_id, session_provider
+        )
+        SELECT
+          id, name, description, project_id, ticket_id, branch, directory, state,
+          queue_position, blocked_reason, created_at, updated_at, completed_at,
+          runnable_at, session_id, session_provider
+        FROM tasks;
+
+        DROP TABLE tasks;
+        ALTER TABLE tasks_new RENAME TO tasks;
+
+        -- The board's main query is "everything in this state, in order", and the
+        -- scheduler's is "the next queued one". Recreated because the index went
+        -- with the old table.
+        CREATE INDEX tasks_by_state ON tasks (state, queue_position);
+      `)
+
+      // Proving the invariant rather than assuming it, the way migration 15
+      // checks for cycles. With enforcement off for this transaction, nothing
+      // else would notice a child left pointing at a task that is gone.
+      const violations = db.all('PRAGMA foreign_key_check')
+      if (violations.length > 0) {
+        throw new Error(
+          `Rebuilding tasks left ${violations.length} foreign key violation(s): ` +
+            JSON.stringify(violations),
+        )
+      }
+
+      // Deleting somebody's tasks is a one-way door and this runs unattended when
+      // a daemon starts, so the count is carried out to the migration log rather
+      // than left only in the schema.
+      return orphans > 0
+        ? `deleted ${orphans} task(s) that belonged to no project, and everything recorded about them`
+        : undefined
+    },
+  },
+  {
+    version: 18,
+    describe: 'a step records the command it actually ran',
+    up: (db) => {
+      // Nullable, because every step recorded before this ran without anybody
+      // writing it down, and a skipped step never ran one at all. Null is the
+      // truth in both cases; a default would invent a command that was never
+      // executed.
+      db.exec('ALTER TABLE run_steps ADD COLUMN command TEXT')
+    },
+  },
+  {
+    version: 19,
+    describe: 'work knows who asked for it',
+    up: (db) => {
+      // Until now every run was equally anonymous, which was fine while the
+      // only things that could start work were a person at the board and a
+      // person at a terminal. An agent Factory launched can reach the daemon —
+      // it is on 127.0.0.1, there is no authentication, and `FACTORY_URL` is
+      // not credential-shaped so it survives the environment filter. Serving
+      // MCP does not create that reach; it makes it ergonomic, which is reason
+      // enough to be able to answer "who asked for this, and from inside what".
+      //
+      // No foreign key on either run pointer, and the reason is written down
+      // in migration 17: `runs.entry_id` has none for the same one. A lineage
+      // pointer must not be able to delete the thing it points at, and
+      // `ON DELETE CASCADE` from a run to its own descendants would do exactly
+      // that — a tidy-up of one finished run taking the record of everything it
+      // started.
+      //
+      // `depth` is NOT NULL with a default of 0, which is the truth for every
+      // row that already exists: a person started it.
+      db.exec(`
+        ALTER TABLE runs ADD COLUMN origin_run_id TEXT;
+        ALTER TABLE runs ADD COLUMN depth INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE tasks ADD COLUMN created_by TEXT;
+        ALTER TABLE tasks ADD COLUMN created_by_run_id TEXT;
+      `)
+    },
+  },
+  {
+    version: 20,
+    describe: "a project knows the command that checks its own work",
+    up: (db) => {
+      // Nullable, and null means "nobody has said" rather than "there is
+      // nothing to run". The difference is load-bearing: the built-in
+      // `project-check` phase refuses to plan on a project with no command,
+      // because `bash -c ''` exits 0 and a default here would be a tick beside
+      // work that never happened.
+      //
+      // `check_command` rather than `check`: `CHECK` is a reserved word in
+      // SQLite's column-constraint grammar, and a column that needs quoting
+      // everywhere is a column somebody eventually forgets to quote.
+      db.exec('ALTER TABLE projects ADD COLUMN check_command TEXT')
+    },
+  },
+  {
+    version: 21,
+    describe: 'a task carries a judgement of how much to trust it',
+    up: (db) => {
+      // Three tables and two columns, and the shapes are argued rather than
+      // assumed.
+      //
+      // **Assessments are append-only.** A judgement is never edited because
+      // interpretation changed; a correction is a later assessment that
+      // supersedes. `sequence` rather than a timestamp is the ordering, because
+      // two assessments written in the same millisecond are possible and a
+      // history that cannot be ordered is not evidence of anything.
+      //
+      // **There is no `current` row.** The current state is the newest
+      // assessment plus the drivers that are still active — two indexed
+      // queries. A stored copy would be a second source of truth for something
+      // the history already says, and the two disagree the first time an
+      // assessment is replayed. `progress` on a task is derived for exactly
+      // this reason and this follows it.
+      //
+      // `considered_run_id` is what makes *staleness* derivable too: a run for
+      // this task that finished after the one an assessment took into account
+      // means the judgement is behind the work, and nothing had to be written
+      // down to know it.
+      //
+      // JSON in TEXT for `dimensions`, `caps` and `explanation`: a small set,
+      // read whole with its owner, never queried across owners — which is the
+      // line `projects.granted_directories` drew and `task_dependencies`
+      // declined to cross. Every read goes through a parser that degrades to
+      // empty rather than throwing, so a hand-edited row cannot make a task
+      // unloadable.
+      db.exec(`
+        CREATE TABLE reliability_assessments (
+          id                    TEXT PRIMARY KEY,
+          task_id               TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          sequence              INTEGER NOT NULL,
+          trigger               TEXT NOT NULL,
+          workflow              TEXT,
+          run_id                TEXT,
+          score                 REAL NOT NULL,
+          raw_score             REAL NOT NULL,
+          coverage              INTEGER NOT NULL,
+          delta                 REAL NOT NULL,
+          summary               TEXT NOT NULL DEFAULT '',
+          dimensions            TEXT NOT NULL,
+          caps                  TEXT NOT NULL,
+          explanation           TEXT NOT NULL,
+          considered_run_id     TEXT,
+          scoring_model_version TEXT NOT NULL,
+          created_at            TEXT NOT NULL,
+          UNIQUE (task_id, sequence)
+        );
+        CREATE INDEX reliability_assessments_by_task
+          ON reliability_assessments(task_id, sequence DESC);
+
+        CREATE TABLE reliability_drivers (
+          id                      TEXT PRIMARY KEY,
+          task_id                 TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          title                   TEXT NOT NULL,
+          description             TEXT NOT NULL DEFAULT '',
+          type                    TEXT NOT NULL,
+          severity                TEXT NOT NULL,
+          status                  TEXT NOT NULL,
+          owner                   TEXT NOT NULL,
+          dimension               TEXT NOT NULL,
+          score_impact            REAL NOT NULL DEFAULT 0,
+          recommended_action      TEXT,
+          evidence_refs           TEXT NOT NULL DEFAULT '[]',
+          introduced_run_id       TEXT,
+          introduced_workflow     TEXT,
+          introduced_assessment_id TEXT,
+          supersedes              TEXT,
+          resolved_at             TEXT,
+          accepted_at             TEXT,
+          accepted_by             TEXT,
+          acceptance_reason       TEXT,
+          created_at              TEXT NOT NULL,
+          updated_at              TEXT NOT NULL
+        );
+        -- The board's question is "what is still open on this task", and the
+        -- status is half of it.
+        CREATE INDEX reliability_drivers_by_task
+          ON reliability_drivers(task_id, status);
+
+        CREATE TABLE reliability_observations (
+          id            TEXT PRIMARY KEY,
+          task_id       TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+          assessment_id TEXT,
+          kind          TEXT NOT NULL,
+          status        TEXT NOT NULL,
+          summary       TEXT NOT NULL DEFAULT '',
+          dimension     TEXT,
+          source        TEXT,
+          run_id        TEXT,
+          step_id       TEXT,
+          reference     TEXT,
+          satisfies     TEXT,
+          created_at    TEXT NOT NULL
+        );
+        CREATE INDEX reliability_observations_by_task
+          ON reliability_observations(task_id, id);
+      `)
+
+      // Which model judges this project's work, and whether one does at all.
+      //
+      // Nullable means "nobody has said" and falls back to the installation's
+      // choice, the way `projects.profile` does — absent is deliberately not the
+      // same as choosing the default. A role (`strong`) rather than a model id,
+      // because ids are retired and a role is not.
+      //
+      // Enabled defaults to 1 because the deterministic evaluator costs nothing
+      // and a feature nobody switches on is a feature nobody has. What the
+      // column actually gates is the *agent* evaluator, which costs tokens.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN reliability_model TEXT;
+        ALTER TABLE projects ADD COLUMN reliability_enabled INTEGER NOT NULL DEFAULT 1;
+      `)
+    },
+  },
+  {
+    version: 22,
+    describe: 'a project can name the agent that judges it, not only the model',
+    up: (db) => {
+      // What the comment above already promised and nothing implemented: nullable
+      // means "nobody has said", and what fills that silence is the
+      // installation's choice.
+      //
+      // Which CLI reads the work was never a choice at all — Factory used
+      // whichever provider happened to be registered first and available, which
+      // is the one place that does not honour "bring your own AI". And effort was
+      // never passed, though the seam for it has always been there.
+      //
+      // Two columns rather than one JSON blob, because each inherits separately
+      // and each is separately refused: a project that named a model before this
+      // existed keeps that model and inherits a provider, which a whole-trio rule
+      // would have silently stopped judging.
+      db.exec(`
+        ALTER TABLE projects ADD COLUMN reliability_provider TEXT;
+        ALTER TABLE projects ADD COLUMN reliability_effort TEXT;
+      `)
+    },
+  },
 ]

@@ -1,6 +1,6 @@
 {
   "name": "@factory/runtime",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Assembles a Factory installation: scopes, host and the built-in plugins.",
@@ -23,6 +23,7 @@
     "@factory/provider-claude": "workspace:*",
     "@factory/provider-codex": "workspace:*",
     "@factory/provider-copilot": "workspace:*",
+    "@factory/reliability-agent": "workspace:*",
     "@factory/task-diffity": "workspace:*",
     "@factory/task-session": "workspace:*",
     "@factory/task-terminal": "workspace:*"

@@ -6,6 +6,10 @@ import { api, type DefinitionListing, type WorkflowChoice } from '../api/client.
 import { useProjects } from '../stores/projects.js'
 import { useTasks } from '../stores/tasks.js'
 import PageHeader from '../components/PageHeader.vue'
+import AppButton from '../components/AppButton.vue'
+import AppIcon from '../components/AppIcon.vue'
+import FieldRow from '../components/form/FieldRow.vue'
+import TextInput from '../components/form/TextInput.vue'
 import WorkflowPicker from '../components/WorkflowPicker.vue'
 
 /**
@@ -33,11 +37,16 @@ const description = ref('')
 const ticketId = ref('')
 const branch = ref('')
 // Defaults to whatever the rail is showing: creating a task while looking at a
-// project almost always means creating it there.
+// project almost always means creating it there. When the rail shows
+// everything, the first project is chosen rather than none — a task cannot be
+// created without one, and an empty select that refuses on submit is a worse
+// way to learn that than a filled one you can change.
 const projectId = ref(chosen.projectId ?? '')
 const workflows = ref<WorkflowChoice[]>([])
 const available = ref<DefinitionListing[]>([])
 const busy = ref(false)
+// So the empty state is not flashed before the first list arrives.
+const loaded = ref(false)
 
 /** What this project can run — its own scope, layered over the shared ones. */
 async function loadWorkflows(): Promise<void> {
@@ -51,8 +60,10 @@ async function loadWorkflows(): Promise<void> {
   }
 }
 
-onMounted(() => {
-  void chosen.load()
+onMounted(async () => {
+  await chosen.load()
+  if (projectId.value === '') projectId.value = projects.value[0]?.id ?? ''
+  loaded.value = true
   void loadWorkflows()
 })
 // Changing the project changes which workflows exist, so the list is fetched
@@ -61,14 +72,14 @@ onMounted(() => {
 watch(projectId, loadWorkflows)
 
 async function submit(): Promise<void> {
-  if (name.value.trim() === '' || busy.value) return
+  if (name.value.trim() === '' || projectId.value === '' || busy.value) return
   busy.value = true
   const id = await tasks.create({
     name: name.value.trim(),
     ...(description.value.trim() === '' ? {} : { description: description.value.trim() }),
     ...(ticketId.value.trim() === '' ? {} : { ticketId: ticketId.value.trim() }),
     ...(branch.value.trim() === '' ? {} : { branch: branch.value.trim() }),
-    ...(projectId.value === '' ? {} : { projectId: projectId.value }),
+    projectId: projectId.value,
     workflows: workflows.value.map((entry) => entry.workflow),
   })
   busy.value = false
@@ -81,105 +92,138 @@ async function submit(): Promise<void> {
   <PageHeader title="New task" subtitle="A name, what it is for, where it happens, and what it runs — in order." />
 
   <div class="px-8 py-6">
-    <form class="max-w-3xl" data-testid="new-task-form" @submit.prevent="submit">
-      <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <label class="flex flex-col gap-1">
-          <span class="text-xs text-[var(--color-ink-muted)]">Name</span>
-          <input
-            v-model="name"
-            data-testid="task-name"
-            placeholder="What needs doing"
-            class="rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm"
-          />
-        </label>
-        <label class="flex flex-col gap-1">
-          <span class="text-xs text-[var(--color-ink-muted)]">Ticket</span>
-          <input
-            v-model="ticketId"
-            data-testid="task-ticket"
-            placeholder="WW2-20742"
-            class="rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm"
-          />
-        </label>
-        <label class="flex flex-col gap-1">
-          <span class="text-xs text-[var(--color-ink-muted)]">Branch</span>
-          <input
-            v-model="branch"
-            data-testid="task-branch"
-            placeholder="feature/due-dates"
-            class="rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm"
-          />
-        </label>
+    <!--
+      A task happens in a project, so with none registered there is nothing to
+      fill in. The form is not shown disabled: the thing to do is add a
+      repository, and that is the only control offered.
+    -->
+    <div
+      v-if="loaded && projects.length === 0"
+      class="max-w-2xl rounded-lg border border-dashed border-[var(--color-line)] px-6 py-12 text-center"
+      data-testid="new-task-needs-project"
+    >
+      <AppIcon name="project" :size="22" class="mx-auto text-[var(--color-ink-faint)]" />
+      <p class="mt-3 text-sm text-[var(--color-ink-muted)]">
+        A task happens in a project, and there are none yet. A project is the repository Factory
+        does the work in.
+      </p>
+      <div class="mt-4 flex justify-center">
+        <AppButton
+          label="Add a repository"
+          icon="add"
+          tone="primary"
+          data-testid="new-task-add-project"
+          @click="router.push('/projects/new')"
+        />
       </div>
+    </div>
 
-      <!-- Below the grid, because it is prose and a third of a row is not
-           enough of it. It is also a token, so what goes here is what a
-           prompt can quote. -->
-      <label class="mt-3 flex flex-col gap-1">
-        <span class="text-xs text-[var(--color-ink-muted)]">
-          Description
-          <span class="font-mono text-[var(--color-ink-faint)]">— steps can write {{ DESCRIPTION_TOKEN }}</span>
-        </span>
+    <form v-else class="max-w-2xl" data-testid="new-task-form" @submit.prevent="submit">
+      <!-- At the top, for the reason the project form's banner is: below every
+           field and the workflow list, it is off the screen at the moment it
+           appears. Anything that belongs to one box is rendered under that box
+           by `FieldRow` instead. -->
+      <p
+        v-if="error"
+        class="mb-5 flex items-start gap-2 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
+        data-testid="error"
+      >
+        <AppIcon name="alert" class="mt-0.5" />
+        {{ error }}
+      </p>
+
+      <FieldRow
+        label="Name"
+        icon="tasks"
+        required
+        for="task-name"
+        hint="What the board will call this. A workflow derives the task's directory and branch from it when nothing else says otherwise."
+      >
+        <TextInput id="task-name" v-model="name" data-testid="task-name" placeholder="What needs doing" />
+      </FieldRow>
+
+      <FieldRow
+        label="Ticket"
+        icon="link"
+        for="task-ticket"
+        hint="Your tracker's id for this work, if it has one. Shown on the board so a row can be matched to the ticket it came from."
+      >
+        <TextInput id="task-ticket" v-model="ticketId" mono data-testid="task-ticket" placeholder="WW2-20742" />
+      </FieldRow>
+
+      <FieldRow
+        label="Branch"
+        icon="branch"
+        for="task-branch"
+        hint="The branch this task's work goes on. Left empty, a workflow derives one from the name."
+      >
+        <TextInput id="task-branch" v-model="branch" mono data-testid="task-branch" placeholder="feature/due-dates" />
+      </FieldRow>
+
+      <!-- Full width, because it is prose and a third of a row is not enough
+           of it. It is also a token, so what goes here is what a prompt can
+           quote — which is worth saying where it is typed. -->
+      <FieldRow label="Description" icon="edit" for="task-description">
         <textarea
+          id="task-description"
           v-model="description"
           data-testid="task-description"
           rows="3"
           placeholder="What the work is for, in your own words."
-          class="resize-y rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm"
+          class="w-full resize-y rounded-md border border-[var(--color-line)] bg-[var(--color-base)] px-3 py-1.5 text-sm placeholder:text-[var(--color-ink-faint)] focus:border-[var(--color-accent)] focus:outline-none"
         />
-      </label>
+        <p class="mt-1 flex items-start gap-1.5 text-xs leading-relaxed text-[var(--color-ink-faint)]">
+          <AppIcon name="info" :size="12" class="mt-0.5" />
+          <span>
+            An agent step can quote this with
+            <code class="value text-[var(--color-accent-text)]">{{ DESCRIPTION_TOKEN }}</code>, so
+            it is part of the prompt and not just a note.
+          </span>
+        </p>
+      </FieldRow>
 
-      <label v-if="projects.length > 0" class="mt-3 flex flex-col gap-1">
-        <span class="text-xs text-[var(--color-ink-muted)]">Project</span>
+      <FieldRow
+        label="Project"
+        icon="project"
+        for="task-project"
+        hint="The repository this work happens in. It decides where the steps run and where the worktree goes."
+      >
         <select
+          id="task-project"
           v-model="projectId"
           data-testid="task-project"
-          class="w-full rounded-md border border-[var(--color-line-strong)] bg-[var(--color-base)] px-2.5 py-1.5 text-sm sm:w-72"
+          class="field-control"
         >
-          <option value="">No project — run where the daemon started</option>
           <option v-for="project in projects" :key="project.id" :value="project.id">
             {{ project.name }}
           </option>
         </select>
-      </label>
+      </FieldRow>
 
-      <div class="mt-5">
-        <span class="text-xs text-[var(--color-ink-muted)]">Workflows, in the order they run</span>
-        <div class="mt-1.5">
-          <WorkflowPicker
-            v-model="workflows"
-            :available="available"
-            :editable="true"
-            :project="projectId === '' ? undefined : projectId"
-          />
-        </div>
-      </div>
-
-      <p
-        v-if="error"
-        class="mt-4 text-sm text-[var(--color-danger)]"
-        data-testid="error"
+      <FieldRow
+        label="Workflows"
+        icon="play"
+        hint="The task stops at the first one that asks for approval, and waits there for you. Drag to reorder."
       >
-        {{ error }}
-      </p>
+        <WorkflowPicker
+          v-model="workflows"
+          :available="available"
+          :editable="true"
+          :project="projectId === '' ? undefined : projectId"
+        />
+      </FieldRow>
 
-      <div class="mt-6 flex items-center gap-3">
-        <button
+      <div class="mt-6 flex items-center gap-2 border-t border-[var(--color-line)] pt-5">
+        <AppButton
+          label="Create task"
+          icon="add"
+          tone="primary"
           type="submit"
-          data-testid="create-task"
-          class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
           :disabled="busy"
-        >
-          Create task
-        </button>
-        <button
-          type="button"
-          data-testid="cancel-task"
-          class="text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
-          @click="router.push('/tasks')"
-        >
-          Cancel
-        </button>
+          hint="Make the task as a draft — nothing runs until it is queued"
+          data-testid="create-task"
+        />
+        <AppButton label="Cancel" data-testid="cancel-task" @click="router.push('/tasks')" />
       </div>
     </form>
   </div>

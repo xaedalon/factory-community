@@ -95,7 +95,7 @@ steps:
     effort: high
     subagent: implementer        # a named persona, mapped per provider
     session: task                # task | workflow | phase | none
-    args: ['--verbose']          # appended verbatim
+    args: ['--verbose']          # appended verbatim — but see below
 
   - uses: worktree
     action: create               # or `remove`
@@ -103,6 +103,13 @@ steps:
     branch: "{{ task.branch }}"
     from: origin/main            # optional starting point
 ```
+
+**`args`** is appended verbatim, with one exception: an argument that would give the agent more
+authority than the project's execution profile allows is **refused at plan time**, naming the
+argument. `args: ['--permission-mode', 'bypassPermissions']` in a phase — or in an agent file, which
+is a file in the repository the agent itself can edit — used to mean Full Access with nothing said.
+If a project needs that, choose it as the project's profile, where it is a decision and is marked on
+screen. See [`security/default-profile.md`](security/default-profile.md).
 
 **`retries`** and **`retry_delay`** work on any step, of any kind — core takes them out before the
 kind's own schema sees them, so no plugin has to implement retrying to be retryable. `retries: 2`
@@ -133,7 +140,7 @@ failure is the common case, not the rare one.
 
 `{{ task.name }}`, `{{ task.ticketId }}`, `{{ task.branch }}`, `{{ task.directory }}`,
 `{{ project.name }}`, `{{ project.path }}`, `{{ project.branch }}`, `{{ project.worktrees }}`,
-and anything you put in `variables:` as `{{ variables.x }}`.
+`{{ project.check }}`, and anything you put in `variables:` as `{{ variables.x }}`.
 
 Phase variables beat workflow variables, which beat project values. A recovery workflow also gets
 `{{ project.failedWorkflow }}`, `{{ project.failedPhase }}` and `{{ project.failureReason }}`.
@@ -164,6 +171,48 @@ step is always shown.
 An agent is not a provider. A provider is *what is installed* — a CLI, its flags,
 how a command is rendered. An agent is *how you want to use one*, and several can
 share a provider and differ only in model or persona.
+
+## The gate
+
+An agent's report is a **claim**. Only a command is a **result**, and a workflow that ends with an
+agent saying the work is good can only ever tell you that it said so. A supervised run of ten tasks
+had a `validate` workflow shaped exactly like that: it passed every time, with no dependencies
+installed and the test suite never run.
+
+The gate is a shell step after the agent step. Its non-zero exit fails the phase, which blocks the
+task — that has always worked; what was missing was anything that knew what to run.
+
+```yaml
+name: validate
+steps:
+  - uses: agent
+    prompt: Check the work against the specification and report what is wrong.
+  - run: '{{ project.check }}'   # the gate. Not the agent's opinion of it.
+```
+
+**`{{ project.check }}`** is one command per project — whatever this repository already runs in CI.
+Factory detects it when the project is added (a `test` script in `package.json`, `Cargo.toml`,
+`go.mod`, a `test:` target in a `Makefile`) and it is editable on the project's page.
+
+The built-in **`project-check`** phase is exactly that one step, so a workflow ending in a real gate
+is one word:
+
+```yaml
+name: validate
+phases: [review, project-check]
+```
+
+A project that has not been given a check command makes that phase **refuse to plan** — the run is
+recorded refused and the task blocked with a reason. That is deliberate: `bash -c ''` exits 0, so
+the alternative is a tick beside nothing. The same refusal applies to any step whose command
+resolves to an empty string.
+
+The gate itself always runs: a `shell` step is started by Factory, not by an agent, so the Default
+profile's allow-list has nothing to do with it. What that allow-list does constrain is an **agent**
+running the same command while it works — under Claude Code's Default profile it may run the package
+managers and nothing else, so an agent told to run `cargo test` is refused. Loudly, now: the run is
+paused naming the command rather than finishing with a tick.
+[`security/providers.md`](security/providers.md) has the list.
 
 ## Artifacts
 
@@ -214,18 +263,52 @@ Factory is one of a family of Xaedalon products, so its files live under
 `.factory` path is **still read** — `factory doctor` names it and the move that
 fixes it, and nothing is relocated for you.
 
-Commit `.xaedalon/.factory`; what runs produce lives under `tasks/` beside it and
-is ignored by the `.gitignore` `factory init` writes.
+**Always at the project, never in a worktree.** A task's artifacts, the dated
+copies of them and this ignore file are all written under the project's own
+directory, whatever workspace the steps ran in — a worktree is deleted when the
+work in it ends, and an artifact that disappears with the work it describes is
+no better than no artifact. Worktrees themselves live *outside* the repository,
+beside it, for the same reason a scope discovery must not climb out of one.
+What does end up in a worktree is whatever the steps write there, which is a
+project's own business: an environment built relative to the working directory
+lives and dies with it, deliberately. The exception is `factory run`, which has
+no project and so writes its artifacts beside the workspace you give it —
+point it at a worktree and its output goes with that worktree.
+
+`.xaedalon/` is ignored from the moment Factory creates it. `factory init` — and registering a
+project on the board, which does the same thing — writes `.xaedalon/.gitignore` containing `*`, so
+the directory and that file with it are invisible to git and adding a project changes nothing in
+`git status`. Most repositories that exist are not using Factory, and trying it on your own machine
+should not turn into a commit.
+
+**Sharing is one edit**, and that file says how: replace the `*` with the three lines that ignore
+only what a run produced — `.factory/tasks/`, `.factory/state/`, `.factory/.trash/` — and commit
+`.xaedalon`. Deleting the file does the same thing; Factory writes the smaller version back the
+next time one of its runs produces an artifact. A repository that already shares its definitions is
+left exactly as it is: Factory never writes an ignore file over a directory it did not create.
+
+Two consequences of ignoring them are worth knowing. `git clean -xdf` deletes ignored files, which
+now means your definitions and the database if it lives in this repository — plain `git clean -fd`
+leaves them alone. And your editor probably hides ignored paths in its file tree, so the notice the
+board shows after registering a project may be the only place you see the files named.
 
 The same name in two scopes is not an error: the higher one wins, and the fact that it hides another
-is reported by `factory why <name>` and by `doctor`. Commit `.xaedalon/.factory` and the workflow travels
-with the repository.
+is reported by `factory why <name>` and by `doctor`. Share `.xaedalon/.factory` and the workflow
+travels with the repository.
 
 **Travels, and arrives by itself.** A chain is resolved per *project*, from the path that project
 points at — not from the directory the daemon was started in. So adding a repository as a project is
 the whole step: its committed workflows, phases and agents are available to its tasks immediately,
 with nothing to import, and `factory workflow list` prints `project` beside each. A repository that
 gains a scope later is picked up on the next request rather than needing a restart.
+
+The corollary of the default: a clone has whatever was committed and nothing else. A project whose
+`.xaedalon/` is still ignored exists on one machine. The same goes for a **git worktree**, which
+materialises tracked files only — so a worktree of a project that has not shared its definitions
+contains no `.xaedalon/` at all. That breaks no run, because a project's chain is resolved from the
+path the *project* points at rather than from the worktree, but `factory run` invoked inside such a
+worktree finds no project scope.
+
 [`xaedalon/sample-todolist`](https://github.com/xaedalon/sample-todolist) is a repository that does
 this — clone it, add it, and its five-workflow pipeline is there.
 

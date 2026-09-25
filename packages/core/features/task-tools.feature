@@ -75,8 +75,8 @@ Feature: The buttons on a task come from plugins
       When the tools for a task are gathered
       Then "open-terminal" would run "cd '/repos/my work'"
 
-    Scenario: A tool on a task with no project says no directory
-      Given the task belongs to no project
+    Scenario: A tool on a task whose project is missing says no directory
+      Given the task's project is not in the database
       And a tool "jira" that runs "open https://example.test"
       When the tools for a task are gathered
       # `cd ''` is a worse answer than none.

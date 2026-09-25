@@ -33,9 +33,15 @@ export type ScopeKind = 'project' | 'user' | 'builtin'
  * declaration of the same union — as it already was, spelled out inline at
  * eight call sites. One named type at least makes the duplication visible.
  */
-export type DefinitionKind = 'workflow' | 'phase' | 'agent'
+export type DefinitionKind = 'workflow' | 'phase' | 'agent' | 'profile'
 
 /** What turning a project setting on copied into the repository. */
+/** Whether adding a project had to create its `.xaedalon/.factory` directory. */
+export interface ScopeReport {
+  created: boolean
+  root: string
+}
+
 export interface ScaffoldReport {
   written: string[]
   kept: string[]
@@ -178,6 +184,22 @@ export interface ProviderEntry {
   effortValues: string[]
   provisional: boolean
   available: boolean
+  /**
+   * The flag that allows one command rather than all of them, if this CLI has one.
+   *
+   * Absent means a custom profile's command list cannot reach it. The profile
+   * editor says so while the list is being written, because it is true and
+   * there is nothing in the YAML that would reveal it.
+   */
+  commandAllowFlag?: string
+  /**
+   * The flag that forbids one command, if this CLI has one.
+   *
+   * A separate question from the one above with a separate answer — Claude has
+   * both, and a CLI with an allow-list and no deny-list would take a profile's
+   * denials in silence. The editor needs both to say which half is lost.
+   */
+  commandDenyFlag?: string
 }
 
 export type TaskState =
@@ -249,7 +271,8 @@ export interface Task {
   name: string
   /** Always present — '' when nobody has written one. */
   description: string
-  projectId?: string
+  /** The project the work happens in. Every task has one. */
+  projectId: string
   ticketId?: string
   branch?: string
   directory?: string
@@ -284,6 +307,15 @@ export interface TaskListItem extends Task {
   actions: AvailableAction[]
   progress?: { completed: number; total: number }
   blockers: TaskBlocker[]
+  /**
+   * The two numbers a row draws, or nothing.
+   *
+   * Absent when nobody has judged the task — an em dash on the row, never a
+   * zero, because a zero reads as a verdict rather than as silence. Read from
+   * the same newest assessment the card reads, through a narrower projection, so
+   * the row and the card cannot disagree about the number.
+   */
+  reliability?: { score: number; coverage: number }
 }
 
 export interface TaskHistoryEntry {
@@ -326,6 +358,8 @@ export interface RunStep {
   index: number
   describe: string
   uses: string
+  /** What it actually ran. Absent for a step that ran no process. */
+  command?: string
   state: 'running' | 'completed' | 'failed' | 'timed-out' | 'skipped'
   /** More than one means the step was retried. */
   attempts: number
@@ -426,6 +460,8 @@ export interface FactorySettings {
   ui: { scale: number; theme: UiTheme }
   plugins: { disabled: string[] }
   security: { acceptedVersion?: number; profile: ExecutionProfile }
+  /** What reads the work, for a project that has not said. All three optional. */
+  reliability: { provider?: string; model?: string; effort?: string }
 }
 
 /** One plugin Factory knows about, whether or not it is loaded. */
@@ -480,13 +516,24 @@ export interface TaskDetail {
   progress?: { completed: number; total: number }
   blockers: TaskBlocker[]
   artifacts: TaskArtifact[]
-  /** Absent for a task belonging to no project: there is nowhere to show. */
+  /**
+   * How much to trust this task, assembled by the daemon and carried here.
+   *
+   * On the detail rather than fetched separately, because the card always
+   * draws and a second request for something assembled from rows already read
+   * is a round trip for nothing.
+   */
+  reliability: ReliabilitySummary
+  /**
+   * Absent only when the task's project is missing from the database, which
+   * takes a hand-edited one: every task has a project.
+   */
   workspace?: TaskWorkspace
   /**
    * The buttons this task offers, in the order the plugins asked for.
    *
-   * Beside `actions`, not inside `workspace`: a task with no project has no
-   * workspace, and a tool that needs no directory would be unreachable there.
+   * Beside `actions`, not inside `workspace`: a tool that needs no directory
+   * — a ticket system, say — would be unreachable nested inside one.
    */
   tools: TaskTool[]
 }
@@ -515,6 +562,71 @@ export interface SetupReport {
   remaining: number
 }
 
+/**
+ * How much to trust a task, as the daemon assembles it.
+ *
+ * `unassessed` is a state and the score is *absent* for it — not zero. A task
+ * nobody has looked at is not a task that failed, and drawing it as 0 would be
+ * the same lie the empty workflow told.
+ */
+export interface ReliabilitySummary {
+  state: 'unassessed' | 'assessed' | 'stale'
+  score?: number
+  rawScore?: number
+  coverage?: number
+  delta?: number
+  dimensions?: Record<string, number>
+  caps?: { type: string; value: number; reason: string }[]
+  assessedAt?: string
+  assessmentId?: string
+  staleReason?: string
+  attention: {
+    agent: number
+    developer: number
+    either: number
+    external: number
+    potential: Record<string, number>
+  }
+}
+
+/** One judgement, with the arithmetic that produced it. */
+export interface ReliabilityAssessment {
+  id: string
+  sequence: number
+  workflow?: string
+  runId?: string
+  score: number
+  rawScore: number
+  coverage: number
+  delta: number
+  summary: string
+  dimensions: Record<string, number>
+  caps: { type: string; value: number; reason: string }[]
+  explanation: {
+    contributions: { dimension: string; score: number; weight: number; contribution: number }[]
+    rawScore: number
+    effectiveScore: number
+    causes: { summary: string; amount: number; driverId?: string }[]
+  }
+  createdAt: string
+}
+
+/** Something that is costing trust, and who can do something about it. */
+export interface ReliabilityDriver {
+  id: string
+  title: string
+  description: string
+  type: string
+  severity: string
+  status: string
+  owner: string
+  dimension: string
+  scoreImpact: number
+  recommendedAction?: { type: string; label: string; workflow?: string }
+  acceptedBy?: string
+  acceptanceReason?: string
+}
+
 export interface Project {
   id: string
   name: string
@@ -527,12 +639,42 @@ export interface Project {
   /** Whether each task gets an environment of its own. Off unless asked for. */
   usesEnvironments: boolean
   /**
+   * The hue this project's square uses, 1 to 6, when it has chosen one.
+   *
+   * Absent means derived from the name — see `identity.ts`, which is still the
+   * default and still the argument. Read through `markTone`, never directly,
+   * so a chosen square and a derived one look the same at the call site.
+   */
+  tone?: number
+  /** The letters on the square, when chosen. Absent means derived. */
+  initials?: string
+  /**
    * How much authority its runs get. Absent means it follows the installation.
    *
    * Absent is not the same as `default`: a project that has never chosen
    * follows the installation's setting, so changing that setting changes it.
    */
   profile?: ExecutionProfile
+  /**
+   * The command that says whether this project's work is sound.
+   *
+   * Absent means nobody has said. The built-in `project-check` phase then
+   * refuses to plan rather than running an empty command and reporting
+   * success, which is the whole reason this is a field and not a convention.
+   */
+  check?: string
+  /**
+   * The model that reads this project's work, when one does.
+   *
+   * Absent means nobody has chosen, which is not the same as switching judging
+   * off: the free evaluator still runs either way, and naming a model is what
+   * adds one that can read.
+   */
+  reliabilityModel?: string
+  reliabilityProvider?: string
+  reliabilityEffort?: string
+  /** Whether this project's runs are judged at all. On until somebody says otherwise. */
+  reliabilityEnabled?: boolean
   /** Directories its agents may reach beyond the workspace, granted for good. */
   grantedDirectories: string[]
   createdAt: string
@@ -545,7 +687,8 @@ export interface NewTask {
   description?: string
   ticketId?: string
   branch?: string
-  projectId?: string
+  /** Required: it decides where the work happens. */
+  projectId: string
   workflows?: string[]
 }
 
@@ -603,10 +746,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // parsing it blindly would replace a useful status with a SyntaxError.
   const text = await response.text()
   let body: unknown
+  let parsed = true
   try {
     body = text === '' ? undefined : JSON.parse(text)
   } catch {
     body = undefined
+    parsed = false
   }
 
   if (!response.ok) {
@@ -616,6 +761,23 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       payload.error ?? `Request failed (${response.status})`,
       payload.problems ?? [],
       body,
+    )
+  }
+
+  // A success that is not JSON is not a success. This used to return
+  // `undefined`, and every caller then failed on a property of it — somewhere
+  // else entirely, with a message naming neither the request nor the cause.
+  // ("Cannot read properties of undefined (reading 'text')" was the one that
+  // got reported, from a daemon whose catch-all answered an API path it did not
+  // know with the board's own HTML and a 200.)
+  //
+  // Thrown rather than logged, because a caller that carries on without the
+  // thing it asked for is the tick-beside-nothing this project keeps finding.
+  if (!parsed) {
+    throw new ApiError(
+      response.status,
+      `The daemon's answer to ${path} was not JSON. It may be an older version ` +
+        `than this page, or something else is answering on its port.`,
     )
   }
   return body as T
@@ -700,6 +862,25 @@ export const api = {
    * A preview produced by a different code path is a preview that can be wrong
    * about what the real one will do.
    */
+  /** The bundles Factory ships, so a project can take one without a terminal. */
+  exampleBundles: () =>
+    request<{
+      items: {
+        name: string
+        description?: string
+        workflows: number
+        phases: number
+        profiles: number
+      }[]
+    }>(
+      '/api/bundles/examples',
+    ),
+
+  exampleBundle: (name: string) =>
+    request<{ name: string; text: string }>(
+      `/api/bundles/examples/${encodeURIComponent(name)}`,
+    ),
+
   importBundle: async (
     text: string,
     options: {
@@ -755,17 +936,60 @@ export const api = {
    */
   setup: () => request<SetupReport>('/api/setup'),
 
+  reliabilityHistory: (task: string) =>
+    request<{ items: ReliabilityAssessment[] }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/history`,
+    ),
+
+  reliabilityDrivers: (task: string) =>
+    request<{ items: ReliabilityDriver[] }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/drivers`,
+    ),
+
+  assessReliability: (task: string) =>
+    request<{ reliability: ReliabilitySummary }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/assess`,
+      { method: 'POST', body: JSON.stringify({}) },
+    ),
+
+  /** `action` is one the driver offers; the daemon refuses anything else. */
+  actOnDriver: (task: string, driver: string, action: string, body: Record<string, unknown> = {}) =>
+    request<{ driver: ReliabilityDriver; reliability: ReliabilitySummary }>(
+      `/api/tasks/${encodeURIComponent(task)}/reliability/drivers/${encodeURIComponent(driver)}/${action}`,
+      { method: 'POST', body: JSON.stringify(body) },
+    ),
+
   projects: () => request<{ items: Project[] }>('/api/projects'),
 
-  /** Turn either project setting on or off. Both go through the same route. */
+  /**
+   * Change a project. Everything editable goes through the one route.
+   *
+   * `name` and `defaultBranch` are here because the alternative was removing
+   * the project and adding it again, which orphans every task that ever ran in
+   * it. `path` is not editable by design — see the route.
+   */
   setProjectSetting: (
     id: string,
     // `profile: null` clears it, which is how a project returns to following
     // the installation. Distinct from choosing `default`.
     setting: {
+      name?: string
+      defaultBranch?: string
       usesWorktrees?: boolean
       usesEnvironments?: boolean
       profile?: ExecutionProfile | null
+      // `null` for either means derive it from the name, which is where a
+      // project starts and what it returns to.
+      tone?: number | null
+      initials?: string | null
+      // `null` clears the check command, which is a real answer: a project
+      // whose gate should not run is better off saying so.
+      check?: string | null
+      /** `null` clears the model, which means no agent reads this project's work. */
+      reliabilityModel?: string | null
+      reliabilityProvider?: string | null
+      reliabilityEffort?: string | null
+      reliabilityEnabled?: boolean
     },
   ) =>
     request<{ project: Project; scaffolded: ScaffoldReport }>(
@@ -779,8 +1003,10 @@ export const api = {
     defaultBranch?: string
     usesWorktrees?: boolean
     usesEnvironments?: boolean
+    /** Omit entirely and the daemon detects it from the repository. */
+    check?: string
   }) =>
-    request<{ project: Project; scaffolded: ScaffoldReport }>('/api/projects', {
+    request<{ project: Project; scope: ScopeReport; scaffolded: ScaffoldReport }>('/api/projects', {
       method: 'POST',
       body: JSON.stringify(input),
     }),
@@ -885,6 +1111,8 @@ export const api = {
   saveSettings: (patch: {
     ui?: { scale?: number; theme?: UiTheme }
     security?: { profile?: ExecutionProfile }
+    /** `null` clears one; leaving it out leaves it alone. */
+    reliability?: { provider?: string | null; model?: string | null; effort?: string | null }
   }) =>
     request<{ settings: FactorySettings; file?: string }>('/api/settings', {
       method: 'PATCH',

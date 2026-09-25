@@ -1,0 +1,69 @@
+# A profile for a project whose build tools are not a Node package manager.
+#
+# The Default profile launches Claude Code with an allow-list of four package
+# managers and nothing else, so `cargo test`, `make check`, `go test` and
+# `docker compose up` are refused. This is the third position: yes to these
+# commands, in this repository, because somebody decided so and wrote it down.
+#
+# Import it, then choose "build-tools" as the project's profile on its page.
+#
+# WHAT IT CHANGES, AND WHAT IT DOES NOT
+#
+# Measured against Claude Code 2.1.281 on 2026-09-24 — see
+# docs/security/providers.md for the table.
+#
+#   Read-only commands are auto-approved whatever an allow-list says. `git
+#   status`, `git diff`, `cat` and `find` already work under the Default
+#   profile. Nothing here buys those, and none of them is listed: a profile
+#   whose entries change nothing is a profile whose author is misled by it.
+#
+#   What this buys is commands with *side effects*, which is what a build is.
+#
+#   It does not move the workspace boundary. `--restricted` still confines the
+#   agent's file tools, credentials are still withheld, and a write outside the
+#   workspace is still refused. A profile widens which commands may run; it
+#   never widens where they may write.
+#
+# WHAT IT COSTS, SAID PLAINLY
+#
+#   `cargo test`, `make check` and `go test` run this repository's own code, so
+#   inside those commands the boundary does not hold — exactly the trade the
+#   Default profile already makes for `pnpm test`, and the reason a build tool
+#   belongs here rather than in the shipped default.
+#
+#   `make` in particular runs whatever the Makefile says, which is arbitrary
+#   shell. That is not a reason to leave it out — a Makefile project's agent
+#   that cannot run `make` is useless — but it is a reason to know.
+#
+#   `docker` reaches the daemon, which is not confined by anything Factory
+#   passes. Remove it if this project does not need containers.
+#
+#   No interpreters. `node`, `python`, `sh` and their kin run whatever they are
+#   given with their own syscalls, and `Bash(node *)` was measured writing
+#   outside the workspace on the first attempt. Add one only if you mean it;
+#   Factory will warn and then let you.
+#
+# Only Claude Code can honour the command list. Copilot has coarse switches and
+# Codex has none, so under those this profile changes nothing — Factory says so
+# rather than letting you assume otherwise.
+kind: factory.bundle/v1
+metadata:
+  name: build-tools
+  description: A profile for projects whose build is not npm.
+# No `entry:`. This bundle carries a profile and no workflow, so there is no
+# entry workflow to name — and naming one that is not in the file would be worse
+# than leaving it out.
+profiles:
+  - kind: factory.profile/v1
+    name: build-tools
+    description: Default, plus the build tools a non-Node project needs.
+    extends: default
+    commands:
+      - cargo
+      - make
+      - go
+      - gradle
+      - mvn
+      - docker
+    deny_commands:
+      - docker system prune

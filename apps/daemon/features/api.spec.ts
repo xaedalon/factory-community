@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { FastifyInstance } from 'fastify'
 import { DISCLAIMER_VERSION, parseWorkflowFile } from '@factory/core'
+import type { PluginContext } from '@factory/core'
 import { createRuntime } from '@factory/runtime'
 import { resolveScopes } from '@factory/config'
 import { buildServer } from '../src/server.js'
@@ -35,6 +36,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   let fetched: Record<string, unknown> = {}
   let bundleText = ''
   let runtimeForRebuild: Awaited<ReturnType<typeof createRuntime>> | undefined
+  let host: Awaited<ReturnType<typeof createRuntime>>['host']
   let rawResponse = ''
 
   AfterEachScenario(async () => {
@@ -82,6 +84,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       // Rebuilt by the "a built board" step when a scenario needs one: the
       // web root is fixed when the server is built.
       runtimeForRebuild = runtime
+      // Kept so a scenario can load a plugin into the host afterwards: hooks
+      // are read when a write happens, not when the server is built.
+      host = runtime.host
       app = buildServer(runtime)
       await app.ready()
     })
@@ -276,6 +281,29 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
   })
 
+  Scenario('Saving into a scope that is not in the chain says so', ({ Given, When, Then, And }) => {
+    Given('the project scope has been taken away', async () => {
+      // Rebuilt against a directory with no project scope at all, which is
+      // what a repository registered before Factory created one looks like.
+      rmSync(join(root, 'work', '.xaedalon'), { recursive: true, force: true })
+      const env = { FACTORY_HOME: userScope, PATH: '' }
+      const chain = resolveScopes({ cwd: join(root, 'work', 'src'), env })
+      const runtime = await createRuntime({ cwd: join(root, 'work'), env, chain })
+      app = buildServer(runtime)
+      await app.ready()
+    })
+    When('I POST a workflow named "release"', () =>
+      call('POST', '/api/workflows', {
+        definition: { name: 'release', mode: 'once', scheduling: 'parallel', description: '', variables: {}, phases: [], extensions: {} },
+        scope: 'project',
+      }),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    And('the response names the scope that is missing', () =>
+      expect(JSON.stringify(response.body)).toContain('project'),
+    )
+  })
+
   Scenario('A definition that does not validate is refused', ({ When, Then, And }) => {
     // The write path re-validates. A client that skipped validation, or a
     // different client entirely, must not be able to put a broken file on disk.
@@ -329,6 +357,63 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the bundle contains the phase "analysis"', () =>
       expect(response.body.text).toContain('name: analysis'),
     )
+  })
+
+  Scenario('The bundles Factory ships can be listed', ({ When, Then, And }) => {
+    When('I GET "/api/bundles/examples"', () => call('GET', '/api/bundles/examples'))
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the bundle "reliability" is offered', () => {
+      const names = (response.body.items as { name: string }[]).map((item) => item.name)
+      expect(names).toContain('reliability')
+    })
+    And('it says how many workflows it carries', () => {
+      const found = (response.body.items as { name: string; workflows: number }[]).find(
+        (item) => item.name === 'reliability',
+      )
+      expect(found?.workflows).toBeGreaterThan(0)
+    })
+  })
+
+  Scenario('A shipped bundle can be read', ({ When, Then, And }) => {
+    When('I GET "/api/bundles/examples/reliability"', () =>
+      call('GET', '/api/bundles/examples/reliability'),
+    )
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the text is a bundle carrying the workflow "analysis"', () => {
+      expect(response.body.text as string).toContain('name: analysis')
+    })
+  })
+
+  Scenario('A bundle Factory does not ship is a 404', ({ When, Then }) => {
+    When('I GET "/api/bundles/examples/nonesuch"', () =>
+      call('GET', '/api/bundles/examples/nonesuch'),
+    )
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+  })
+
+  Scenario('A name that is a path is refused rather than resolved', ({ When, Then }) => {
+    When('I GET a shipped bundle named "../../../etc/passwd"', () =>
+      call('GET', `/api/bundles/examples/${encodeURIComponent('../../../etc/passwd')}`),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+  })
+
+  Scenario('The shipped bundle goes in through the same door a person\'s file does', ({
+    When,
+    Then,
+    And,
+  }) => {
+    When('I import the shipped bundle "reliability" into the user scope', async () => {
+      await call('GET', '/api/bundles/examples/reliability')
+      await call('POST', '/api/bundles/import', {
+        text: response.body.text as string,
+        scope: 'user',
+      })
+    })
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    And('the workflow "analysis" is in the user scope', () => {
+      expect(existsSync(workflowFile(userScope, 'analysis'))).toBe(true)
+    })
   })
 
   Scenario('Importing is previewed without writing', ({ Given, And, When, Then }) => {
@@ -385,6 +470,69 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('"claude" is listed', () =>
       expect((response.body.items as { id: string }[]).some((item) => item.id === 'claude')).toBe(true),
     )
+  })
+
+  Rule('the installation can name the judge a project inherits', ({ RuleScenario }) => {
+    const judgeOf = (): Record<string, unknown> =>
+      (response.body.settings as { reliability: Record<string, unknown> }).reliability
+
+    RuleScenario('A judge can be named for the installation', ({ When, Then, And }) => {
+      When('I PATCH "/api/settings" with a judge of "claude" using "strong"', () =>
+        call('PATCH', '/api/settings', { reliability: { provider: 'claude', model: 'strong' } }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And("the installation's judging provider is \"claude\"", () =>
+        expect(judgeOf()['provider']).toBe('claude'),
+      )
+    })
+
+    RuleScenario('A provider nobody registered is refused', ({ When, Then }) => {
+      When('I PATCH "/api/settings" with a judge of "nonesuch"', () =>
+        call('PATCH', '/api/settings', { reliability: { provider: 'nonesuch' } }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('Clearing the model returns the installation to naming nothing', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the installation judges with "claude" using "strong"', () =>
+        call('PATCH', '/api/settings', { reliability: { provider: 'claude', model: 'strong' } }),
+      )
+      When('I PATCH "/api/settings" clearing the judging model', () =>
+        call('PATCH', '/api/settings', { reliability: { model: null } }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the installation names no judging model', () =>
+        expect(judgeOf()['model']).toBeUndefined(),
+      )
+      // Clearing one is not clearing the group.
+      And("the installation's judging provider is \"claude\"", () =>
+        expect(judgeOf()['provider']).toBe('claude'),
+      )
+    })
+  })
+
+  Scenario('The provider registry says which half of a profile a CLI can honour', ({ When, Then, And }) => {
+    When('I GET "/api/registries/providers"', () => call('GET', '/api/registries/providers'))
+    Then('the response is 200', () => expect(response.statusCode).toBe(200))
+    const flagged = (id: string) =>
+      (response.body.items as { id: string; commandAllowFlag?: string; commandDenyFlag?: string }[]).find(
+        (item) => item.id === id,
+      )
+    And('"claude" can be told one command is allowed', () =>
+      expect(flagged('claude')?.commandAllowFlag).toBe('--allowedTools'),
+    )
+    And('"claude" can be told one command is forbidden', () =>
+      expect(flagged('claude')?.commandDenyFlag).toBe('--disallowedTools'),
+    )
+    And('"codex" can be told neither', () => {
+      expect(flagged('codex')?.commandAllowFlag).toBeUndefined()
+      expect(flagged('codex')?.commandDenyFlag).toBeUndefined()
+    })
   })
 
   Scenario('Doctor reports findings in the body, not the status', ({ Given, When, Then, And }) => {
@@ -453,6 +601,45 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
   })
 
+  Scenario('An API path the daemon does not serve is a JSON 404, not the board', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    Given('a built board', givenBuiltBoard)
+    When('I GET "/api/bundles/examples/nothing-like-this"', () =>
+      call('GET', '/api/bundles/examples/nothing-like-this'),
+    )
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    And('the response is JSON', () => {
+      expect(() => JSON.parse(rawResponse) as unknown).not.toThrow()
+    })
+    And("the board's page is not returned", () => expect(rawResponse).not.toContain('id="app"'))
+  })
+
+  Scenario('A page whose name merely begins with those letters is still a page', ({
+    Given,
+    When,
+    Then,
+  }) => {
+    Given('a built board', givenBuiltBoard)
+    When('I GET "/apiary"', () => call('GET', '/apiary'))
+    Then("the board's page is returned", () => expect(rawResponse).toContain('id="app"'))
+  })
+
+  Scenario('An unknown API path is a 404 even where there is no board to serve', ({
+    When,
+    Then,
+    And,
+  }) => {
+    When('I GET "/api/nothing-like-this"', () => call('GET', '/api/nothing-like-this'))
+    Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    And('the response is JSON', () => {
+      expect(() => JSON.parse(rawResponse) as unknown).not.toThrow()
+    })
+  })
+
   Scenario('Without a built board the root page says how to build it', ({
     When,
     Then,
@@ -492,6 +679,70 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       : {}
   const switchTo = (id: string, enabled: unknown) => () =>
     call('POST', `/api/plugins/${encodeURIComponent(id)}`, { enabled })
+
+  Rule('a profile goes in and out through the same routes as everything else', ({
+    RuleScenario,
+  }) => {
+    const profile = (over: Record<string, unknown> = {}) => ({
+      name: 'development',
+      description: 'Build tools this repository uses.',
+      extends: 'default',
+      commands: ['cargo'],
+      denyCommands: [],
+      providers: {},
+      extensions: {},
+      ...over,
+    })
+
+    RuleScenario('A profile can be written and read back', ({ When, Then, And }) => {
+      When('I POST a profile named "development"', () =>
+        call('POST', '/api/profiles', { definition: profile() }),
+      )
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('reading it back returns what was written', async () => {
+        await call('GET', '/api/profiles/development')
+        expect(response.statusCode).toBe(200)
+        expect((response.body.definition as { commands: string[] }).commands).toEqual(['cargo'])
+      })
+      And('the file was written as a profile', () => {
+        expect(existsSync(join(projectScope, 'profiles', 'development.profile.yaml'))).toBe(true)
+      })
+    })
+
+    RuleScenario('Previewing a profile shows the YAML it would write', ({ When, Then, And }) => {
+      When('I preview a profile named "development"', () =>
+        call('POST', '/api/definitions/preview', { kind: 'profile', definition: profile() }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the preview reads as a profile', () => {
+        expect(response.body.text as string).toContain('name: development')
+        expect(response.body.text as string).toContain('cargo')
+      })
+    })
+
+    RuleScenario('A profile that would reach Full Access is refused', ({ When, Then, And }) => {
+      When('I POST a profile that passes "bypassPermissions" to claude', () =>
+        call('POST', '/api/profiles', {
+          definition: profile({
+            name: 'reckless',
+            providers: { claude: { args: ['--permission-mode', 'bypassPermissions'] } },
+          }),
+        }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the refusal names Full Access', () => {
+        const said = JSON.stringify(response.body)
+        expect(said).toContain('Full Access')
+      })
+    })
+
+    RuleScenario('A profile that allows an ordinary build tool is written', ({ When, Then }) => {
+      When('I POST a profile allowing "cargo"', () =>
+        call('POST', '/api/profiles', { definition: profile({ name: 'buildtools' }) }),
+      )
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    })
+  })
 
   Rule('plugins can be listed and switched', ({ RuleScenario }) => {
     RuleScenario('The list names every plugin and what it contributes', ({
@@ -815,6 +1066,147 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       And('the response mentions the profile', () =>
         expect(String((response.body as { error?: string }).error)).toContain('profile'),
       )
+    })
+  })
+  Rule('a plugin can refuse a definition, or adjust it on its way to disk', ({ RuleScenario }) => {
+    const workflow = (name: string) => ({
+      definition: {
+        name,
+        mode: 'once',
+        scheduling: 'parallel',
+        description: '',
+        variables: {},
+        phases: [],
+        extensions: {},
+      },
+    })
+    const post = (name: string) => () => call('POST', '/api/workflows', workflow(name))
+    const notWritten = (name: string) => () =>
+      expect(existsSync(workflowFile(projectScope, name))).toBe(false)
+
+    /** A plugin carrying one hook, loaded after the server was built. */
+    const loading = (register: (context: PluginContext) => void) => async (): Promise<void> => {
+      await host.load({ name: 'stub-hooks', version: '1.0.0', register })
+    }
+
+    RuleScenario('A plugin can refuse a definition', ({ Given, When, Then, And }) => {
+      Given(
+        'a plugin that refuses any workflow called "forbidden"',
+        loading((context) => {
+          context.hook('validateDefinition', (input) =>
+            input.name === 'forbidden'
+              ? [{ severity: 'error', message: 'that name is spoken for', rule: 'stub.name' }]
+              : [],
+          )
+        }),
+      )
+      When('I POST a workflow named "forbidden"', post('forbidden'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And("the response carries the plugin's reason", () =>
+        expect(JSON.stringify(response.body)).toContain('that name is spoken for'),
+      )
+      And('the workflow "forbidden" was not written', notWritten('forbidden'))
+    })
+
+    RuleScenario('A plugin that refuses one name leaves the others alone', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given(
+        'a plugin that refuses any workflow called "forbidden"',
+        loading((context) => {
+          context.hook('validateDefinition', (input) =>
+            input.name === 'forbidden'
+              ? [{ severity: 'error', message: 'that name is spoken for', rule: 'stub.name' }]
+              : [],
+          )
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    })
+
+    RuleScenario('A plugin can adjust what is written', ({ Given, When, Then, And }) => {
+      Given(
+        'a plugin that describes every workflow it is shown',
+        loading((context) => {
+          context.hook('beforeDefinitionWrite', (value) => ({
+            action: 'continue',
+            value: {
+              ...value,
+              definition: { ...(value.definition as object), description: 'set by a plugin' },
+            },
+          }))
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('the stored workflow carries the description the plugin gave it', () =>
+        expect(readFileSync(workflowFile(projectScope, 'allowed'), 'utf8')).toContain(
+          'set by a plugin',
+        ),
+      )
+    })
+
+    RuleScenario('A plugin can refuse the write itself', ({ Given, When, Then, And }) => {
+      Given(
+        'a plugin that refuses to write anything',
+        loading((context) => {
+          context.hook('beforeDefinitionWrite', () => ({
+            action: 'reject',
+            problems: [{ severity: 'error', message: 'this scope is read-only today', rule: 'stub.write' }],
+          }))
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the workflow "allowed" was not written', notWritten('allowed'))
+    })
+
+    RuleScenario('A hook that throws refuses rather than writing half of it', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'a plugin whose write hook throws',
+        loading((context) => {
+          context.hook('beforeDefinitionWrite', () => {
+            throw new Error('the plugin fell over')
+          })
+        }),
+      )
+      When('I POST a workflow named "allowed"', post('allowed'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+      And('the workflow "allowed" was not written', notWritten('allowed'))
+    })
+  })
+
+  Rule('the installation-wide profile stays one of the two Factory ships', ({ RuleScenario }) => {
+    RuleScenario('A custom profile is refused as the installation\'s default', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the user scope defines the profile "buildtools"', () => {
+        file(
+          join(userScope, 'profiles', 'buildtools.profile.yaml'),
+          'kind: factory.profile/v1\nname: buildtools\ncommands: [cargo]\n',
+        )
+      })
+      When('I set the installation profile to "buildtools"', () =>
+        call('PATCH', '/api/settings', { security: { profile: 'buildtools' } }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('The built-ins are still accepted', ({ When, Then }) => {
+      When('I set the installation profile to "full-access"', () =>
+        call('PATCH', '/api/settings', { security: { profile: 'full-access' } }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
     })
   })
 })

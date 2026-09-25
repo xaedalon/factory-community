@@ -275,3 +275,30 @@ Feature: Definition schemas
       When the workflow is parsed
       Then parsing fails
       And a problem names the field "needs.0"
+
+  Rule: a workflow with no phases says so while somebody can still see it
+
+    A warning rather than an error, and the distinction is the builder: it
+    writes a workflow before its phases are chosen, so refusing the file would
+    make it impossible to create one in the browser at all. What must not
+    happen is *running* it, and planning refuses that separately.
+
+    Scenario: A workflow with no phases parses, with a warning
+      Given the workflow YAML:
+        """
+        name: design
+        description: Task design
+        """
+      When the workflow is parsed
+      Then parsing succeeds
+      And a warning says the workflow will do nothing
+
+    Scenario: A workflow with a phase says nothing
+      Given the workflow YAML:
+        """
+        name: design
+        phases: [design]
+        """
+      When the workflow is parsed
+      Then parsing succeeds
+      And there are no warnings

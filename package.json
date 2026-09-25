@@ -1,6 +1,6 @@
 {
   "name": "@factory/community",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.3.4",
@@ -14,6 +14,7 @@
     "lint": "eslint . --max-warnings 0",
     "build": "tsc --build && pnpm --filter @factory/web build",
     "verify:standalone": "bash scripts/verify-standalone.sh",
+    "mutate": "node scripts/mutate.mjs",
     "test:e2e": "pnpm --filter @factory/web test:e2e",
     "dev": "pnpm --filter @factory/web dev"
   },

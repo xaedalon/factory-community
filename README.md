@@ -106,6 +106,12 @@ through forms, and shows you the file it will write before it writes it.
   step rather than blocking the task for a person to press a button.
 - **Reconciliation** at boot closes runs a crash left marked as running, and blocks the tasks that
   were mid-flight — rather than restarting work that may have already pushed a branch.
+- **Every run is judged**, so a task says how much to trust it rather than only that it is `done`:
+  a score, the evidence coverage behind it, the findings holding it down, and which of those an
+  agent can deal with and which need you. The score can go *down* — a validation that finds a
+  regression has learned something. No agent ever sets it. See
+  [`docs/reliability/`](docs/reliability/), which is also candid that these are heuristics rather
+  than calibrated odds.
 
 ## Extending it
 
@@ -138,6 +144,14 @@ taught about it.
 Definitions are files, because they are authored, reviewed and committed. They resolve through a
 chain of scopes — **project** (`./.xaedalon/.factory`) wins over **user** (`~/.xaedalon/.factory`) wins over the
 built-ins shipped in the package — and a definition hiding another is reported, never silent.
+
+A project's directory is ignored by git the moment Factory creates it, so trying Factory on a
+repository leaves that repository alone. Sharing the definitions with a team is one edit to
+`.xaedalon/.gitignore`, which says how.
+
+A project's directory is ignored by git the moment Factory creates it, so trying Factory on a
+repository leaves that repository alone. Sharing the definitions with a team is one edit to
+`.xaedalon/.gitignore`, which says how.
 
 Tasks, runs and logs are not files. They are rows in `state/factory.db` in the writable scope,
 because they are queried by state and written while something else is reading them.
@@ -195,18 +209,34 @@ there. Rules are a capability, so a plugin adds its own.
 
 | | |
 |---|---|
-| `factory` | Definitions, scopes, plugins, `run`, `doctor`, and `task` — all with `--json` |
+| `factory` | Definitions, scopes, plugins, `run`, `doctor`, `task` and `reliability` — all with `--json` |
 | `factory-daemon` | HTTP on `127.0.0.1:7317`, including a live event stream |
 | the board | Tasks, runs, logs, evidence, and the builder, at the same address |
+| `factory mcp` | The same contract again, for the coding agent you already have |
+
+### From your coding agent
+
+Factory runs coding agents. It can also be driven by one: `factory mcp` serves the Model Context
+Protocol over stdio, so Claude Code, Codex, Copilot CLI or anything else that speaks it can resolve
+the project you are in, create a task, pick a workflow, queue it and read what came back.
+
+```json
+{ "mcpServers": { "factory": { "command": "factory", "args": ["mcp"] } } }
+```
+
+It is a control surface, not a way round anything: the same disclaimer gate, the same execution
+profile, the same workspace boundary. It cannot approve its own work, and how far work may start
+work is bounded by the daemon rather than by the client asking.
+[`docs/mcp.md`](docs/mcp.md) is the whole feature.
 
 ## Security
 
 Factory coordinates autonomous coding agents that modify files and execute
-development commands. The **Default** profile gives an agent broad authority
-inside the active project's workspace — read, write, delete, run the tests,
-install the dependencies, commit — while confining it to that workspace,
-withholding credentials from its environment, and requiring permission for
-anything outside. **Full Access** removes those boundaries, is never the
+development commands. The **Default** profile lets an agent read, write and
+delete freely inside the active project's workspace, and run a short allow-list
+of commands — the package managers, so installing dependencies and running the
+tests work — while confining it to that workspace, withholding credentials from
+its environment, and requiring permission for anything outside. **Full Access** removes those boundaries, is never the
 default, is chosen per project, and is marked on screen the whole time it is on.
 
 Factory is not a sandbox, and says so: it constrains what it launches and what

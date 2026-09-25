@@ -1,7 +1,15 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { execFileSync } from 'node:child_process'
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -64,6 +72,23 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     for (const extra of [root, ...roots]) rmSync(extra, { recursive: true, force: true })
     roots = []
   })
+
+  /**
+   * The project tasks are created in.
+   *
+   * Set by the Background and replaced by any scenario that adds one of its
+   * own, so a task lands in whichever project the scenario is about.
+   */
+  let projectId = ''
+
+  const addProject = async (name: string, path: string, usesWorktrees?: boolean) => {
+    await call('POST', '/api/projects', {
+      name,
+      path,
+      ...(usesWorktrees === undefined ? {} : { usesWorktrees }),
+    })
+    projectId = (response.body.project as { id: string } | undefined)?.id ?? ''
+  }
 
   const file = (path: string, contents: string) => {
     mkdirSync(dirname(path), { recursive: true })
@@ -144,11 +169,18 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       file(join(scope, 'workflows', 'hello.workflow.yaml'), 'name: hello\nphases: [greet]\n')
       file(join(scope, 'phases', 'greet.phase.yaml'), 'name: greet\nsteps: [{run: echo hello}]\n')
     })
+    // A task cannot be created without one. Named so the many scenarios that
+    // add their own project called "work" still can — two projects may share a
+    // path, only the name has to be unique.
+    And('a project to create tasks in', async () => {
+      await addProject('sample', join(root, 'work'))
+    })
   })
 
   const create = async (name: string, workflows?: string[]) => {
     await call('POST', '/api/tasks', {
       name,
+      projectId,
       ...(workflows === undefined ? {} : { workflows }),
     })
     taskId = (response.body.task as { id: string }).id
@@ -358,17 +390,6 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('nothing was dropped from the output', () => expect(response.body.dropped).toBe(0))
   })
 
-  let projectId = ''
-
-  const addProject = async (name: string, path: string, usesWorktrees?: boolean) => {
-    await call('POST', '/api/projects', {
-      name,
-      path,
-      ...(usesWorktrees === undefined ? {} : { usesWorktrees }),
-    })
-    projectId = (response.body.project as { id: string } | undefined)?.id ?? ''
-  }
-
   /** A real repository with a commit: `git worktree add` needs a HEAD. */
   const makeRepository = (at: string): string => {
     mkdirSync(at, { recursive: true })
@@ -393,9 +414,46 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
     Then('the response is 201', () => expect(response.statusCode).toBe(201))
     And('the project is listed', async () => {
+      const added = projectId
       await call('GET', '/api/projects')
-      expect(response.body.items).toHaveLength(1)
+      const items = response.body.items as { id: string }[]
+      expect(items.some((item) => item.id === added)).toBe(true)
     })
+  })
+
+  Scenario('A repository with no Factory scope is given one', ({ When, Then, And }) => {
+    let fresh = ''
+    When('I add the project "fresh" at a repository with no scope', async () => {
+      fresh = join(root, 'fresh')
+      mkdirSync(join(fresh, '.git'), { recursive: true })
+      await addProject('fresh', fresh)
+    })
+    Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    Then('the project has a scope of its own', () =>
+      expect(existsSync(join(fresh, '.xaedalon', '.factory', 'config.yaml'))).toBe(true),
+    )
+    And('the response says the scope was created', () =>
+      expect((response.body.scope as { created: boolean }).created).toBe(true),
+    )
+  })
+
+  Scenario('A repository that already has a scope keeps it', ({ Given, When, Then, And }) => {
+    let fresh = ''
+    Given('a repository whose scope says something of its own', () => {
+      fresh = join(root, 'fresh')
+      file(join(fresh, '.xaedalon', '.factory', 'config.yaml'), '# mine\nkind: factory.scope/v1\nscope: project\n')
+      mkdirSync(join(fresh, '.git'), { recursive: true })
+    })
+    When('I add the project "fresh" at that repository', () => addProject('fresh', fresh))
+    Then('the response is 201', () => expect(response.statusCode).toBe(201))
+    And('the scope still says what it said', () =>
+      expect(
+        readFileSync(join(fresh, '.xaedalon', '.factory', 'config.yaml'), 'utf8'),
+      ).toContain('# mine'),
+    )
+    And('the response does not claim to have created one', () =>
+      expect((response.body.scope as { created: boolean }).created).toBe(false),
+    )
   })
 
   Scenario('A project at a path that does not exist is refused', ({ When, Then, And }) => {
@@ -418,6 +476,42 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the task belongs to the project', () =>
       expect((response.body.task as { projectId?: string }).projectId).toBe(projectId),
     )
+  })
+
+  Scenario('A task without a project is refused', ({ When, Then, And }) => {
+    When('I create the task "Add due dates" naming no project', () =>
+      call('POST', '/api/tasks', { name: 'Add due dates' }),
+    )
+    Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    And('the response says a task needs a project', () =>
+      expect(String(response.body.error)).toContain('needs a project'),
+    )
+  })
+
+  Scenario('A project with nothing in it can be removed', ({ Given, When, Then }) => {
+    Given('the project "work" exists', () => addProject('work', join(root, 'work')))
+    When('I remove that project', () => call('DELETE', `/api/projects/${projectId}`))
+    Then('the response is 204', () => expect(response.statusCode).toBe(204))
+  })
+
+  Scenario('A project that still has tasks cannot be removed', ({ Given, And, When, Then }) => {
+    let removed = ''
+    Given('the project "work" exists', () => addProject('work', join(root, 'work')))
+    And('the task "Add due dates" exists in that project', async () => {
+      removed = projectId
+      await create('Add due dates')
+    })
+    When('I remove that project', () => call('DELETE', `/api/projects/${removed}`))
+    Then('the response is 409', () => expect(response.statusCode).toBe(409))
+    And('the response says 1 task is still in it', () =>
+      expect(String(response.body.error)).toContain('1 task still in it'),
+    )
+    And('the response carries the count', () => expect(response.body.tasks).toBe(1))
+    And('the project is still listed', async () => {
+      await call('GET', '/api/projects')
+      const items = response.body.items as { id: string }[]
+      expect(items.some((item) => item.id === removed)).toBe(true)
+    })
   })
 
   Scenario("A task in a project runs in that project's directory", ({
@@ -491,9 +585,10 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       git('add', '.')
       git('commit', '-m', 'first')
       await addProject('repo', repo)
+      const mine = projectId
       worktrees = ((await app.inject({ method: 'GET', url: '/api/projects' })).json() as {
-        items: { worktreesRoot: string }[]
-      }).items[0]?.worktreesRoot as string
+        items: { id: string; worktreesRoot: string }[]
+      }).items.find((item) => item.id === mine)?.worktreesRoot as string
     })
     And('the task "Add due dates" in it, on "worktree-create" and then "where"', async () => {
       // In the user scope, which every project can see. The daemon's own
@@ -537,12 +632,80 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Scenario('A worktree is removed even though the step runs inside it', ({
+    Given,
+    And,
+    When,
+    Then,
+  }) => {
+    let worktrees = ''
+    let directory = ''
+    Given('a project that is a real git repository', async () => {
+      await addProject('repo', makeRepository(join(root, 'repo')))
+      const mine = projectId
+      worktrees = ((await app.inject({ method: 'GET', url: '/api/projects' })).json() as {
+        items: { id: string; worktreesRoot: string }[]
+      }).items.find((item) => item.id === mine)?.worktreesRoot as string
+    })
+    And(
+      'the task "Add due dates" in it, on "worktree-create" and then "worktree-delete"',
+      async () => {
+        await call('POST', '/api/tasks', {
+          name: 'Add due dates',
+          projectId,
+          branch: 'feature/due-dates',
+          workflows: ['worktree-create', 'worktree-delete'],
+        })
+        taskId = (response.body.task as { id: string }).id
+        directory = (response.body.task as { directory: string }).directory
+      },
+    )
+    When('I queue the task', () => call('POST', `/api/tasks/${taskId}/actions/queue`))
+    And('the work finishes', () =>
+      until(async () => {
+        await reload()
+        return stateOf() === 'done' || stateOf() === 'blocked'
+      }, 'the task to finish'),
+    )
+    Then('no worktree is left for the task', () =>
+      expect(existsSync(join(worktrees, directory))).toBe(false),
+    )
+    And('the task no longer has the flag "hasWorktree"', () =>
+      expect((response.body.task as { flags: string[] }).flags).not.toContain('hasWorktree'),
+    )
+    // The symptom, asserted as well as the outcome: the old script exited 0
+    // with this on stderr and the prune never ran, so a scenario watching only
+    // the exit code would have passed.
+    And('nothing in the run mentions being unable to read the current directory', async () => {
+      const runs = response.body.runs as { id: string; workflow: string }[]
+      const removal = runs.find((run) => run.workflow === 'worktree-delete')
+      await call('GET', `/api/runs/${removal?.id}`)
+      const steps = response.body.steps as { id: number }[]
+      for (const step of steps) {
+        await call('GET', `/api/runs/${removal?.id}/logs?step=${step.id}`)
+        const text = (response.body.lines as { text: string }[])
+          .map((line) => line.text)
+          .join('')
+        expect(text).not.toContain('Unable to read current working directory')
+      }
+    })
+  })
+
   const stepFor = (id: string) =>
     (response.body.items as { id: string; done: boolean; essential?: boolean }[]).find(
       (item) => item.id === id,
     )
 
-  Scenario('Setup says what is still missing', ({ When, Then, And }) => {
+  Scenario('Setup says what is still missing', ({ Given, When, Then, And }) => {
+    // The Background adds one, because a task cannot be created without it.
+    // Removing it is how this scenario gets back to a fresh installation —
+    // and it is only removable because nothing has been put in it yet.
+    Given('no repositories have been added', async () => {
+      await call('GET', '/api/projects')
+      for (const item of response.body.items as { id: string }[]) {
+        await call('DELETE', `/api/projects/${item.id}`)
+      }
+    })
     When('I ask what setup is left', () => call('GET', '/api/setup'))
     Then('the response is 200', () => expect(response.statusCode).toBe(200))
     // Contributed by the engine, because it is the only part that can see the
@@ -759,7 +922,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     )
   })
 
-  Scenario('The live stream carries what happens', ({ Given, When, Then }) => {
+  Scenario('The live stream carries what happens', ({ Given, When, Then, And }) => {
     Given('I am listening to the live stream', async () => {
       // A real socket: `inject` has no streaming response to read from, and the
       // thing being tested is that the response streams.
@@ -799,6 +962,16 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         'the event to arrive',
       ),
     )
+    And('the event was not named on the wire', () =>
+      expect((stream?.lines ?? []).join('')).not.toContain('event:'),
+    )
+    And('the event carries its name in the payload', () => {
+      const data = (stream?.lines ?? [])
+        .join('')
+        .split('\n')
+        .find((line) => line.startsWith('data:'))
+      expect(JSON.parse((data as string).slice('data:'.length)).name).toBe('task.created')
+    })
   })
 
   Scenario('Stopping does not wait for a live stream for ever', ({ Given, When, Then }) => {
@@ -954,6 +1127,60 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a task can be moved to another project', ({ RuleScenario }) => {
+    let elsewhere = ''
+    const givenElsewhere = async (): Promise<void> => {
+      const home = projectId
+      await addProject('elsewhere', join(root, 'work'))
+      elsewhere = projectId
+      // Back to the Background's project, so the task lands where the scenario
+      // means it to and the move is what changes that.
+      projectId = home
+    }
+    const moveTo = (to: string) => () => call('PATCH', `/api/tasks/${taskId}`, { projectId: to })
+
+    RuleScenario('A task is moved', ({ Given, And, When, Then }) => {
+      Given('the project "elsewhere" also exists', givenElsewhere)
+      And('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to "elsewhere"', () => moveTo(elsewhere)())
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the task belongs to "elsewhere"', () =>
+        expect((response.body.task as { projectId: string }).projectId).toBe(elsewhere),
+      )
+    })
+
+    RuleScenario('Moving to a project that is not there is a bad request', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', () => create('Add due dates'))
+      When('I move it to a project that does not exist', () => moveTo('project-nowhere')())
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+
+    RuleScenario('Moving a task that is running is refused', ({ Given, And, When, Then }) => {
+      Given('the project "elsewhere" also exists', givenElsewhere)
+      // A workflow that lingers, so "running" is a state the scenario can
+      // still be in when it asks. `hello` finishes in milliseconds and the
+      // refusal would be tested or not according to how fast the machine is.
+      And('the task "Add due dates" exists', () => {
+        file(join(scope, 'workflows', 'waiting.workflow.yaml'), 'name: waiting\nphases: [linger]\n')
+        file(join(scope, 'phases', 'linger.phase.yaml'), 'name: linger\nsteps: [{run: sleep 2}]\n')
+        return create('Add due dates', ['waiting'])
+      })
+      And('"Add due dates" is running', async () => {
+        await call('POST', `/api/tasks/${taskId}/actions/queue`)
+        await until(async () => {
+          await reload()
+          return stateOf() === 'running'
+        }, 'the task to start')
+      })
+      When('I move it to "elsewhere"', () => moveTo(elsewhere)())
+      Then('the response is 409', () => expect(response.statusCode).toBe(409))
+    })
+  })
+
   Rule('A task can be renamed, and agents are definitions like any other', ({ RuleScenario }) => {
     let directoryBefore = ''
 
@@ -1063,6 +1290,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       Given('the task "Add due dates" is created with a description', async () => {
         await call('POST', '/api/tasks', {
           name: 'Add due dates',
+          projectId,
           description: 'Every todo gets an optional due date.',
         })
         taskId = (response.body.task as { id: string }).id
@@ -1434,6 +1662,27 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a run says what it actually executed', ({ RuleScenario }) => {
+    RuleScenario('The step carries the command that ran', ({ Given, When, Then }) => {
+      Given('the task "Add due dates" exists with the workflow "hello"', () =>
+        create('Add due dates', ['hello']),
+      )
+      When('I queue the task and it finishes', async () => {
+        await call('POST', `/api/tasks/${taskId}/actions/queue`)
+        await until(async () => {
+          await reload()
+          return stateOf() === 'done' || stateOf() === 'blocked'
+        }, 'the task to finish')
+      })
+      Then('the step says it ran "echo hello"', async () => {
+        const runId = (response.body.runs as { id: string }[])[0]?.id
+        await call('GET', `/api/runs/${runId}`)
+        const steps = response.body.steps as { command?: string }[]
+        expect(steps[0]?.command).toContain('echo hello')
+      })
+    })
+  })
+
   Rule("a task's artifacts are listed, and one can be read", ({ RuleScenario }) => {
     const WRITTEN = '# Review\n\nlooks good\n'
 
@@ -1553,8 +1802,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       // test is that resolution *looks*, and a directory somebody created or
       // deleted outside Factory is exactly the case the rule exists for.
       And('a worktree for it exists on the disk', async () => {
+        const mine = projectId
         await call('GET', '/api/projects')
-        const project = (response.body.items as { worktreesRoot: string }[])[0]
+        const project = (response.body.items as { id: string; worktreesRoot: string }[]).find(
+          (item) => item.id === mine,
+        )
         await reload()
         const directory = (response.body.task as { directory: string }).directory
         worktree = join(project?.worktreesRoot as string, directory)
@@ -1563,18 +1815,6 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       When('I ask for the task', reload)
       Then('its workspace is that worktree', () => expect(workspace()?.path).toBe(worktree))
       And('the workspace is a worktree', () => expect(workspace()?.inWorktree).toBe(true))
-    })
-
-    RuleScenario('A task belonging to no project has no workspace', ({
-      Given,
-      When,
-      Then,
-    }) => {
-      Given('the task "Add due dates" exists with the workflow "hello"', () =>
-        create('Add due dates', ['hello']),
-      )
-      When('I ask for the task', reload)
-      Then('it has no workspace', () => expect(workspace()).toBeUndefined())
     })
 
     RuleScenario('The task list does not carry it', ({ Given, And, When, Then }) => {
@@ -1626,18 +1866,17 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
     RuleScenario('The tools are beside the actions, not inside the workspace', ({
       Given,
+      And,
       When,
       Then,
-      And,
     }) => {
-      Given('the task "Add due dates" exists with the workflow "hello"', () =>
-        create('Add due dates', ['hello']),
-      )
+      Given("the project \"work\" exists at the scope's directory", givenProject)
+      And('the task "Add due dates" exists in it with the workflow "hello"', givenTask)
       When('I ask for the task', reload)
-      Then('it has no workspace', () =>
-        expect((response.body as { workspace?: unknown }).workspace).toBeUndefined(),
-      )
-      And('it still has tools', () => expect(tools().length).toBeGreaterThan(0))
+      Then('its tools are beside its workspace, not inside it', () => {
+        expect(tools().length).toBeGreaterThan(0)
+        expect((response.body.workspace as { tools?: unknown }).tools).toBeUndefined()
+      })
     })
 
     RuleScenario('A terminal tool only changes directory', ({ Given, And, When, Then }) => {
@@ -1926,7 +2165,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
 
   Rule('a client chooses a task\'s name, never a path', ({ RuleScenario }) => {
     const createWithDirectory = (name: string, directory: string) => async (): Promise<void> => {
-      await call('POST', '/api/tasks', { name, directory })
+      await call('POST', '/api/tasks', { name, projectId, directory })
       taskId = (response.body.task as { id: string }).id
     }
     const directoryIs = (expected: string) => (): void => {
@@ -1997,6 +2236,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       app = buildServer(freshRuntime, freshService, {})
       service = freshService
       roots.push(fresh)
+      // A fresh database, so the Background's project is not in it — and a
+      // task cannot be created without one.
+      await addProject('sample', join(fresh, 'work'))
     }
     const accept = async (): Promise<void> => {
       await call('POST', '/api/settings/accept')
@@ -2141,6 +2383,142 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     })
   })
 
+  Rule('a project names the agent that judges it, not only the model', ({ RuleScenario }) => {
+    const givenProject = async (): Promise<void> => {
+      // The directory has to exist: registering a project reads it.
+      const directory = join(root, `judge-${String(Date.now())}-${String(Math.random()).slice(2, 8)}`)
+      mkdirSync(directory, { recursive: true })
+      await addProject(`judge-${String(Date.now())}`, directory)
+    }
+    const patch = (body: Record<string, unknown>) => () =>
+      call('PATCH', `/api/projects/${projectId}`, body)
+    const project = () => response.body.project as Record<string, unknown> | undefined
+    const status = (code: number) => (): void => expect(response.statusCode).toBe(code)
+
+    RuleScenario('A judging provider can be chosen for a project', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project to work in', givenProject)
+      When("I set the project's judging provider to \"claude\"", patch({ reliabilityProvider: 'claude' }))
+      Then('the response is 200', status(200))
+      And("the project's judging provider is \"claude\"", () =>
+        expect(project()?.['reliabilityProvider']).toBe('claude'),
+      )
+    })
+
+    RuleScenario('A provider nobody registered is refused, and the refusal names the field', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project to work in', givenProject)
+      When("I set the project's judging provider to \"nonesuch\"", patch({ reliabilityProvider: 'nonesuch' }))
+      Then('the response is 400', status(400))
+      And('the refusal names "nonesuch"', () =>
+        expect(String(response.body.error)).toContain('nonesuch'),
+      )
+    })
+
+    RuleScenario('An effort that is not text is refused', ({ Given, When, Then }) => {
+      Given('a project to work in', givenProject)
+      When("I set the project's judging effort to a number", patch({ reliabilityEffort: 3 }))
+      Then('the response is 400', status(400))
+    })
+
+    RuleScenario('Clearing the provider returns the project to following the installation', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('its judging provider is "claude"', patch({ reliabilityProvider: 'claude' }))
+      When("I clear the project's judging provider", patch({ reliabilityProvider: null }))
+      Then('the response is 200', status(200))
+      And('the project names no judging provider', () =>
+        expect(project()?.['reliabilityProvider']).toBeUndefined(),
+      )
+    })
+  })
+
+  Rule('a list says how much to trust each task, in two numbers', ({ RuleScenario }) => {
+    let listed: Record<string, unknown> | undefined
+    let detail: Record<string, unknown>
+
+    const exists = async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+      taskId = (response.body.task as { id: string }).id
+    }
+    const assessed = async (): Promise<void> => {
+      await call('POST', `/api/tasks/${taskId}/reliability/assess`, {})
+    }
+    const askList = async (): Promise<void> => {
+      await call('GET', '/api/tasks')
+      listed = (response.body.items as Record<string, unknown>[]).find(
+        (item) => item['id'] === taskId,
+      )
+    }
+    const brief = () => listed?.['reliability'] as { score?: number; coverage?: number } | undefined
+
+    RuleScenario('The list carries the score and the coverage together', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      And('it has been assessed', assessed)
+      When('I ask for every task', askList)
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the row carries a score and a coverage', () => {
+        expect(typeof brief()?.score).toBe('number')
+        expect(typeof brief()?.coverage).toBe('number')
+      })
+    })
+
+    RuleScenario('A task nobody has judged carries no reliability at all', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I ask for every task', askList)
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      // Not `score: 0`. A task nobody looked at is not a task that failed.
+      And('the row carries no reliability', () => expect(brief()).toBeUndefined())
+    })
+
+    RuleScenario('The list and the task agree about the score', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      And('it has been assessed', assessed)
+      When('I ask for every task', askList)
+      And('I read the task', async () => {
+        await call('GET', `/api/tasks/${taskId}`)
+        detail = response.body
+      })
+      Then('both say the same score', () =>
+        expect(brief()?.score).toBe(
+          (detail['reliability'] as { score?: number }).score,
+        ),
+      )
+      And('both say the same coverage', () =>
+        expect(brief()?.coverage).toBe(
+          (detail['reliability'] as { coverage?: number }).coverage,
+        ),
+      )
+    })
+  })
+
   Rule('a task says what it is waiting for', ({ RuleScenario }) => {
     const ids = new Map<string, string>()
     const exists = (name: string) => async (): Promise<void> => {
@@ -2169,6 +2547,37 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         expect(blockers()).toEqual([])
         expect((response.body.task as { dependsOn: string[] }).dependsOn).toEqual([])
       })
+    })
+
+    RuleScenario('A dependency written with a half-read initiator is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the task "Scaffold" exists', exists('Scaffold'))
+      And('the task "The model" exists', exists('The model'))
+      When('"The model" is made to wait for "Scaffold" with an initiator of "yes please"', () =>
+        call('POST', `/api/tasks/${idOf('The model')}/dependencies`, {
+          dependsOn: idOf('Scaffold'),
+          initiator: 'yes please',
+        }),
+      )
+      Then('the response is 400', status(400))
+    })
+
+    RuleScenario('Undoing a dependency reads the initiator too', ({ Given, And, When, Then }) => {
+      Given('the task "Scaffold" exists', exists('Scaffold'))
+      And('the task "The model" exists', exists('The model'))
+      And('"The model" is made to wait for "Scaffold"', waitFor('The model', 'Scaffold'))
+      When('the wait is removed with an initiator of "yes please"', () =>
+        call(
+          'DELETE',
+          `/api/tasks/${idOf('The model')}/dependencies/${idOf('Scaffold')}`,
+          { initiator: 'yes please' },
+        ),
+      )
+      Then('the response is 400', status(400))
     })
 
     RuleScenario('A dependency is written and read back', ({ Given, And, When, Then }) => {
@@ -2344,8 +2753,11 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       })
       ids.set(name, (response.body.task as { id: string }).id)
     }
-    const taskNowhere = (name: string) => async (): Promise<void> => {
-      await call('POST', '/api/tasks', { name, workflows: ['hello'] })
+    // In a *different* project, which is what the batch routes have to ignore.
+    // It used to be a task in no project, which no longer exists.
+    const taskElsewhere = (name: string) => async (): Promise<void> => {
+      await addProject('elsewhere', join(root, 'work'))
+      await call('POST', '/api/tasks', { name, projectId, workflows: ['hello'] })
       ids.set(name, (response.body.task as { id: string }).id)
     }
     const idOf = (name: string) => ids.get(name) as string
@@ -2447,7 +2859,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     RuleScenario("Queue all ignores another project's tasks", ({ Given, And, When, Then }) => {
       Given('the project "work" exists here', quietDaemon(true))
       And('the task "One" exists in the project with a workflow', taskIn('One', ['hello']))
-      And('a task "Elsewhere" with a workflow in no project', taskNowhere('Elsewhere'))
+      And('a task "Elsewhere" with a workflow in another project', taskElsewhere('Elsewhere'))
       When('I queue the whole project', queueAll)
       Then('1 task was queued', () => expect(queued()).toHaveLength(1))
     })
@@ -2557,7 +2969,7 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     RuleScenario("Stop all ignores another project's tasks", ({ Given, And, When, Then }) => {
       Given('the project "work" exists here', quietDaemon(true))
       And('the task "One" exists in the project with a workflow', taskIn('One', ['hello']))
-      And('a task "Elsewhere" with a workflow in no project', taskNowhere('Elsewhere'))
+      And('a task "Elsewhere" with a workflow in another project', taskElsewhere('Elsewhere'))
       And('the whole project is queued', queueAll)
       And('"Elsewhere" is queued', act('Elsewhere', 'queue'))
       When('I stop the whole project', stopAll)
@@ -2578,6 +2990,826 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         call('POST', '/api/projects/nope/stop'),
       )
       Then('the response is 404', status(404))
+    })
+  })
+  Rule('adding a project leaves the repository exactly as it was', ({ RuleScenario }) => {
+    let repository = ''
+    /** Real git, because `git status` is the promise and the file is only how. */
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: repository,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      })
+
+    RuleScenario('Registering a project adds nothing to git status', ({ Given, When, Then, And }) => {
+      Given('a repository with nothing to commit', () => {
+        repository = makeRepository(join(root, 'fresh'))
+        expect(git('status', '--porcelain').trim()).toBe('')
+      })
+      When('I add it as a project', () => addProject('fresh', repository))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('it has a Factory scope of its own', () =>
+        expect(existsSync(join(repository, '.xaedalon', '.factory', 'config.yaml'))).toBe(true),
+      )
+      // `-uall` so an untracked *directory* cannot hide its contents behind one
+      // line, which is the shape this could have passed under by accident.
+      And('git still has nothing to say about it', () =>
+        expect(git('status', '--porcelain', '-uall').trim()).toBe(''),
+      )
+    })
+
+    RuleScenario('A repository that already shares its definitions is left sharing them', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a repository whose Factory definitions are committed', () => {
+        repository = makeRepository(join(root, 'shared'))
+        file(
+          join(repository, '.xaedalon', '.factory', 'config.yaml'),
+          'kind: factory.scope/v1\nscope: project\n',
+        )
+        file(
+          join(repository, '.xaedalon', '.factory', 'workflows', 'theirs.workflow.yaml'),
+          'name: theirs\nphases: []\n',
+        )
+        git('add', '-A')
+        git('commit', '-m', 'share the definitions')
+      })
+      When('I add it as a project', () => addProject('shared', repository))
+      Then('the response is 201', () => expect(response.statusCode).toBe(201))
+      And('no ignore file was written', () =>
+        expect(existsSync(join(repository, '.xaedalon', '.gitignore'))).toBe(false),
+      )
+      // Visible, deliberately. An ignore file here would hide these from the
+      // team that is sharing the rest, and they are the definitions the
+      // project just gained.
+      And('the definitions it copied in are there for the team to commit', () => {
+        const untracked = git('status', '--porcelain', '-uall').trim()
+        expect(untracked).toContain('.xaedalon/.factory/workflows/worktree-create.workflow.yaml')
+      })
+    })
+  })
+  Rule('doctor asks git what it can see of a project', ({ RuleScenario }) => {
+    const findings = () => (response.body.problems as { rule?: string; message: string }[]) ?? []
+    const aboutGit = () =>
+      findings().filter(
+        (problem) =>
+          problem.rule === 'doctor.productOutputTracked' ||
+          problem.rule === 'doctor.definitionsIgnored',
+      )
+    /** A project row for a directory this scenario made, added straight to the store. */
+    const register = async (name: string, path: string): Promise<void> => {
+      await call('POST', '/api/projects', { name, path })
+    }
+
+    RuleScenario('A committed artifact is found in a real repository', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is a real repository with a committed task artifact', async () => {
+        const repository = join(root, 'tracked')
+        mkdirSync(repository, { recursive: true })
+        const git = (...args: string[]) =>
+          execFileSync('git', args, {
+            cwd: repository,
+            env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+          })
+        git('init', '--initial-branch=main')
+        git('config', 'user.email', 'test@example.com')
+        git('config', 'user.name', 'Factory Test')
+        file(
+          join(repository, '.xaedalon', '.factory', 'tasks', 'add-due-dates', 'artifacts', 'r.md'),
+          'what the agent wrote\n',
+        )
+        // Forced, because Factory's own ignore file is doing its job — which is
+        // how somebody gets here: `git add -f` is the wrong opt-in.
+        git('add', '-f', '.xaedalon')
+        git('commit', '-m', 'oops')
+        await register('tracked', repository)
+      })
+      When('I GET "/api/doctor"', () => call('GET', '/api/doctor'))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And("the findings say a run's output is committed", () => {
+        expect(aboutGit().map((problem) => problem.rule)).toEqual(['doctor.productOutputTracked'])
+        expect(aboutGit()[0]?.message).toContain('artifacts')
+      })
+    })
+
+    RuleScenario('A project that is not a repository produces no finding', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a project that is a plain directory', async () => {
+        const plain = join(root, 'plain')
+        mkdirSync(plain, { recursive: true })
+        await register('plain', plain)
+      })
+      When('I GET "/api/doctor"', () => call('GET', '/api/doctor'))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the findings say nothing about git', () => expect(aboutGit()).toHaveLength(0))
+    })
+  })
+  Rule('a directory can ask which project it is in', ({ RuleScenario }) => {
+    const status = (code: number) => (): void => expect(response.statusCode).toBe(code)
+    let repository = ''
+    const ask = (path: string) =>
+      call('GET', `/api/projects/at?path=${encodeURIComponent(path)}`)
+    const givenProject = async (): Promise<void> => {
+      repository = makeRepository(join(root, 'resolvable'))
+      await addProject('factory', repository)
+    }
+
+    RuleScenario('A directory inside a project resolves to it', ({ Given, When, Then, And }) => {
+      Given('a project "factory" at a repository', givenProject)
+      When('I ask which project is at a directory inside it', async () => {
+        const deep = join(repository, 'packages', 'core', 'src')
+        mkdirSync(deep, { recursive: true })
+        await ask(deep)
+      })
+      Then('the response is 200', status(200))
+      And('the project is "factory"', () =>
+        expect((response.body.project as { name: string }).name).toBe('factory'),
+      )
+      And('it matched an ancestor', () => expect(response.body.matchedBy).toBe('ancestor'))
+    })
+
+    RuleScenario('A directory nobody registered is not found', ({ Given, When, Then }) => {
+      Given('a project "factory" at a repository', givenProject)
+      When('I ask which project is at a directory outside every project', async () => {
+        const elsewhere = join(root, 'elsewhere')
+        mkdirSync(elsewhere, { recursive: true })
+        await ask(elsewhere)
+      })
+      Then('the response is 404', status(404))
+    })
+
+    RuleScenario('A task\'s worktree resolves to the project and the task', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      let worktree = ''
+      Given('a project "factory" at a repository', givenProject)
+      And('a task "Add due dates" in it with a worktree on disk', async () => {
+        await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+        const project = (
+          await app.inject({ method: 'GET', url: '/api/projects' })
+        ).json() as { items: { id: string; worktreesRoot: string }[] }
+        const root_ = project.items.find((item) => item.id === projectId)?.worktreesRoot ?? ''
+        worktree = join(root_, 'add-due-dates')
+        mkdirSync(worktree, { recursive: true })
+      })
+      When('I ask which project is at that worktree', () => ask(worktree))
+      Then('the response is 200', status(200))
+      And('the project is "factory"', () =>
+        expect((response.body.project as { name: string }).name).toBe('factory'),
+      )
+      And('the answer names the task "Add due dates"', () =>
+        expect((response.body.task as { name: string } | undefined)?.name).toBe('Add due dates'),
+      )
+    })
+
+    RuleScenario('Two projects at one directory are a conflict', ({ Given, And, When, Then }) => {
+      Given('a project "factory" at a repository', givenProject)
+      And('a second project "factory-again" at the same repository', () =>
+        addProject('factory-again', repository),
+      )
+      When('I ask which project is at that repository', () => ask(repository))
+      Then('the response is 409', status(409))
+      And('both project names are in the answer', () =>
+        expect(response.body.projects).toEqual(['factory', 'factory-again']),
+      )
+    })
+
+    RuleScenario('Asking without a path is a usage error', ({ When, Then, And }) => {
+      When('I ask which project is at no path at all', () => call('GET', '/api/projects/at'))
+      Then('the response is 400', status(400))
+      And('the answer says what to pass instead', () =>
+        expect(response.body.error).toContain('?path='),
+      )
+    })
+  })
+  Rule("how far work may start work is the daemon's to decide", ({ RuleScenario }) => {
+    const status = (code: number) => (): void => expect(response.statusCode).toBe(code)
+    const coded = (code: string) => (): void => expect(response.body.code).toBe(code)
+    let ids: Record<string, string> = {}
+
+    const givenProject = async (): Promise<void> => {
+      ids = {}
+      await addProject('resolvable', makeRepository(join(root, 'orchestrated')))
+    }
+    /** A finished run at a chosen depth, written through the repository. */
+    const runAt = (name: string, depth: number) => (): void => {
+      const run = service.runs.start({ workflow: 'development', depth })
+      service.runs.finish(run.id, 'completed')
+      ids[name] = run.id
+    }
+    const createFrom = (initiator: unknown) => async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId, initiator })
+    }
+    const aTask = async (name = 'Add due dates'): Promise<string> => {
+      await call('POST', '/api/tasks', {
+        name,
+        projectId,
+        workflows: ['development'],
+      })
+      return (response.body.task as { id: string }).id
+    }
+    const accept = () => call('POST', '/api/settings/accept')
+
+    RuleScenario('A request with nobody behind it is a person', ({ Given, When, Then }) => {
+      Given('a project to work in', givenProject)
+      When('I create a task with no initiator', () =>
+        call('POST', '/api/tasks', { name: 'Add due dates', projectId }),
+      )
+      Then('the response is 201', status(201))
+    })
+
+    RuleScenario('Work four levels deep is refused', ({ Given, And, When, Then }) => {
+      Given('a project to work in', givenProject)
+      And('a run "deep" at depth 3', runAt('deep', 3))
+      When('I create a task from inside "deep"', () => createFrom({ runId: ids.deep })())
+      Then('the response is 409', status(409))
+      And('the answer is coded RECURSION_LIMIT', coded('RECURSION_LIMIT'))
+      And('no task was created', () => expect(service.tasks.list()).toHaveLength(0))
+    })
+
+    RuleScenario('The eleventh task from one run is refused', ({ Given, And, When, Then }) => {
+      Given('a project to work in', givenProject)
+      And('a run "busy" at depth 0 that has already asked for 10 tasks', async () => {
+        runAt('busy', 0)()
+        for (let index = 0; index < 10; index += 1) {
+          await call('POST', '/api/tasks', {
+            name: `Task ${index}`,
+            projectId,
+            initiator: { runId: ids.busy },
+          })
+        }
+      })
+      When('I create a task from inside "busy"', () => createFrom({ runId: ids.busy })())
+      Then('the response is 409', status(409))
+      And('the answer is coded FAN_OUT_LIMIT', coded('FAN_OUT_LIMIT'))
+    })
+
+    RuleScenario('A task created from inside a run remembers which', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('a run "asker" at depth 0', runAt('asker', 0))
+      When('I create a task from inside "asker"', () =>
+        createFrom({ runId: ids.asker, label: 'mcp:a-client/1.0' })(),
+      )
+      Then('the response is 201', status(201))
+      And('the task says "asker" asked for it', () =>
+        expect((response.body.task as { createdByRunId?: string }).createdByRunId).toBe(ids.asker),
+      )
+      And('the task says who the client called itself', () =>
+        expect((response.body.task as { createdBy?: string }).createdBy).toBe('mcp:a-client/1.0'),
+      )
+    })
+
+    RuleScenario('An initiator that is not an object is refused rather than half-read', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      When('I create a task with an initiator of "yes please"', createFrom('yes please'))
+      Then('the response is 400', status(400))
+    })
+
+    RuleScenario('An agent cannot queue the task it is running inside', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('a task "Add due dates" that can be queued', async () => {
+        ids.task = await aTask()
+      })
+      And('the disclaimer has been accepted', accept)
+      When('the agent running that task tries to queue it', () =>
+        call('POST', `/api/tasks/${ids.task}/actions/queue`, {
+          initiator: { runId: 'run-x', taskId: ids.task },
+        }),
+      )
+      Then('the response is 409', status(409))
+      And('the answer is coded SELF_ORCHESTRATION_BLOCKED', coded('SELF_ORCHESTRATION_BLOCKED'))
+      And('the task was not queued', () =>
+        expect(service.tasks.get(ids.task as string)?.state).toBe('draft'),
+      )
+    })
+
+    RuleScenario("An agent cannot approve what its own run asked for", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('a run "asker" at depth 0', runAt('asker', 0))
+      And('a task "Add due dates" that "asker" asked for, waiting for approval', async () => {
+        await call('POST', '/api/tasks', {
+          name: 'Add due dates',
+          projectId,
+          workflows: ['development'],
+          initiator: { runId: ids.asker },
+        })
+        ids.task = (response.body.task as { id: string }).id
+        // Straight through the repository: reaching `awaiting_approval` is the
+        // engine's job and this scenario is about who may answer the gate.
+        service.tasks.act(ids.task, 'queue')
+        service.tasks.act(ids.task, 'start')
+        service.tasks.act(ids.task, 'await_approval')
+      })
+      When('the agent in "asker" tries to approve it', () =>
+        call('POST', `/api/tasks/${ids.task}/actions/approve`, {
+          initiator: { runId: ids.asker },
+        }),
+      )
+      Then('the response is 409', status(409))
+      And('the answer is coded APPROVAL_SEPARATION', coded('APPROVAL_SEPARATION'))
+      And('the task is still waiting for approval', () =>
+        expect(service.tasks.get(ids.task as string)?.state).toBe('awaiting_approval'),
+      )
+    })
+
+    RuleScenario("Queue all skips the agent's own task and queues the rest", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a project to work in', givenProject)
+      And('the disclaimer has been accepted', accept)
+      And('two tasks that can be queued', async () => {
+        ids.first = await aTask('First')
+        ids.second = await aTask('Second')
+      })
+      When('the agent running the first one queues the whole project', () =>
+        call('POST', `/api/projects/${projectId}/queue`, {
+          initiator: { runId: 'run-x', taskId: ids.first },
+        }),
+      )
+      Then('the response is 200', status(200))
+      And('one task was queued', () => expect(response.body.queued).toHaveLength(1))
+      And('the one it is running inside was skipped with a reason', () => {
+        const skipped = response.body.skipped as { task: { id: string }; reason: string }[]
+        expect(skipped).toHaveLength(1)
+        expect(skipped[0]?.task.id).toBe(ids.first)
+        expect(skipped[0]?.reason).toContain('running inside')
+      })
+    })
+  })
+
+  Rule('a project is asked what checks its work, and told when it cannot be guessed', ({
+    RuleScenario,
+  }) => {
+    let directory = ''
+    let added = ''
+
+    const withManifest = (): void => {
+      directory = join(root, 'checked')
+      file(join(directory, 'package.json'), '{"name":"checked","scripts":{"test":"vitest"}}')
+    }
+    const withNothing = (): void => {
+      directory = join(root, 'bare')
+      mkdirSync(directory, { recursive: true })
+    }
+    const register = async (payload: Record<string, unknown> = {}): Promise<void> => {
+      await call('POST', '/api/projects', { name: `checked-${added.length}`, path: directory, ...payload })
+      added = (response.body.project as { id: string } | undefined)?.id ?? ''
+    }
+    /** Read back from the list, not from the create reply: the row is the truth. */
+    const stored = async (): Promise<{ check?: string } | undefined> => {
+      await call('GET', '/api/projects')
+      return (response.body.items as { id: string; check?: string }[]).find(
+        (item) => item.id === added,
+      )
+    }
+    const checkIs = (command: string) => async (): Promise<void> => {
+      expect((await stored())?.check).toBe(command)
+    }
+    const noCheck = async (): Promise<void> => {
+      expect((await stored())?.check).toBeUndefined()
+    }
+
+    RuleScenario('Adding a repository with a test script detects its command', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      When('I add a project at that directory', () => register())
+      Then('the project\'s check command is "npm test"', checkIs('npm test'))
+    })
+
+    RuleScenario('A repository that says nothing gets no command', ({ Given, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      When('I add a project at that directory', () => register())
+      Then('the project has no check command', noCheck)
+    })
+
+    RuleScenario('A command sent with the request is used as sent', ({ Given, When, Then }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      When('I add a project at that directory with the check command "make verify"', () =>
+        register({ check: 'make verify' }),
+      )
+      Then('the project\'s check command is "make verify"', checkIs('make verify'))
+    })
+
+    RuleScenario('The command can be changed afterwards', ({ Given, And, When, Then }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      And('a project added at that directory', () => register())
+      When("I set that project's check command to \"pnpm verify\"", () =>
+        call('PATCH', `/api/projects/${added}`, { check: 'pnpm verify' }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the project\'s check command is "pnpm verify"', checkIs('pnpm verify'))
+    })
+
+    RuleScenario('The command can be cleared afterwards', ({ Given, And, When, Then }) => {
+      Given('a directory whose "package.json" declares a "test" script', withManifest)
+      And('a project added at that directory', () => register())
+      When("I clear that project's check command", () =>
+        call('PATCH', `/api/projects/${added}`, { check: null }),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the project has no check command', noCheck)
+    })
+
+    RuleScenario('A check command that is not text is refused', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', () => register())
+      When("I set that project's check command to the number 7", () =>
+        call('PATCH', `/api/projects/${added}`, { check: 7 }),
+      )
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
+    })
+  })
+
+  Rule('a green project check is evidence, and Factory knows which command it was', ({
+    RuleScenario,
+  }) => {
+    const CHECK = 'echo checks passed'
+
+    const checksItself = async (): Promise<void> => {
+      await call('PATCH', `/api/projects/${projectId}`, { check: CHECK })
+    }
+    const checkWorkflow = (): void => {
+      file(join(scope, 'workflows', 'check.workflow.yaml'), 'name: check\nphases: [verify]\n')
+      file(
+        join(scope, 'phases', 'verify.phase.yaml'),
+        `name: verify\nsteps: [{run: ${CHECK}}]\n`,
+      )
+    }
+    RuleScenario('A run of the project\'s check command earns regression coverage', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(`the project checks itself with "${CHECK}"`, checksItself)
+      And('the workflow "check" runs that command', checkWorkflow)
+      And('the task "Add due dates" exists with the workflow "check"', () =>
+        create('Add due dates', ['check']),
+      )
+      When('I queue the task', () => call('POST', `/api/tasks/${taskId}/actions/queue`))
+      And('the work finishes', () =>
+        until(async () => {
+          await reload()
+          return stateOf() === 'done'
+        }, 'the task to finish'),
+      )
+      Then('the assessment counts "regression_checks" as collected', async () => {
+        await call('GET', `/api/tasks/${taskId}/reliability`)
+        expect((response.body.reliability as { coverage: number }).coverage).toBeGreaterThan(0)
+      })
+    })
+
+    RuleScenario('A run of some other command earns none', ({ Given, And, When, Then }) => {
+      Given(`the project checks itself with "${CHECK}"`, checksItself)
+      And('the task "Add due dates" exists with the workflow "hello"', () =>
+        create('Add due dates', ['hello']),
+      )
+      When('I queue the task', () => call('POST', `/api/tasks/${taskId}/actions/queue`))
+      And('the work finishes', () =>
+        until(async () => {
+          await reload()
+          return stateOf() === 'done'
+        }, 'the task to finish'),
+      )
+      Then('the assessment counts no evidence at all', async () => {
+        await call('GET', `/api/tasks/${taskId}/reliability`)
+        expect((response.body.reliability as { coverage: number }).coverage).toBe(0)
+      })
+    })
+  })
+
+  Rule('a project says which model judges its work, and whether one does', ({
+    RuleScenario,
+  }) => {
+    let directory = ''
+    let added = ''
+
+    const withNothing = (): void => {
+      directory = join(root, `judged-${String(added.length)}-${String(Date.now())}`)
+      mkdirSync(directory, { recursive: true })
+    }
+    const register = async (): Promise<void> => {
+      await call('POST', '/api/projects', { name: `judged-${String(Date.now())}`, path: directory })
+      added = (response.body.project as { id: string } | undefined)?.id ?? ''
+    }
+    /** Read back from the list: the row is the truth, not the reply that wrote it. */
+    const stored = async (): Promise<
+      { reliabilityModel?: string; reliabilityEnabled?: boolean } | undefined
+    > => {
+      await call('GET', '/api/projects')
+      return (
+        response.body.items as {
+          id: string
+          reliabilityModel?: string
+          reliabilityEnabled?: boolean
+        }[]
+      ).find((item) => item.id === added)
+    }
+    const modelIs = (model: string) => async (): Promise<void> => {
+      expect((await stored())?.reliabilityModel).toBe(model)
+    }
+    const noModel = async (): Promise<void> => {
+      expect((await stored())?.reliabilityModel).toBeUndefined()
+    }
+    const setModel = (model: unknown) => (): Promise<void> =>
+      call('PATCH', `/api/projects/${added}`, { reliabilityModel: model })
+    const ok = (): void => expect(response.statusCode).toBe(200)
+    const refused = (): void => expect(response.statusCode).toBe(400)
+
+    RuleScenario('A new project names no model and is judged', ({ Given, When, Then, And }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      When('I add a project at that directory', register)
+      Then('the project names no judging model', noModel)
+      And('the project is judged', async () => {
+        expect((await stored())?.reliabilityEnabled).toBe(true)
+      })
+    })
+
+    RuleScenario('A model can be chosen', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      When('I set that project\'s judging model to "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      Then('the response is 200', ok)
+      And('the project\'s judging model is "claude-opus-5-5"', modelIs('claude-opus-5-5'))
+    })
+
+    RuleScenario('A model can be cleared', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      And('that project\'s judging model is "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      When("I clear that project's judging model", setModel(null))
+      Then('the response is 200', ok)
+      And('the project names no judging model', noModel)
+    })
+
+    RuleScenario('Judging can be switched off without losing the model', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      And('that project\'s judging model is "claude-opus-5-5"', setModel('claude-opus-5-5'))
+      When("I stop that project's work being judged", () =>
+        call('PATCH', `/api/projects/${added}`, { reliabilityEnabled: false }),
+      )
+      Then('the response is 200', ok)
+      And('the project is not judged', async () => {
+        expect((await stored())?.reliabilityEnabled).toBe(false)
+      })
+      And('the project\'s judging model is "claude-opus-5-5"', modelIs('claude-opus-5-5'))
+    })
+
+    RuleScenario('A model that is not text is refused, and the refusal names the field', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      When("I set that project's judging model to the number 7", setModel(7))
+      Then('the response is 400', refused)
+      And('the refusal names the judging model', () => {
+        expect(response.body.error as string).toContain('reliabilityModel')
+      })
+    })
+
+    RuleScenario('Judging that is not true or false is refused', ({ Given, And, When, Then }) => {
+      Given('a directory with nothing Factory recognises', withNothing)
+      And('a project added at that directory', register)
+      When('I set that project\'s judging to "maybe"', () =>
+        call('PATCH', `/api/projects/${added}`, { reliabilityEnabled: 'maybe' }),
+      )
+      Then('the response is 400', refused)
+    })
+  })
+
+  Rule('a task carries how much to trust it, and no surface can simply say', ({
+    RuleScenario,
+  }) => {
+    let detail: Record<string, unknown>
+
+    const exists = async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+      taskId = (response.body.task as { id: string }).id
+    }
+    const readTask = async (): Promise<void> => {
+      await call('GET', `/api/tasks/${taskId}`)
+      detail = response.body
+    }
+    const reliabilityOf = (body: Record<string, unknown>): Record<string, unknown> =>
+      body['reliability'] as Record<string, unknown>
+
+    RuleScenario('A task nobody has judged says so rather than scoring zero', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read the task', readTask)
+      Then('its reliability is "unassessed"', () =>
+        expect(reliabilityOf(detail)['state']).toBe('unassessed'),
+      )
+      // Not `toBe(0)` — a task nobody looked at is not a task that failed.
+      And('it carries no score', () => expect(reliabilityOf(detail)['score']).toBeUndefined())
+    })
+
+    RuleScenario('The reliability route agrees with the task payload', ({
+      Given,
+      When,
+      And,
+      Then,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read the task', readTask)
+      And('I read its reliability', () => call('GET', `/api/tasks/${taskId}/reliability`))
+      Then('both say the same state', () =>
+        expect(reliabilityOf(response.body)['state']).toBe(reliabilityOf(detail)['state']),
+      )
+    })
+
+    RuleScenario('An assessment can be asked for', ({ Given, When, Then, And }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I ask for an assessment', () =>
+        call('POST', `/api/tasks/${taskId}/reliability/assess`, {}),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('its reliability is "assessed"', () =>
+        expect(reliabilityOf(response.body)['state']).toBe('assessed'),
+      )
+      And('it carries a score', () =>
+        expect(typeof reliabilityOf(response.body)['score']).toBe('number'),
+      )
+    })
+
+    RuleScenario('History starts empty and grows', ({ Given, When, Then, And }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read its reliability history', () =>
+        call('GET', `/api/tasks/${taskId}/reliability/history`),
+      )
+      Then('0 assessments are listed', () =>
+        expect((response.body.items as unknown[]).length).toBe(0),
+      )
+      When('I ask for an assessment', () =>
+        call('POST', `/api/tasks/${taskId}/reliability/assess`, {}),
+      )
+      And('I read its reliability history', () =>
+        call('GET', `/api/tasks/${taskId}/reliability/history`),
+      )
+      Then('1 assessment is listed', () =>
+        expect((response.body.items as unknown[]).length).toBe(1),
+      )
+    })
+
+    RuleScenario('Next actions are offered for a task with nothing to do', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I read its next actions', () =>
+        call('GET', `/api/tasks/${taskId}/reliability/next-actions`),
+      )
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('no actions are offered', () => expect(response.body.actions).toEqual([]))
+    })
+
+    RuleScenario('There is no route that sets a score', ({ Given, When, Then }) => {
+      Given('the task "Add due dates" exists', exists)
+      When('I try to set its score to 100', () =>
+        call('POST', `/api/tasks/${taskId}/reliability/score`, { score: 100 }),
+      )
+      // Not "it is refused" — the route does not exist, which is a stronger
+      // guarantee than one that refuses.
+      Then('the response is 404', () => expect(response.statusCode).toBe(404))
+    })
+  })
+
+  Rule('accepting a serious risk is a person\'s, and the daemon is what knows', ({
+    RuleScenario,
+  }) => {
+    let driverId = ''
+
+    const withDriver = async (): Promise<void> => {
+      await call('POST', '/api/tasks', { name: 'Add due dates', projectId })
+      taskId = (response.body.task as { id: string }).id
+      service.reliability.addDriver({
+        taskId,
+        title: 'checkout regression',
+        type: 'regression',
+        severity: 'high',
+        owner: 'agent',
+        dimension: 'regressionSafety',
+        scoreImpact: -4,
+      })
+      driverId = service.reliability.drivers(taskId)[0]?.id ?? ''
+    }
+    const act = (action: string, body: Record<string, unknown> = {}) =>
+      call('POST', `/api/tasks/${taskId}/reliability/drivers/${driverId}/${action}`, body)
+    /** A run Factory stamped, which is what makes a caller an agent. */
+    const asAgent = { initiator: { label: 'claude', runId: 'run-1', taskId: 'task-1' } }
+
+    RuleScenario('An agent cannot accept a high risk', ({ Given, When, Then, And }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('an agent tries to accept that driver', () => act('accept', asAgent))
+      Then('the response is 409', () => expect(response.statusCode).toBe(409))
+      And('the refusal says a person is required', () =>
+        expect(response.body.code).toBe('HUMAN_REQUIRED'),
+      )
+    })
+
+    RuleScenario('A person can accept a high risk', ({ Given, When, Then, And }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('a person accepts that driver', () => act('accept', { by: 'alex', reason: 'known' }))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the driver is "accepted"', () =>
+        expect((response.body.driver as { status: string }).status).toBe('accepted'),
+      )
+      And('it records who accepted it', () =>
+        expect((response.body.driver as { acceptedBy?: string }).acceptedBy).toBe('alex'),
+      )
+    })
+
+    RuleScenario('An agent can resolve a high risk', ({ Given, When, Then, And }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('an agent resolves that driver', () => act('resolve', asAgent))
+      Then('the response is 200', () => expect(response.statusCode).toBe(200))
+      And('the driver is "resolved"', () =>
+        expect((response.body.driver as { status: string }).status).toBe('resolved'),
+      )
+    })
+
+    RuleScenario('Accepting re-judges the task immediately', ({ Given, When, Then }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('a person accepts that driver', () => act('accept', { by: 'alex' }))
+      Then('the reliability comes back with the reply', () =>
+        expect((response.body.reliability as { state: string }).state).toBe('assessed'),
+      )
+    })
+
+    RuleScenario('A move the driver does not offer is refused with the ones it does', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      And('that driver has been resolved', () => act('resolve', { by: 'alex' }))
+      When('a person tries to resolve it again', () => act('resolve', { by: 'alex' }))
+      Then('the response is 409', () => expect(response.statusCode).toBe(409))
+      And('the refusal lists what it would accept', () =>
+        expect(response.body.actions).toContain('reopen'),
+      )
+    })
+
+    RuleScenario('Something that is not a driver action is refused', ({ Given, When, Then }) => {
+      Given('a task with a "high" reliability driver', withDriver)
+      When('a person tries to "obliterate" that driver', () => act('obliterate'))
+      Then('the response is 400', () => expect(response.statusCode).toBe(400))
     })
   })
 })

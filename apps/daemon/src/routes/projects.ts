@@ -1,14 +1,29 @@
 import type { FastifyInstance } from 'fastify'
-import { scaffoldProjectDefinitions } from '@factory/config'
+import { SCOPE_DIR, createScope, scaffoldProjectDefinitions } from '@factory/config'
+import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import {
   DISCLAIMER,
+  admitAction,
+  parseInitiator,
   EXECUTION_PROFILES,
   NOT_ACCEPTED,
+  PROJECT_TONES,
+  PROVIDER_KIND,
+  detectCheckCommand,
   hasAccepted,
-  isExecutionProfile,
+  isKnownProfile,
   queueOrder,
+  type ProjectFileReader,
 } from '@factory/core'
-import type { ExecutionProfile, Project, ProjectSetting, Task } from '@factory/core'
+import type {
+  ExecutionProfile,
+  Project,
+  ProjectSetting,
+  ProviderCapability,
+  Task,
+} from '@factory/core'
+import { AmbiguousProjectError, ProjectHasTasksError } from '@factory/store'
 import type { Runtime } from '@factory/runtime'
 import type { Service } from '../service.js'
 
@@ -29,6 +44,22 @@ const merge = (reports: readonly (ScaffoldReport | undefined)[]): ScaffoldReport
     kept: present.flatMap((report) => report.kept),
     missing: present.flatMap((report) => report.missing),
     ...(error === undefined ? {} : { error }),
+  }
+}
+
+/**
+ * Reads a file out of the repository being registered.
+ *
+ * The detection itself is in core and takes a reader, so it can be driven by a
+ * scenario without a repository on disk — and so core keeps its promise that
+ * every path comes from `scopes.ts`. This is the one place that turns a reader
+ * into actual files, and anything it cannot read is simply not there.
+ */
+const projectFileReader = (root: string): ProjectFileReader => (relative) => {
+  try {
+    return readFileSync(join(root, relative), 'utf8')
+  } catch {
+    return undefined
   }
 }
 
@@ -55,6 +86,14 @@ export function registerProjectRoutes(
    */
   const accepted = (): boolean => hasAccepted(runtime.settings.current().security.acceptedVersion)
 
+  /** The same facts the task routes use, built from the same repositories. */
+  const facts = {
+    depthOf: (runId: string) => service.runs.get(runId)?.depth,
+    tasksCreatedBy: (runId: string) => tasks.countCreatedBy(runId),
+    creatorOf: (taskId: string) => tasks.get(taskId)?.createdByRunId,
+    originOf: (runId: string) => service.runs.get(runId)?.originRunId,
+  }
+
 
   /**
    * Put the definitions a setting needs into the project, and say what landed.
@@ -68,11 +107,18 @@ export function registerProjectRoutes(
    * read-only checkout, permissions, a `.factory` that is a file — is worth
    * reporting, not worth undoing their change over.
    */
-  const scaffold = (project: Project, setting: ProjectSetting) => {
+  const scaffold = async (project: Project, setting: ProjectSetting) => {
     const chain = chains.for(project.id)
     if (chain === undefined) return undefined
     try {
-      return scaffoldProjectDefinitions({ chain, host: runtime.host, setting })
+      return await scaffoldProjectDefinitions({
+        chain,
+        host: runtime.host,
+        // A plugin sees the copies a project is given, the same as any other
+        // write.
+        hooks: runtime.host.hooks,
+        setting,
+      })
     } catch (error) {
       return {
         written: [],
@@ -82,6 +128,69 @@ export function registerProjectRoutes(
       }
     }
   }
+
+  /**
+   * Which project is this directory in?
+   *
+   * Here rather than in whichever client is asking, because three of them want
+   * the same answer: an MCP client resolving the directory its agent was
+   * started in, the CLI, which today resolves a project by *name* with a prefix
+   * rule, and the board. A client that worked it out for itself would disagree
+   * with this one the first time the rule changed, which is the shape this
+   * codebase keeps paying for.
+   *
+   * 404 rather than 200-with-nothing: "no project here" is an answer a caller
+   * acts on, and it is the one case where telling somebody the directory they
+   * are standing in is not registered is the whole point of the reply.
+   *
+   * Ambiguity is 409 and names both, like every other refusal that has two
+   * candidates. Picking one would queue somebody's work in the wrong
+   * repository.
+   */
+  app.get<{ Querystring: { path?: string } }>('/api/projects/at', async (request, reply) => {
+    const path = request.query.path
+    if (path === undefined || path.trim() === '') {
+      return reply.code(400).send({ error: 'Which directory? Pass ?path=<absolute path>.' })
+    }
+
+    let found
+    try {
+      found = projects.at(path)
+    } catch (error) {
+      if (error instanceof AmbiguousProjectError) {
+        return reply.code(409).send({ error: error.message, projects: error.names })
+      }
+      return reply
+        .code(400)
+        .send({ error: error instanceof Error ? error.message : String(error) })
+    }
+    if (found === undefined) {
+      return reply
+        .code(404)
+        .send({ error: `${path} is not inside any project Factory knows about.` })
+    }
+
+    // Looked up here rather than in the repository: a worktree directory is a
+    // task's, and the project repository writes project rows. One of the two
+    // has to know how a worktree path is built, and it is already the one that
+    // stores `worktreesRoot`.
+    const task =
+      found.taskDirectory === undefined
+        ? undefined
+        : tasks
+            .list({ includeArchived: true })
+            .find(
+              (candidate) =>
+                candidate.projectId === found.project.id &&
+                candidate.directory === found.taskDirectory,
+            )
+
+    return {
+      project: found.project,
+      matchedBy: found.matchedBy,
+      ...(task === undefined ? {} : { task }),
+    }
+  })
 
   app.get('/api/projects', async () => ({
     items: projects.list().map((project) => ({
@@ -100,6 +209,7 @@ export function registerProjectRoutes(
       worktreesRoot?: string
       usesWorktrees?: boolean
       usesEnvironments?: boolean
+      check?: string
     }
   }>(
     '/api/projects',
@@ -109,6 +219,12 @@ export function registerProjectRoutes(
         return reply.code(400).send({ error: 'Send { name, path }.' })
       }
       try {
+        // Detected only when the caller said nothing at all. A caller that
+        // sent a blank string meant blank — "this project has no gate" is a
+        // real answer, and overruling it with a guess would be the kind of
+        // helpfulness nobody can switch off.
+        const check =
+          body.check === undefined ? detectCheckCommand(projectFileReader(body.path)) : body.check
         const project = projects.add({
           name: body.name,
           path: body.path,
@@ -118,13 +234,30 @@ export function registerProjectRoutes(
           ...(body.usesEnvironments === undefined
             ? {}
             : { usesEnvironments: body.usesEnvironments }),
+          ...(check === undefined ? {} : { check }),
         })
+        // A scope of its own, before anything tries to write into it.
+        //
+        // A repository with no `.xaedalon/.factory` resolves to a chain with no
+        // project scope, and then every write that asks for one fails — which
+        // is the first thing a new project does, because the worktree workflows
+        // are copied in as it is registered. It answered 500 with "No project
+        // scope in this chain", and the reply that had already tried said only
+        // `written: []`. Creating it is the one `mkdir` the person would have
+        // had to do, and it is the same directory the copies are about to go
+        // into.
+        //
+        // Never over an existing one: the moment `config.yaml` is there the
+        // directory is theirs — which is also why Factory never writes an
+        // ignore file over a scope somebody may already be sharing.
+        const scope = createScope({ root: join(project.path, SCOPE_DIR), kind: 'project' })
+
         // Whatever it was registered with, it gets the files for.
         const scaffolded = [
-          ...(project.usesWorktrees ? [scaffold(project, 'worktrees')] : []),
-          ...(project.usesEnvironments ? [scaffold(project, 'environments')] : []),
+          ...(project.usesWorktrees ? [await scaffold(project, 'worktrees')] : []),
+          ...(project.usesEnvironments ? [await scaffold(project, 'environments')] : []),
         ]
-        return reply.code(201).send({ project, scaffolded: merge(scaffolded) })
+        return reply.code(201).send({ project, scope, scaffolded: merge(scaffolded) })
       } catch (error) {
         // A path that does not exist or a name already taken is a mistake in
         // the request, not a failure of the server.
@@ -138,33 +271,116 @@ export function registerProjectRoutes(
    *
    * A separate route rather than "remove and add again", which would null the
    * `project_id` of every task that ever ran in it — the record of the work
-   * would survive, pointing at nothing.
+   * would survive, pointing at nothing. That is also why `name` and
+   * `defaultBranch` belong here: they were the two fields a person could only
+   * change by destroying the project's history to do it.
+   *
+   * `path` is deliberately not accepted. Worktree roots are derived from it and
+   * every run that ever happened recorded it, so a project that moves is a
+   * different project, and saying so is kinder than pretending otherwise.
    *
    * Allowed while the project has work in flight: tasks already running finish
    * where they are, and the new rule applies to whatever starts next.
    */
   app.patch<{
     Params: { id: string }
-    Body: { usesWorktrees?: boolean; usesEnvironments?: boolean; profile?: unknown }
+    Body: {
+      name?: unknown
+      defaultBranch?: unknown
+      tone?: unknown
+      initials?: unknown
+      usesWorktrees?: boolean
+      usesEnvironments?: boolean
+      profile?: unknown
+      check?: unknown
+      reliabilityModel?: unknown
+      reliabilityProvider?: unknown
+      reliabilityEffort?: unknown
+      reliabilityEnabled?: unknown
+    }
   }>('/api/projects/:id', async (request, reply) => {
     if (projects.get(request.params.id) === undefined) {
       return reply.code(404).send({ error: `No project ${request.params.id}.` })
     }
-    const { usesWorktrees, usesEnvironments, profile } = request.body ?? {}
+    const { name, defaultBranch, usesWorktrees, usesEnvironments, profile } = request.body ?? {}
     const settingProfile = 'profile' in (request.body ?? {})
-    if (usesWorktrees === undefined && usesEnvironments === undefined && !settingProfile) {
+    // Present-and-null is how either half of the square is handed back to the
+    // name, so "in the body" is the question, not "has a value".
+    const settingTone = 'tone' in (request.body ?? {})
+    const settingInitials = 'initials' in (request.body ?? {})
+    // Present-and-blank clears it, so "in the body" is the question here too.
+    const settingCheck = 'check' in (request.body ?? {})
+    // Present-and-null clears the model, the way the check command does.
+    const settingModel = 'reliabilityModel' in (request.body ?? {})
+    // The other two thirds of the same decision. Present-and-null returns this
+    // project to following the installation, which is a real position and not
+    // the same as naming nothing for the first time.
+    const settingProvider = 'reliabilityProvider' in (request.body ?? {})
+    const settingEffort = 'reliabilityEffort' in (request.body ?? {})
+    const judging = request.body?.reliabilityEnabled
+    if (
+      name === undefined &&
+      defaultBranch === undefined &&
+      usesWorktrees === undefined &&
+      usesEnvironments === undefined &&
+      !settingProfile &&
+      !settingTone &&
+      !settingInitials &&
+      !settingCheck &&
+      !settingModel &&
+      !settingProvider &&
+      !settingEffort &&
+      judging === undefined
+    ) {
       return reply.code(400).send({
         error:
-          'Send { usesWorktrees } or { usesEnvironments }, true or false, ' +
+          'Send { name } or { defaultBranch } to change what the project is called or where ' +
+          'work starts, { usesWorktrees } or { usesEnvironments }, true or false, ' +
+          '{ check } for the command that verifies its work, ' +
+          '{ reliabilityProvider }, { reliabilityModel }, { reliabilityEffort } or ' +
+          '{ reliabilityEnabled } to say how its work is judged, ' +
           'or { profile } to say how much authority its runs get.',
       })
+    }
+    // Refused here rather than at the store, so the message names the field a
+    // form can put the error against.
+    if (name !== undefined && (typeof name !== 'string' || name.trim() === '')) {
+      return reply.code(400).send({ error: 'A project needs a name.' })
+    }
+    if (
+      defaultBranch !== undefined &&
+      (typeof defaultBranch !== 'string' || defaultBranch.trim() === '')
+    ) {
+      return reply.code(400).send({ error: 'A project needs a branch to start work from.' })
+    }
+    if (
+      settingTone &&
+      request.body.tone !== null &&
+      (!Number.isInteger(request.body.tone) ||
+        (request.body.tone as number) < 1 ||
+        (request.body.tone as number) > PROJECT_TONES)
+    ) {
+      return reply.code(400).send({
+        error: `colour is 1 to ${PROJECT_TONES}, or null to derive it from the name.`,
+      })
+    }
+    if (settingInitials && request.body.initials !== null) {
+      if (typeof request.body.initials !== 'string') {
+        return reply.code(400).send({ error: 'letters are text, or null to derive them.' })
+      }
     }
     // `null` clears it, which is not the same as `default`: a project that
     // states nothing follows the installation's choice, and returning to that
     // has to be expressible.
-    if (settingProfile && profile !== null && !isExecutionProfile(profile)) {
+    // A built-in, or a profile this project's chain defines. An unknown name is
+    // refused rather than stored: read back later as "not stated" it would
+    // silently loosen a project that had asked to be confined.
+    if (settingProfile && profile !== null && !isKnownProfile(profile, service.profileNames(request.params.id))) {
+      const known = service.profileNames(request.params.id).names
       return reply.code(400).send({
-        error: `profile is ${EXECUTION_PROFILES.join(', ')} or null to follow the installation.`,
+        error:
+          `profile is ${[...EXECUTION_PROFILES, ...known].join(', ')} or null to follow the ` +
+          `installation.`,
       })
     }
     if (
@@ -173,21 +389,116 @@ export function registerProjectRoutes(
     ) {
       return reply.code(400).send({ error: 'Settings are true or false.' })
     }
+    if (settingCheck && request.body.check !== null && typeof request.body.check !== 'string') {
+      return reply
+        .code(400)
+        .send({ error: 'check is the command that verifies this project, or null to clear it.' })
+    }
+    if (
+      settingModel &&
+      request.body.reliabilityModel !== null &&
+      typeof request.body.reliabilityModel !== 'string'
+    ) {
+      return reply.code(400).send({
+        error:
+          'reliabilityModel is the model that judges this project, or null so nothing does.',
+      })
+    }
+    if (
+      settingProvider &&
+      request.body.reliabilityProvider !== null &&
+      typeof request.body.reliabilityProvider !== 'string'
+    ) {
+      return reply.code(400).send({
+        error:
+          'reliabilityProvider is the agent CLI that judges this project, or null to follow the installation.',
+      })
+    }
+    // Registered, not installed. A machine is configured before its CLIs are,
+    // and refusing a provider somebody has not installed yet would make the
+    // field unusable on a fresh box. A name nobody registered *is* refused: read
+    // back later it would look like "nobody has said" and fall through to
+    // whatever is installed, judging with a CLI nobody chose.
+    if (settingProvider && typeof request.body.reliabilityProvider === 'string') {
+      const known = runtime.host
+        .list<ProviderCapability>(PROVIDER_KIND)
+        .map((entry) => entry.capability.id)
+      const named = request.body.reliabilityProvider.trim()
+      if (named !== '' && !known.includes(named)) {
+        return reply.code(400).send({
+          error: `No provider called "${named}" is registered. Installed or not, it has to be one Factory knows: ${known.join(', ')}.`,
+        })
+      }
+    }
+    if (
+      settingEffort &&
+      request.body.reliabilityEffort !== null &&
+      typeof request.body.reliabilityEffort !== 'string'
+    ) {
+      return reply.code(400).send({
+        error:
+          'reliabilityEffort is how hard the judge should think, or null to follow the installation.',
+      })
+    }
+    if (judging !== undefined && typeof judging !== 'boolean') {
+      return reply.code(400).send({ error: 'Settings are true or false.' })
+    }
 
     try {
       let project = projects.get(request.params.id) as Project
       const scaffolded: (ScaffoldReport | undefined)[] = []
 
+      // Identity before settings: if the rename is going to be refused for
+      // colliding with another project, nothing else should have happened yet.
+      if (name !== undefined) project = projects.rename(request.params.id, name as string)
+      if (defaultBranch !== undefined) {
+        project = projects.setDefaultBranch(request.params.id, defaultBranch as string)
+      }
+      if (settingTone || settingInitials) {
+        project = projects.setAppearance(request.params.id, {
+          ...(settingTone ? { tone: (request.body.tone as number | null) ?? undefined } : {}),
+          ...(settingInitials
+            ? { initials: (request.body.initials as string | null) ?? undefined }
+            : {}),
+        })
+      }
       if (usesWorktrees !== undefined) {
         project = projects.setWorktrees(request.params.id, usesWorktrees)
         // Only on the way on. Turning a setting off leaves the files where they
         // are: they are the project's now, and deleting someone's committed
         // workflow because they flipped a checkbox would be unforgivable.
-        if (usesWorktrees) scaffolded.push(scaffold(project, 'worktrees'))
+        if (usesWorktrees) scaffolded.push(await scaffold(project, 'worktrees'))
       }
       if (usesEnvironments !== undefined) {
         project = projects.setEnvironments(request.params.id, usesEnvironments)
-        if (usesEnvironments) scaffolded.push(scaffold(project, 'environments'))
+        if (usesEnvironments) scaffolded.push(await scaffold(project, 'environments'))
+      }
+      if (settingCheck) {
+        // Nothing is scaffolded for a check command either: it changes what
+        // the gate runs, not what the repository contains.
+        project = projects.setCheck(
+          request.params.id,
+          (request.body.check as string | null) ?? undefined,
+        )
+      }
+      // One call for the three, so saving a page is one UPDATE and one
+      // `project.changed` rather than three of each — each event costs the board
+      // a refetch.
+      if (settingModel || settingProvider || settingEffort) {
+        project = projects.setJudge(request.params.id, {
+          ...(settingModel
+            ? { model: (request.body.reliabilityModel as string | null) ?? undefined }
+            : {}),
+          ...(settingProvider
+            ? { provider: (request.body.reliabilityProvider as string | null) ?? undefined }
+            : {}),
+          ...(settingEffort
+            ? { effort: (request.body.reliabilityEffort as string | null) ?? undefined }
+            : {}),
+        })
+      }
+      if (judging !== undefined) {
+        project = projects.setReliabilityEnabled(request.params.id, judging)
       }
       if (settingProfile) {
         // Nothing is scaffolded for a profile: it changes what the next run is
@@ -225,7 +536,9 @@ export function registerProjectRoutes(
    * Never `done` or `cancelled` — one click must not set five agents on work
    * that already finished.
    */
-  app.post<{ Params: { id: string } }>('/api/projects/:id/queue', async (request, reply) => {
+  app.post<{ Params: { id: string }; Body: { initiator?: unknown } }>(
+    '/api/projects/:id/queue',
+    async (request, reply) => {
     const project = projects.get(request.params.id)
     if (project === undefined) {
       return reply.code(404).send({ error: `No project ${request.params.id}.` })
@@ -234,6 +547,15 @@ export function registerProjectRoutes(
     // to an agent running, whether it is one task or ten.
     if (!accepted()) {
       return reply.code(409).send({ error: NOT_ACCEPTED, disclaimer: DISCLAIMER })
+    }
+
+    let initiator
+    try {
+      initiator = parseInitiator(request.body?.initiator)
+    } catch (error) {
+      return reply
+        .code(400)
+        .send({ error: error instanceof Error ? error.message : String(error) })
     }
 
     const candidates = tasks
@@ -266,10 +588,19 @@ export function registerProjectRoutes(
         skipped.push({ task, reason: 'nothing in its plan is ticked' })
         continue
       }
+      // An agent pressing Queue all from inside one of these tasks skips its
+      // own rather than failing the batch. The other nine are somebody's work
+      // and there is no reason not to start them.
+      const refusal = admitAction({ initiator, action: 'queue', taskId: id, facts })
+      if (refusal !== undefined) {
+        skipped.push({ task, reason: refusal.message })
+        continue
+      }
       queued.push(tasks.act(id, 'queue'))
     }
     return { queued, skipped }
-  })
+    },
+  )
 
   /**
    * Stop everything in flight in this project.
@@ -314,9 +645,26 @@ export function registerProjectRoutes(
     return { cancelled, signalled, killed }
   })
 
+  /**
+   * Forget a project, if nothing is left in it.
+   *
+   * 409 rather than a cascade: removing a project used to orphan its tasks,
+   * and an orphan ran wherever the daemon was started. The count is in the
+   * body as well as the message, so a client can say "3 tasks" without reading
+   * a sentence.
+   */
   app.delete<{ Params: { id: string } }>('/api/projects/:id', async (request, reply) => {
-    if (!projects.remove(request.params.id)) {
-      return reply.code(404).send({ error: `No project ${request.params.id}.` })
+    try {
+      if (!projects.remove(request.params.id)) {
+        return reply.code(404).send({ error: `No project ${request.params.id}.` })
+      }
+    } catch (error) {
+      if (error instanceof ProjectHasTasksError) {
+        return reply
+          .code(409)
+          .send({ error: error.message, tasks: error.count, archived: error.archived })
+      }
+      throw error
     }
     return reply.code(204).send()
   })

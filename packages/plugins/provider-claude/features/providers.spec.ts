@@ -69,8 +69,17 @@ describeFeature(feature, ({ Background, Rule, Scenario, ScenarioOutline, BeforeE
     Then('"strong" resolves to "opus" for "claude"', () =>
       expect(provider('claude').resolveModel('strong')).toBe('opus'),
     )
-    And('"strong" resolves to "claude-opus-5" for "copilot"', () =>
-      expect(provider('copilot').resolveModel('strong')).toBe('claude-opus-5'),
+    And('"strong" resolves to "claude-opus-5.5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('strong')).toBe('claude-opus-5.5'),
+    )
+  })
+
+  Scenario("Copilot dots a model's minor version rather than hyphenating it", ({ Then, And }) => {
+    Then('"fast" resolves to "claude-haiku-4.5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('fast')).toBe('claude-haiku-4.5'),
+    )
+    And('"balanced" resolves to "claude-sonnet-5" for "copilot"', () =>
+      expect(provider('copilot').resolveModel('balanced')).toBe('claude-sonnet-5'),
     )
   })
 
@@ -382,6 +391,49 @@ describeFeature(feature, ({ Background, Rule, Scenario, ScenarioOutline, BeforeE
       })
       And('the arguments include "--permission-prompts none"', includes('--permission-prompts none'))
       And('the arguments do not include "bypassPermissions"', excludes('bypassPermissions'))
+    })
+
+    /** The value of `--allowedTools`, which is one comma-separated argument. */
+    const allowList = (): string[] => {
+      const at = rendered.args.indexOf('--allowedTools')
+      return at === -1 ? [] : (rendered.args[at + 1] ?? '').split(',')
+    }
+    const allows = (command: string) => (): void => {
+      expect(allowList()).toContain(`Bash(${command} *)`)
+    }
+    const doesNotAllow = (command: string) => (): void => {
+      expect(allowList().some((rule) => rule.startsWith(`Bash(${command}`))).toBe(false)
+    }
+
+    RuleScenario("The Default profile lets the agent run the project's package manager", ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('an agent step with the prompt "Analyse WW2-1234"', withPrompt('Analyse WW2-1234'))
+      When('it is rendered for "claude" under "default"', renderAs('claude', 'default'))
+      Then('the arguments allow "pnpm"', allows('pnpm'))
+      And('the arguments allow "npm"', allows('npm'))
+    })
+
+    RuleScenario('No interpreter is on the allow-list', ({ Given, When, Then, And }) => {
+      Given('an agent step with the prompt "Analyse WW2-1234"', withPrompt('Analyse WW2-1234'))
+      When('it is rendered for "claude" under "default"', renderAs('claude', 'default'))
+      Then('the arguments do not allow "node"', doesNotAllow('node'))
+      And('the arguments do not allow "python"', doesNotAllow('python'))
+      // The one that undoes the whole profile: `Bash` on its own allows every
+      // command, including a redirect out of the workspace. Measured.
+      And('the arguments do not allow a bare tool name', () => {
+        expect(allowList()).not.toContain('Bash')
+        for (const rule of allowList()) expect(rule).toMatch(/^Bash\(.+ \*\)$/)
+      })
+    })
+
+    RuleScenario('Full Access needs no allow-list', ({ Given, When, Then }) => {
+      Given('an agent step with the prompt "Analyse WW2-1234"', withPrompt('Analyse WW2-1234'))
+      When('it is rendered for "claude" under "full-access"', renderAs('claude', 'full-access'))
+      Then('the arguments do not include "--allowedTools"', excludes('--allowedTools'))
     })
 
     RuleScenario('The Full Access profile removes the restriction', ({

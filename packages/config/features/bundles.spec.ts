@@ -20,7 +20,7 @@ import {
 
 const feature = await loadFeature(fileURLToPath(new URL('./bundles.feature', import.meta.url)))
 
-describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
+describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => {
   let box: Sandbox
   let host: CapabilityHost
   let chain: ScopeChain
@@ -86,6 +86,14 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     box.workflow(projectScope, 'development-failure', 'name: development-failure\nphases: [diagnose]\n')
     box.phase(projectScope, 'diagnose', 'name: diagnose\nsteps: [{run: echo diagnose}]\n')
   }
+  const givenNeeds = () => {
+    box.workflow(
+      projectScope,
+      'development',
+      'name: development\nneeds: [analysis-first]\nphases: [analysis, implement]\n',
+    )
+    box.workflow(projectScope, 'analysis-first', 'name: analysis-first\nphases: [analysis]\n')
+  }
   const givenUserHasDevelopment = () => {
     box.workflow(userScope, 'development', 'name: development\ndescription: mine\nphases: []\n')
   }
@@ -94,7 +102,7 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     When('I export "development"', () => doExport())
     Then('the export succeeds', () => expect(exported.bundle).toBeDefined())
     And('the bundle entry is "development"', () =>
-      expect(exported.bundle?.entry.workflow).toBe('development'),
+      expect(exported.bundle?.entry?.workflow).toBe('development'),
     )
     And('the bundle contains the workflows "development"', () =>
       expect(names(exported.bundle?.workflows ?? [])).toBe('development'),
@@ -113,6 +121,31 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     )
     And('the bundle contains the phases "analysis, implement, diagnose"', () =>
       expect(names(exported.bundle?.phases ?? [])).toBe('analysis, diagnose, implement'),
+    )
+  })
+
+  Scenario('Export follows what the workflow needs', ({ Given, When, Then, And }) => {
+    Given('"development" needs "analysis-first"', givenNeeds)
+    When('I export "development"', () => doExport())
+    Then('the export succeeds', () => expect(exported.bundle).toBeDefined())
+    And('the bundle contains the workflows "development, analysis-first"', () =>
+      expect(names(exported.bundle?.workflows ?? [])).toBe('analysis-first, development'),
+    )
+  })
+
+  Scenario('A cycle in what workflows need terminates', ({ Given, And, When, Then }) => {
+    Given('"development" needs "analysis-first"', givenNeeds)
+    And('"analysis-first" needs "development"', () => {
+      box.workflow(
+        projectScope,
+        'analysis-first',
+        'name: analysis-first\nneeds: [development]\nphases: [analysis]\n',
+      )
+    })
+    When('I export "development"', () => doExport())
+    Then('the export succeeds', () => expect(exported.bundle).toBeDefined())
+    And('the bundle contains 2 workflows', () =>
+      expect(exported.bundle?.workflows ?? []).toHaveLength(2),
     )
   })
 
@@ -328,6 +361,56 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     And('nothing it wrote fails to validate', () => {
       const reread = readBundleFile(join(examplesRoot(), 'development.bundle.yaml'), host)
       expect(reread.problems).toEqual([])
+    })
+  })
+
+  Rule('a bundle can carry a profile, and need not carry a workflow', ({ RuleScenario }) => {
+    const profileFile = (name: string): string =>
+      join(userScope, 'profiles', `${name}.profile.yaml`)
+    const shipped = (): void => {
+      read = readBundleFile(join(examplesRoot(), 'build-tools.bundle.yaml'), host)
+    }
+
+    RuleScenario('A bundle of only a profile reads', ({ Given, When, Then, And }) => {
+      Given('the bundle Factory ships for build tools', shipped)
+      When('it is read', () => {})
+      Then('reading succeeds', () =>
+        expect(read.problems, JSON.stringify(read.problems)).toEqual([]),
+      )
+      And('it carries the profile "build-tools"', () => {
+        expect((read.bundle as Bundle).profiles.map((p) => p.name)).toEqual(['build-tools'])
+      })
+      And('it names no entry workflow', () =>
+        expect((read.bundle as Bundle).entry).toBeUndefined(),
+      )
+    })
+
+    RuleScenario('Importing it writes the profile into the scope', ({ Given, When, Then }) => {
+      Given('the bundle Factory ships for build tools', shipped)
+      When('I import it into the user scope', () => {
+        applied = importBundle({ chain, host, bundle: read.bundle as Bundle, scope: 'user' })
+      })
+      Then('the profile "build-tools" is in the user scope', () => {
+        expect(applied.problems, JSON.stringify(applied.problems)).toEqual([])
+        expect(existsSync(profileFile('build-tools'))).toBe(true)
+      })
+    })
+
+    RuleScenario('A prefix renames the profile on the way in', ({ Given, When, Then }) => {
+      Given('the bundle Factory ships for build tools', shipped)
+      When('I import it into the user scope with the prefix "acme-"', () => {
+        applied = importBundle({
+          chain,
+          host,
+          bundle: read.bundle as Bundle,
+          scope: 'user',
+          prefix: 'acme-',
+        })
+      })
+      Then('the profile "acme-build-tools" is in the user scope', () => {
+        expect(applied.problems, JSON.stringify(applied.problems)).toEqual([])
+        expect(existsSync(profileFile('acme-build-tools'))).toBe(true)
+      })
     })
   })
 })

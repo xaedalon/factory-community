@@ -1,10 +1,12 @@
 import { spawn } from 'node:child_process'
+import { closeSync, openSync } from 'node:fs'
 import type { EventBus } from '@factory/events'
 import type { Problem } from '../problems.js'
 import type { ResolvedPhase, ResolvedPlan, ResolvedStep } from '../plan/resolve.js'
 import { retryPolicy } from '../schema/step.js'
 import { agentEnvironment, withheldMessage } from '../security/environment.js'
-import { DenialScanner, type Denial } from '../security/denials.js'
+import { DenialScanner, refusalDenial, type Denial } from '../security/denials.js'
+import type { StreamEvent } from '../providers/stream.js'
 import {
   processGroup,
   type ProcessRegistry,
@@ -398,12 +400,32 @@ function runStep(
       options.onOutput?.(`${withheldMessage(filtered.withheld)}\n`, 'stderr', step, phase)
     }
 
+    // `stdin:` on a planned step is a file to redirect in, which several agent
+    // CLIs need to run headless. It was carried this far and then dropped:
+    // `--dry-run` printed `< prompt.txt` and the process got nothing. Opened
+    // here rather than in the plan, because a plan is pure and a file
+    // descriptor is not.
+    let input: number | undefined
+    if (step.planned.stdin !== undefined) {
+      try {
+        input = openSync(step.planned.stdin, 'r')
+      } catch (error) {
+        // The step's failure, not the runner's. Reported the way a command
+        // that will not start is reported, because that is what it is.
+        const because = error instanceof Error ? error.message : String(error)
+        options.onOutput?.(`cannot open ${step.planned.stdin}: ${because}\n`, 'stderr', step, phase)
+        resolve({ ...base, exitCode: null, timedOut: false, error: because })
+        return
+      }
+    }
+
     const child = spawn(step.planned.command, [...args], {
       cwd: phase.cwd,
       env: { ...filtered.env, ...step.planned.env },
-      // A step that expects input has nobody to provide it. Closing stdin makes
-      // it fail fast instead of blocking until the deadline.
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // A step that expects input and asked for none has nobody to provide it.
+      // Closing stdin makes it fail fast instead of blocking until the
+      // deadline.
+      stdio: [input ?? 'ignore', 'pipe', 'pipe'],
       // Its own process group, which is what makes stopping it possible at all.
       // A step is almost always `bash -c '…'`, and the work is a grandchild:
       // signalling the one pid killed the shell and left `npm test` running.
@@ -412,6 +434,10 @@ function runStep(
       // exactly what the run is waiting for.
       detached: true,
     })
+
+    // The child has its own duplicate of the descriptor by now, so this one is
+    // ours to close — and leaving it open would leak one per step.
+    if (input !== undefined) closeSync(input)
 
     // Registered before anything can be awaited, so there is no window in which
     // a running process is unknown to the thing that stops processes.
@@ -440,7 +466,36 @@ function runStep(
     // Watched for refusals as it goes, because a confined agent reports being
     // refused and then exits 0 — there is no failure to inspect afterwards.
     const scanner = new DenialScanner(step.planned.denialPatterns ?? [])
+    // A refusal the provider stated outright, rather than one read out of its
+    // prose. Kept separate from the scanner's findings until they are joined at
+    // the end, because they are found by different means and only one of them
+    // can name a command.
+    const stated = new Map<string, Denial>()
+
+    // One reader per step, never shared: it remembers tool-use ids so that a
+    // denial arriving three events later can still say which command it was.
+    const reader = step.planned.stream?.()
+    const consume = (events: readonly StreamEvent[]): void => {
+      for (const event of events) {
+        if (event.scan !== undefined) scanner.push(event.scan)
+        if (event.refused !== undefined) {
+          const denial = refusalDenial(event.refused)
+          if (!stated.has(denial.id)) stated.set(denial.id, denial)
+        }
+        if (event.log !== undefined) {
+          options.onOutput?.(event.log.text, event.log.stream, step, phase)
+        }
+      }
+    }
+
     const observe = (text: string, stream: 'stdout' | 'stderr'): void => {
+      // stderr is not the transcript. A CLI writes its warnings and its crash
+      // there, and feeding those to a JSON reader would swallow exactly the
+      // output somebody debugging a failed run needs.
+      if (reader !== undefined && stream === 'stdout') {
+        consume(reader.push(text))
+        return
+      }
       scanner.push(text)
       options.onOutput?.(text, stream, step, phase)
     }
@@ -451,7 +506,10 @@ function runStep(
     const done = (partial: StepOutcome) => {
       if (settled) return
       settled = true
-      const found = scanner.denials()
+      // Whatever never got its newline. A process that is killed mid-line still
+      // owes its last event.
+      if (reader !== undefined) consume(reader.end())
+      const found = [...stated.values(), ...scanner.denials()]
       const outcome: StepOutcome = {
         ...partial,
         ...(found.length === 0 ? {} : { denials: found }),

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { RELIABILITY_DIMENSIONS, type ReliabilityDimension } from '../reliability/model.js'
 import type { Problem } from '../problems.js'
 import { closedWithExtensions, extensionsOf, problemsFromZod, slug, variables } from './common.js'
 
@@ -90,6 +91,27 @@ const workflowShape = {
    * run the built-in copy.
    */
   override: z.enum(OVERRIDE).optional(),
+  /**
+   * What this workflow contributes to the task's reliability.
+   *
+   * Optional with no default, for the reason `conditions` is: a default would
+   * add empty keys to every workflow anybody saves.
+   *
+   * Absent does **not** mean invisible. Every run is judged, because any
+   * workflow can change the project — including one somebody wrote this
+   * morning and told Factory nothing about. What this block buys is *precision*:
+   * a workflow that names the evidence it collects earns coverage for it, and
+   * a workflow that names the dimensions it touches has its failures attributed
+   * to them instead of spread. Without it Factory still sees the exit codes,
+   * the refusals and the artifacts, which is most of the value.
+   */
+  reliability: z
+    .object({
+      contributes: z.array(z.enum(RELIABILITY_DIMENSIONS)).default([]),
+      expected_evidence: z.array(z.string().min(1)).default([]),
+      evaluate_after_run: z.boolean().optional(),
+    })
+    .optional(),
   phases: z.array(slug('phase name')).default([]),
 }
 
@@ -102,6 +124,19 @@ const workflowYaml = closedWithExtensions(workflowShape)
  * fails the build until the writer is taught about it. See schema/fields.ts.
  */
 export const workflowSchemaKeys: readonly string[] = Object.keys(workflowShape)
+
+/**
+ * A workflow's own account of what it adds to a judgement.
+ *
+ * `evaluate_after_run` is the one switch: false means this workflow's runs are
+ * not judged at all, which is for the handful that change nothing worth judging
+ * — a worktree being created, an environment torn down.
+ */
+export interface WorkflowReliability {
+  readonly contributes: readonly ReliabilityDimension[]
+  readonly expected_evidence: readonly string[]
+  readonly evaluate_after_run?: boolean
+}
 
 export interface WorkflowConditions {
   /** Flags that must be set on the task before this workflow may run. */
@@ -141,6 +176,8 @@ export interface Workflow {
   readonly onFail?: string
   /** Set when a project must supply its own copy before this may be used. */
   readonly override?: Override
+  /** What this workflow says it contributes to reliability. Absent is not invisible. */
+  readonly reliability?: WorkflowReliability
   readonly phases: readonly string[]
   /** `x-` fields, carried through untouched. */
   readonly extensions: Readonly<Record<string, unknown>>
@@ -191,6 +228,21 @@ export function parseWorkflow(
     })
   }
 
+  // A warning rather than an error, deliberately. The builder writes a workflow
+  // before its phases are chosen, so refusing the file would make it impossible
+  // to create one in the browser at all. What must not happen is *running* it,
+  // and `resolvePlan` refuses that — this is the earlier, gentler notice, at the
+  // point somebody can still see it in the editor.
+  if (value.phases.length === 0) {
+    problems.push({
+      severity: 'warning',
+      message: 'Workflow lists no phases, so it will do nothing',
+      ...(options.file === undefined ? {} : { file: options.file }),
+      field: 'phases',
+      rule: 'workflow.noPhases',
+    })
+  }
+
   const duplicates = value.phases.filter((name, index) => value.phases.indexOf(name) !== index)
   for (const name of new Set(duplicates)) {
     problems.push({
@@ -235,6 +287,9 @@ export function parseWorkflow(
     needs: value.needs,
     ...(value.on_fail === undefined ? {} : { onFail: value.on_fail }),
     ...(value.override === undefined ? {} : { override: value.override }),
+    ...(value.reliability === undefined
+      ? {}
+      : { reliability: value.reliability as WorkflowReliability }),
     phases: value.phases,
     extensions: extensionsOf(value),
   }

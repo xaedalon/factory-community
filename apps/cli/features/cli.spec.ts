@@ -1,6 +1,7 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -14,7 +15,8 @@ import { fileURLToPath } from 'node:url'
 import { DISCLAIMER_VERSION } from '@factory/core'
 import { run } from '../src/main.js'
 import type { CommandResult } from '../src/context.js'
-import { DaemonError, type DaemonClient } from '../src/daemon.js'
+import { DaemonError, createDaemonClient, type DaemonClient } from '../src/daemon.js'
+import { createServer, type Server } from 'node:http'
 
 const feature = await loadFeature(fileURLToPath(new URL('./cli.feature', import.meta.url)))
 
@@ -57,6 +59,20 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     updatedAt: '2026-01-01T00:00:00.000Z',
     ...over,
   })
+
+  /** A daemon that knows about these projects and nothing else. */
+  const daemonWithProjects = (...names: string[]) => (): void => {
+    asked = []
+    daemon = fakeDaemon((path, method) =>
+      method === 'POST'
+        ? { task: task({ state: 'draft' }), actions: [{ action: 'queue', label: 'Queue' }] }
+        : path.startsWith('/api/projects')
+          ? { items: names.map((name, index) => ({ id: `pr-${index + 1}`, name })) }
+          : { items: [] },
+    )
+  }
+  const createdIn = () =>
+    (asked.find((entry) => entry.method === 'POST')?.body as { projectId?: string })?.projectId
 
   const file = (path: string, contents: string) => {
     mkdirSync(dirname(path), { recursive: true })
@@ -112,7 +128,14 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     output = [...streamed, ...result.lines].join('\n')
   }
 
-  AfterEachScenario(() => rmSync(root, { recursive: true, force: true }))
+  /** A stub daemon for the one scenario that needs a real HTTP answer. */
+  let stubServer: Server | undefined
+
+  AfterEachScenario(() => {
+    stubServer?.close()
+    stubServer = undefined
+    rmSync(root, { recursive: true, force: true })
+  })
 
   // All setup lives in the Background step, not in BeforeEachScenario: the
   // runner executes Background steps FIRST, so anything built in
@@ -244,6 +267,58 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   Scenario('doctor is quiet when nothing is wrong', ({ When, Then }) => {
     When('I run "doctor"', () => invoke('doctor'))
     Then('the output reports the number of rules run', () => expect(output).toContain('rule(s)'))
+  })
+
+  Scenario('doctor says what it could not check without a daemon', ({ When, Then }) => {
+    When('I run "doctor"', () => invoke('doctor'))
+    Then('the output says the running checks were not run', () =>
+      expect(output).toContain('need a running daemon'),
+    )
+  })
+
+  Scenario('doctor adds what the daemon found', ({ Given, When, Then, And }) => {
+    Given('a daemon reporting a problem of its own', () => {
+      daemon = fakeDaemon(() => ({
+        problems: [
+          {
+            severity: 'warning',
+            message: 'Project "work" has Factory\'s own output committed to git.',
+            rule: 'doctor.productOutputTracked',
+          },
+        ],
+      }))
+    })
+    When('I run "doctor"', () => invoke('doctor'))
+    Then("the output carries the daemon's problem", () =>
+      expect(output).toContain('committed to git'),
+    )
+    And('it does not say the running checks were missed', () =>
+      expect(output).not.toContain('need a running daemon'),
+    )
+  })
+
+  Scenario('a problem both halves found is reported once', ({ Given, When, Then }) => {
+    Given('a daemon reporting a problem this installation also has', () => {
+      workflow(projectScope, 'dangling', 'name: dangling\nphases: [nowhere]\n')
+      // Word for word what the local rule produces, because that is what the
+      // daemon running the same rule over its own chain would send back. An
+      // approximation here would dedupe nothing and the scenario would pass
+      // without the thing it is about ever happening.
+      daemon = fakeDaemon(() => ({
+        problems: [
+          {
+            severity: 'error',
+            message:
+              'Workflow "dangling" names a phase "nowhere" that does not exist in any scope.',
+            rule: 'doctor.missingPhase',
+          },
+        ],
+      }))
+    })
+    When('I run "doctor"', () => invoke('doctor'))
+    Then('the problem appears once', () =>
+      expect(output.split('does not exist in any scope').length - 1).toBe(1),
+    )
   })
 
   Scenario('doctor reports a definition that does not validate', ({ Given, When, Then, And }) => {
@@ -420,14 +495,9 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   })
 
   Scenario('a task is created with its workflows in order', ({ Given, When, Then, And }) => {
-    Given('a daemon with no tasks', () => {
-      asked = []
-      daemon = fakeDaemon((path, method) =>
-        method === 'POST'
-          ? { task: task({ state: 'draft' }), actions: [{ action: 'queue', label: 'Queue' }] }
-          : { items: [] },
-      )
-    })
+    // One project, because a task needs one — and with exactly one there is
+    // nothing for the command line to say about it.
+    Given('a daemon with no tasks', daemonWithProjects('work'))
     When('I run "task new Add due dates --workflow worktree-create --workflow development"', () =>
       invoke('task new Add due dates --workflow worktree-create --workflow development'),
     )
@@ -442,6 +512,76 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
     And('the output says how to start it', () =>
       expect(output).toContain('factory task queue'),
     )
+  })
+
+  Scenario('a task is moved to another project', ({ Given, When, Then, And }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', () => {
+      asked = []
+      daemon = fakeDaemon((path, method) =>
+        method === 'PATCH'
+          ? { task: task({ state: 'draft' }) }
+          : path.startsWith('/api/projects')
+            ? { items: [{ id: 'pr-1', name: 'work' }, { id: 'pr-2', name: 'elsewhere' }] }
+            : { items: [task()] },
+      )
+    })
+    When('I run "task move task-1 elsewhere"', () => invoke('task move task-1 elsewhere'))
+    Then('the daemon was asked to move it to "elsewhere"', () => {
+      const patch = asked.find((entry) => entry.method === 'PATCH')
+      expect((patch?.body as { projectId: string }).projectId).toBe('pr-2')
+    })
+    And('the output says where it is now', () => expect(output).toContain('elsewhere'))
+  })
+
+  Scenario('moving to a project that is not there says which exist', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', () => {
+      asked = []
+      daemon = fakeDaemon((path) =>
+        path.startsWith('/api/projects')
+          ? { items: [{ id: 'pr-1', name: 'work' }, { id: 'pr-2', name: 'elsewhere' }] }
+          : { items: [task()] },
+      )
+    })
+    When('I run "task move task-1 nowhere"', () => invoke('task move task-1 nowhere'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output names both projects', () => {
+      expect(output).toContain('work')
+      expect(output).toContain('elsewhere')
+    })
+  })
+
+  Scenario('a task lands in the only project there is', ({ Given, When, Then }) => {
+    Given('a daemon with one project "work"', daemonWithProjects('work'))
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('the daemon was asked to create it in "work"', () => expect(createdIn()).toBe('pr-1'))
+  })
+
+  Scenario('with no project there is nowhere to put a task', ({ Given, When, Then, And }) => {
+    Given('a daemon with no projects', daemonWithProjects())
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output contains "needs a project"', () =>
+      expect(output).toContain('needs a project'),
+    )
+    And('the output says how to add one', () =>
+      expect(output).toContain('factory project add'),
+    )
+  })
+
+  Scenario('with more than one project the task says which', ({ Given, When, Then, And }) => {
+    Given('a daemon with the projects "work" and "elsewhere"', daemonWithProjects('work', 'elsewhere'))
+    When('I run "task new Add due dates"', () => invoke('task new Add due dates'))
+    Then('it fails', () => expect(result.exitCode).toBe(1))
+    And('the output contains "--project"', () => expect(output).toContain('--project'))
+    And('the output names both projects', () => {
+      expect(output).toContain('work')
+      expect(output).toContain('elsewhere')
+    })
   })
 
   Scenario('showing a task lists what it can do next', ({ Given, When, Then }) => {
@@ -502,6 +642,79 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       expect(output).toContain('Cannot reach the Factory daemon'),
     )
     And('the output contains "factory-daemon"', () => expect(output).toContain('factory-daemon'))
+  })
+
+  Scenario('a run can be tried under a profile before it is chosen for a project', ({
+    Given,
+    And,
+    When,
+    Then,
+  }) => {
+    Given('the project defines the profile "buildtools" allowing "cargo"', () => {
+      file(
+        join(projectScope, 'profiles', 'buildtools.profile.yaml'),
+        'kind: factory.profile/v1\nname: buildtools\ncommands: [cargo]\n',
+      )
+    })
+    And('a workflow whose step runs an agent', () => {
+      file(join(projectScope, 'workflows', 'build.workflow.yaml'), 'name: build\nphases: [make]\n')
+      file(
+        join(projectScope, 'phases', 'make.phase.yaml'),
+        'name: make\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    })
+    When('I run "run build --dry-run --profile buildtools"', () =>
+      invoke('run build --dry-run --profile buildtools'),
+    )
+    Then('the command succeeds', () => expect(result.exitCode).toBe(0))
+    And('the printed command allows "Bash(cargo *)"', () =>
+      expect(streamed.join("\n")).toContain("Bash(cargo *)"),
+    )
+  })
+
+  Scenario('a run under a profile nobody wrote is refused', ({ Given, When, Then, And }) => {
+    Given('a workflow whose step runs an agent', () => {
+      file(join(projectScope, 'workflows', 'build.workflow.yaml'), 'name: build\nphases: [make]\n')
+      file(
+        join(projectScope, 'phases', 'make.phase.yaml'),
+        'name: make\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    })
+    When('I run "run build --dry-run --profile nowhere"', () =>
+      invoke('run build --dry-run --profile nowhere'),
+    )
+    Then('the command fails', () => expect(result.exitCode).toBe(1))
+    And('the output says no scope defines that profile', () =>
+      expect(result.lines.join('\n')).toContain('no scope defines one by that name'),
+    )
+  })
+
+  Scenario('an answer that is not JSON is explained rather than failing on nothing', ({
+    Given,
+    When,
+    Then,
+    And,
+  }) => {
+    // The real client, not the stub: this is about how a response is *read*,
+    // and a stub that returns objects can never produce the failure.
+    Given('a daemon that answers with a page instead of JSON', async () => {
+      const server = createServer((_request, response) => {
+        response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+        response.end('<!doctype html><title>Factory</title><div id="app"></div>')
+      })
+      stubServer = server
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve))
+      const port = (server.address() as { port: number }).port
+      daemon = createDaemonClient({ FACTORY_URL: `http://127.0.0.1:${String(port)}` })
+    })
+    When('I run "task list"', () => invoke('task list'))
+    Then('the command fails', () => expect(result.exitCode).toBe(1))
+    And('the output says the answer was not JSON', () =>
+      expect(result.lines.join('\n')).toContain('not JSON'),
+    )
+    And('the output names the request', () =>
+      expect(result.lines.join('\n')).toContain('/api/tasks'),
+    )
   })
 
   Scenario('the short id the listing prints is enough to act on', ({ Given, When, Then }) => {
@@ -626,6 +839,106 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         expect(started).toBeDefined()
         expect(output).toContain(`--resume ${started as string}`)
       })
+    })
+  })
+
+  Rule('a foreground run says what the agent was refused, and does not call it success', ({
+    RuleScenario,
+  }) => {
+    /**
+     * A stand-in for the agent CLI that speaks its transcript format.
+     *
+     * Pointed at through `providers.claude.command`, which is the documented
+     * way to tell Factory where an agent is — so everything downstream is the
+     * real thing: the real descriptor, the real reader, the real runner and
+     * the real command. Only the binary is a stub, because a scenario that
+     * needed a logged-in Claude Code would run nowhere.
+     *
+     * The shapes are the ones measured on 2.1.281, including the `result`
+     * event that says `success` on the run where the command was refused.
+     */
+    const stubAgent = (denied?: string): string => {
+      const path = join(root, 'stub-agent')
+      const events = [
+        JSON.stringify({ type: 'system', subtype: 'init' }),
+        ...(denied === undefined
+          ? []
+          : [
+              JSON.stringify({
+                type: 'assistant',
+                message: {
+                  content: [
+                    { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: denied } },
+                  ],
+                },
+              }),
+              JSON.stringify({
+                type: 'system',
+                subtype: 'permission_denied',
+                tool_use_id: 'toolu_1',
+                message: 'Permission for this tool use was denied.',
+              }),
+            ]),
+        JSON.stringify({
+          type: 'assistant',
+          message: { content: [{ type: 'text', text: 'All done.' }] },
+        }),
+        JSON.stringify({ type: 'result', subtype: 'success', is_error: false }),
+      ]
+      // Exits 0, like the real thing on a run whose command was refused. That
+      // is the entire point of the scenario.
+      file(path, `#!/bin/sh\n${events.map((line) => `echo '${line}'`).join('\n')}\nexit 0\n`)
+      chmodSync(path, 0o755)
+      file(
+        join(projectScope, 'config.yaml'),
+        `kind: factory.scope/v1\nscope: project\nproviders:\n  claude:\n    command: ${path}\n`,
+      )
+      return path
+    }
+    const agentPhase = (): void => {
+      workflow(projectScope, 'probe', 'name: probe\nphases: [work]\n')
+      phase(
+        projectScope,
+        'work',
+        'name: work\nsteps: [{uses: agent, provider: claude, prompt: go}]\n',
+      )
+    }
+
+    RuleScenario('A refused command is named, and the run does not succeed', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('an agent whose transcript reports "pnpm install" denied', () => {
+        stubAgent('pnpm install')
+      })
+      And('the project defines a workflow with one agent phase', agentPhase)
+      When('I run "run probe --yes"', () => invoke('run probe --yes'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+      // On one line, and the refusal's own. `toContain('pnpm install')` alone
+      // passes on the trace line the tool call already wrote, and kept passing
+      // with the refusal report deleted entirely.
+      And('one line says that command did not run, and names it', () => {
+        const line = output.split('\n').find((text) => text.includes('did not run'))
+        expect(line, output).toBeDefined()
+        expect(line).toContain('pnpm install')
+      })
+      // The summary line itself, not the absence of the word anywhere: the
+      // agent's own prose is in this output too.
+      And('the output does not say the run completed', () =>
+        expect(output).not.toContain('Completed.'),
+      )
+    })
+
+    RuleScenario('A run with nothing refused still succeeds', ({ Given, And, When, Then }) => {
+      Given('an agent whose transcript reports no refusal', () => {
+        stubAgent()
+      })
+      And('the project defines a workflow with one agent phase', agentPhase)
+      When('I run "run probe --yes"', () => invoke('run probe --yes'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says the run completed', () => expect(output).toContain('Completed.'))
     })
   })
 
@@ -1213,6 +1526,307 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       When('I run "project add work"', () => invoke('project add work'))
       Then('the exit code is 2', () => expect(result.exitCode).toBe(2))
       And('the output mentions "<path>"', () => expect(output).toContain('<path>'))
+    })
+  })
+  Rule('`factory mcp` serves the protocol and says nothing else', ({ RuleScenario }) => {
+    /** A pipe of strings: what the client sent, and what came back where. */
+    let sent: string[] = []
+    let written: string[] = []
+    let errors: string[] = []
+    /** Whether anything ever asked stdin for a chunk. */
+    let read = false
+    let atATerminal = false
+
+    const pipe = () => ({
+      input: {
+        async *[Symbol.asyncIterator]() {
+          read = true
+          for (const chunk of sent) yield chunk
+        },
+      },
+      output: { write: (text: string) => void written.push(text) },
+      error: { write: (text: string) => void errors.push(text) },
+    })
+    const frames = () =>
+      written
+        .join('')
+        .split('\n')
+        .filter((line) => line !== '')
+        .map((line) => JSON.parse(line) as { result?: { tools?: { name: string }[] } })
+
+    const serveIt = async (): Promise<void> => {
+      streamed = []
+      written = []
+      errors = []
+      read = false
+      result = await run({
+        argv: ['mcp'],
+        cwd: workDir,
+        env: { FACTORY_HOME: userScope, FACTORY_URL: 'http://127.0.0.1:9', PATH: '/usr/bin:/bin' },
+        write: (text) => streamed.push(text),
+        // Handed over exactly as `bin.ts` hands them over: always, with the
+        // terminal reported separately. Leaving them out here would specify a
+        // shape the product does not produce, which is how the hang survived.
+        streams: pipe(),
+        stdinIsTty: atATerminal,
+      })
+      output = [...streamed, ...result.lines].join('\n')
+    }
+
+    RuleScenario('It answers a client over the pipe it was given', ({ Given, When, Then, And }) => {
+      Given('a client that initializes and lists the tools', () => {
+        atATerminal = false
+        sent = [
+          `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'a-client' } } })}\n`,
+          `${JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' })}\n`,
+        ]
+      })
+      When('I run "mcp"', serveIt)
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('two frames were written to the pipe', () => expect(frames()).toHaveLength(2))
+      // The whole contract of stdio transport, asserted rather than assumed:
+      // `bin.ts` prints every line a command returns, so this one returns none.
+      And('nothing was printed', () => expect(output).toBe(''))
+      And('the tools include "factory_project_current"', () =>
+        expect(frames()[1]?.result?.tools?.map((tool) => tool.name)).toContain(
+          'factory_project_current',
+        ),
+      )
+    })
+
+    RuleScenario('At a terminal it explains itself rather than waiting', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a person typing it, with a terminal on stdin', () => {
+        atATerminal = true
+        // A frame is waiting, so a server that read stdin would find one and
+        // answer it. Nothing should.
+        sent = [`${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })}\n`]
+      })
+      When('I run "mcp"', serveIt)
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+      And('the output says an MCP client starts it', () =>
+        expect(output).toContain('An MCP client starts it'),
+      )
+      And("the output shows what to put in a client's configuration", () =>
+        expect(output).toContain('"mcpServers"'),
+      )
+      And('nothing was read from stdin', () => {
+        expect(read).toBe(false)
+        expect(written).toEqual([])
+      })
+    })
+
+    RuleScenario('Given no streams at all it says the same thing', ({ When, Then, And }) => {
+      When('I run "mcp" with no pipe at all', () => invoke('mcp'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+      And('the output says an MCP client starts it', () =>
+        expect(output).toContain('An MCP client starts it'),
+      )
+    })
+
+    RuleScenario('It is in the help', ({ When, Then }) => {
+      When('I run "--help"', () => invoke('--help'))
+      Then('the output mentions "factory mcp"', () => expect(output).toContain('factory mcp'))
+    })
+  })
+
+  Rule('how much to trust a task, from a terminal', ({ RuleScenario }) => {
+    const TASK_ID = 'abc123de-0000-4000-8000-000000000000'
+
+    /**
+     * A daemon that knows one task and whatever this scenario says about it.
+     *
+     * The short id has to be expanded first, so every one of these answers the
+     * task listing too — which is also what makes the "no such task" scenario
+     * mean something rather than failing on the wrong request.
+     */
+    const answering = (routes: Record<string, unknown>) => (): void => {
+      asked = []
+      daemon = fakeDaemon((path) => {
+        for (const [suffix, value] of Object.entries(routes)) {
+          if (path.includes(suffix)) return value
+        }
+        if (path.startsWith('/api/tasks?')) {
+          return { items: [{ id: TASK_ID, name: 'Add due dates' }] }
+        }
+        return { items: [] }
+      })
+    }
+
+    const summary = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
+      state: 'assessed',
+      score: 88,
+      rawScore: 88,
+      coverage: 70,
+      delta: -3,
+      dimensions: { understanding: 90, regressionSafety: 84 },
+      caps: [],
+      attention: { agent: 1, developer: 0, either: 0, external: 0, potential: {} },
+      ...over,
+    })
+    const withSummary = (over: Record<string, unknown> = {}) =>
+      answering({ '/reliability': { reliability: summary(over) } })
+
+    const says = (fragment: string) => (): void => expect(output).toContain(fragment)
+
+    RuleScenario('A task nobody has judged says so, and how to fix that', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a daemon that says the task is unassessed', () =>
+        withSummary({
+          state: 'unassessed',
+          score: undefined,
+          attention: { agent: 0, developer: 0, either: 0, external: 0, potential: {} },
+        })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says it is not assessed', says('not assessed'))
+      And('the output names the command that would assess it', says('reliability abc123 assess'))
+    })
+
+    RuleScenario('A judged task shows the score and the coverage together', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('a daemon that says the task scores 88', () => withSummary()())
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says 88', says('88'))
+      And('the output says the coverage', says('70%'))
+    })
+
+    RuleScenario('A fall is shown with an arrow, not with colour alone', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a daemon that says the task scores 88', () => withSummary()())
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      // Colour is stripped by NO_COLOR in this suite, which is the point: the
+      // direction has to survive without it.
+      Then('the output shows a downward movement', says('↓ -3'))
+    })
+
+    RuleScenario('A cap is explained where it is applied', ({ Given, When, Then }) => {
+      Given('a daemon that says the task is capped', () =>
+        withSummary({
+          score: 70,
+          rawScore: 96,
+          caps: [{ type: 'criticalOpenDriver', value: 70, reason: 'A critical risk is still open.' }],
+        })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('the output says what capped it', says('A critical risk is still open.'))
+    })
+
+    RuleScenario('A stale assessment says so', ({ Given, When, Then }) => {
+      Given('a daemon that says the assessment is stale', () =>
+        withSummary({ state: 'stale', staleReason: 'One run has finished since this was assessed.' })(),
+      )
+      When('I run "reliability abc123"', () => invoke('reliability abc123'))
+      Then('the output says it is stale', says('Stale'))
+    })
+
+    RuleScenario('The drivers are listed with their owner', ({ Given, When, Then, And }) => {
+      Given('a daemon with one driver on the task', () =>
+        answering({
+          '/reliability/drivers': {
+            items: [
+              {
+                id: 'driver-1',
+                title: 'checkout regression',
+                description: '',
+                type: 'regression',
+                severity: 'high',
+                status: 'open',
+                owner: 'agent',
+                dimension: 'regressionSafety',
+                scoreImpact: -3,
+              },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 drivers"', () => invoke('reliability abc123 drivers'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output names the driver', says('checkout regression'))
+      And('the output says who should resolve it', says('agent'))
+    })
+
+    RuleScenario('A task with nothing outstanding says so', ({ Given, When, Then }) => {
+      Given('a daemon with no drivers on the task', () =>
+        answering({ '/reliability/drivers': { items: [] } })(),
+      )
+      When('I run "reliability abc123 drivers"', () => invoke('reliability abc123 drivers'))
+      Then('the output says nothing is holding it back', says('Nothing is holding this task back'))
+    })
+
+    RuleScenario('The next actions are estimates and say so', ({ Given, When, Then, And }) => {
+      Given('a daemon offering one next action', () =>
+        answering({
+          '/reliability/next-actions': {
+            currentScore: 88,
+            actions: [
+              {
+                driverId: 'driver-1',
+                title: 'checkout regression',
+                owner: 'agent',
+                severity: 'high',
+                impact: 3,
+                actionType: 'agent_investigation',
+                label: 'Investigate: checkout regression',
+              },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 next"', () => invoke('reliability abc123 next'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output says they are estimates', says('Estimates'))
+    })
+
+    RuleScenario('History reads oldest first', ({ Given, When, Then, And }) => {
+      Given('a daemon with two assessments on the task', () =>
+        answering({
+          '/reliability/history': {
+            items: [
+              { sequence: 1, workflow: 'implement', score: 82, coverage: 50, delta: 82, summary: 'first', createdAt: '' },
+              { sequence: 2, workflow: 'verify', score: 88, coverage: 90, delta: 6, summary: 'second', createdAt: '' },
+            ],
+          },
+        })(),
+      )
+      When('I run "reliability abc123 history"', () => invoke('reliability abc123 history'))
+      Then('it succeeds', () => expect(result.exitCode).toBe(0))
+      And('the output reads 82 before 88', () =>
+        expect(output.indexOf('82')).toBeLessThan(output.indexOf('88')),
+      )
+    })
+
+    RuleScenario('A task nobody can find is refused clearly', ({ Given, When, Then }) => {
+      Given('a daemon with no such task', () => {
+        asked = []
+        daemon = fakeDaemon(() => ({ items: [] }))
+      })
+      When('I run "reliability nope"', () => invoke('reliability nope'))
+      Then('it fails', () => expect(result.exitCode).not.toBe(0))
+    })
+
+    RuleScenario('There is no way to set a score', ({ When, Then }) => {
+      When('I run "reliability abc123 set 100"', () => invoke('reliability abc123 set 100'))
+      // Exit code 2, which is what this CLI uses for "that is not a command" —
+      // and the verb does not exist rather than being refused.
+      Then('it is a usage error', () => expect(result.exitCode).toBe(2))
     })
   })
 })

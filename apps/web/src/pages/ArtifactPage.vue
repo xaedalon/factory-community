@@ -53,7 +53,7 @@ const when = (iso: string): string => new Date(iso).toLocaleString()
   <div class="px-8 py-6">
     <RouterLink
       :to="`/tasks/${taskId}`"
-      class="mb-4 inline-block font-mono text-[11px] text-[var(--color-accent)] hover:underline"
+      class="mb-4 inline-block font-mono text-meta text-[var(--color-accent-text)] hover:underline"
       data-testid="back-to-task"
     >
       ← back to the task
@@ -71,7 +71,7 @@ const when = (iso: string): string => new Date(iso).toLocaleString()
       <!-- The path, as the prototype shows it: this is the file on disk, and
            knowing where it is is half of why you opened the page. -->
       <p
-        class="mb-4 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-[11px] break-all text-[var(--color-ink-faint)]"
+        class="mb-4 rounded-md border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2 font-mono text-meta break-all text-[var(--color-ink-faint)]"
         data-testid="artifact-path"
       >
         {{ detail.path }}
@@ -84,14 +84,14 @@ const when = (iso: string): string => new Date(iso).toLocaleString()
         class="mb-4 flex flex-wrap items-center gap-2"
         data-testid="artifact-versions"
       >
-        <span class="font-mono text-[10px] tracking-wider text-[var(--color-ink-faint)] uppercase">
+        <span class="font-mono text-label text-[var(--color-ink-faint)] uppercase">
           Versions
         </span>
         <button
           v-for="(version, index) in detail.versions"
           :key="version.runId"
           type="button"
-          class="rounded-md border px-2 py-1 font-mono text-[10px]"
+          class="rounded-md border px-2 py-1 font-mono text-meta"
           :class="
             index === at
               ? 'border-[var(--color-accent)] text-[var(--color-ink)]'

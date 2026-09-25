@@ -1,0 +1,430 @@
+Feature: The tools an agent is given
+  Every tool over one HTTP API. What matters is not that each one reaches a
+  route — that part is arithmetic — but what comes back, because the reader is a
+  model deciding what to do next and it will act on whatever it is told.
+
+  The count used to be written here, and was wrong twice: fifteen while there
+  were twenty-two. A number nothing checks is a number that rots, so the tools
+  are counted by the scenario below instead, which fails when the documented
+  list and the registered one disagree.
+
+  So three things are served rather than worked out here. What a task will
+  accept right now comes from the daemon, which is the same list the board draws
+  its buttons from; a client that re-derived it would offer something the daemon
+  refuses. Which workflows a project can run comes from the project's own scope
+  chain. And a truncated log says it is truncated, because a log that lost its
+  middle and reads like a complete one is how an agent concludes a build passed.
+
+  What is deliberately *not* here: a tool to start a run, and a tool to cancel
+  one. Nothing in Factory starts a run directly — queueing a task is what starts
+  work and cancelling it is what stops work — so both are actions on a task, and
+  a second way to do either would be a second set of rules to keep honest.
+
+  Background:
+    Given a Factory with the project "factory"
+    And an agent working in that project
+
+  Rule: the documented tools are the registered tools
+
+    `docs/mcp.md` is how somebody decides whether Factory can do what they need
+    before installing anything, and it was hand-maintained against a list that
+    grew underneath it. A tool nobody documented is a tool nobody uses; a
+    documented tool that does not exist is worse.
+
+    Scenario: Every tool an agent is given is written down
+      Then every registered tool is listed in the documentation
+
+    Scenario: Nothing is documented that does not exist
+      Then every documented tool is registered
+
+  Rule: a task carries the actions it will accept, never a guess
+
+    Scenario: A task offers what the daemon said it offers
+      Given a draft task "Add due dates" the daemon says can be queued
+      When the agent reads that task
+      Then the actions offered are "queue"
+      And it is told to queue it when the plan is right
+      # What the work is *for* is the thing a model most needs and the thing a
+      # summary most easily drops.
+      And it says what the work is for
+
+    Scenario: A task an agent asked for says which run asked
+      Given a task "Add due dates" that a run asked for
+      When the agent reads that task
+      Then it says which run asked for it
+      And it says what that client called itself
+
+    Scenario: A task waiting for a person says a person has to decide
+      Given a task "Add due dates" waiting for approval
+      When the agent reads that task
+      Then it is told a person has to approve or reject it
+
+    Scenario: Tasks in another project are not listed
+      Given a task "Add due dates" in "factory"
+      And a task "Somebody else's" in another project
+      When the agent lists the tasks
+      Then only "Add due dates" is listed
+
+    Scenario: Only tasks that have not finished, when that is what was asked
+      Given a task "Add due dates" in "factory"
+      And a finished task "Ship it" in "factory"
+      When the agent lists only the active tasks
+      Then only "Add due dates" is listed
+
+  Rule: a listed task says how much to trust it
+
+    An agent choosing what to pick up wants the score and how hard anybody
+    looked, and asking `factory_reliability_get` per task to find out is a
+    request per row for something the list already read once.
+
+    Scenario: A listed task carries the score and the coverage
+      Given a task judged at 88 with 70% coverage
+      When the agent lists the tasks
+      Then the listed task is 88 with 70% coverage
+
+    Scenario: A task nobody has judged carries neither
+      Given a task nobody has judged
+      When the agent lists the tasks
+      Then the listed task carries no reliability
+
+  Rule: what a project can run is what it is offered
+
+    Scenario: A workflow comes with what it needs
+      Given the project offers a workflow "development" that needs "analysis"
+      When the agent lists the workflows
+      Then "development" is offered
+      And it says it needs "analysis"
+
+    Scenario: A workflow the project cannot run yet is marked, not hidden
+      # The file is still the project's to read and edit. It is only the list
+      # of what to run next that has no business offering it.
+      Given the project offers a workflow "merge" it cannot run without worktrees
+      When the agent lists the workflows
+      Then "merge" is offered
+      And it says why it is unavailable
+
+    Scenario: A phase says whether somebody has to approve it
+      Given the project offers a phase "publish" that needs approval first
+      When the agent lists the phases
+      Then "publish" says its approval is "before"
+
+  Rule: a run arrives with its evidence
+
+    Scenario: A run carries its steps and what it produced
+      Given a run that wrote an artifact "report.md"
+      When the agent reads that run
+      Then the run's steps are listed
+      And "report.md" is named with its size
+
+    Scenario: Evidence is named and sized, never quoted
+      # Five artifacts of Markdown is tens of kilobytes, and a run detail is a
+      # listing rather than a reading.
+      Given a run that wrote an artifact "report.md"
+      When the agent reads that run
+      Then the answer does not contain the artifact's contents
+
+  Rule: logs are bounded, and a log that lost its middle says so
+
+    A run's own log holds what the engine wrote. Everything a *command* printed
+    is attached to the step that printed it, so asking for a run's output and
+    reading only the run's own log returns almost nothing — which is what this
+    tool did until a scenario ran a real command and read back an empty string.
+
+    Scenario: The output of every step is gathered, and each line says which
+      Given a run with two steps that each printed something
+      When the agent reads that run's logs
+      Then both steps' output comes back
+      And each line says which step printed it
+
+    Scenario: Only the tail comes back
+      Given a run whose step printed 500 lines
+      When the agent reads the last 10 lines of it
+      Then 10 lines come back
+      And it says 490 older lines were not sent
+
+    Scenario: What Factory dropped is counted apart from what was not sent
+      # Two different losses. Conflating them is a lie in one direction or the
+      # other: one is the daemon's log budget, the other is this call's tail.
+      Given a run whose log Factory had to trim by 2048 bytes
+      When the agent reads that run's logs
+      Then it says Factory dropped something
+
+    Scenario: One step's output can be asked for on its own
+      Given a run whose step printed 500 lines
+      When the agent reads the logs of step 3
+      Then Factory was asked for step 3 only
+      And nothing else was asked for
+
+  Rule: what is waiting for a person is reported, not answered
+
+    Scenario: A parked task names its run and where it continues from
+      Given a task "Add due dates" parked at a gate in the run "run-1"
+      When the agent asks what is waiting
+      Then "Add due dates" is waiting
+      And the answer names the run "run-1"
+      And it says a person has to decide
+
+    Scenario: Nothing waiting says so plainly
+      Given a task "Add due dates" in "factory"
+      When the agent asks what is waiting
+      Then nothing is waiting
+
+  Rule: creating a task starts nothing
+
+    A task is a piece of work with an ordered list of workflows. Making one is
+    a note; queueing it is the thing that spawns agents against somebody's
+    repository. Keeping those two apart is what lets an agent propose work
+    without doing it.
+
+    Scenario: A task lands in the project the agent is working in
+      Given the agent is working in "factory"
+      When the agent creates the task "Add due dates" with the workflow "development"
+      Then Factory was told to put it in "factory"
+      And Factory was told to run "development"
+      And the agent is told to queue it when the plan is right
+
+  Rule: queueing is what starts work, and cancelling is what stops it
+
+    There is no tool to start a run and none to cancel one, and that is the
+    design rather than an omission: nothing in Factory starts a run directly,
+    and the engine kills a run's process group on any transition to cancelled,
+    whoever asked for it. A second door onto either would be a second set of
+    rules to keep honest.
+
+    Scenario: There is no tool to start a run, and none to cancel one
+      Then no tool is called "factory_run_start"
+      And no tool is called "factory_run_cancel"
+
+    Scenario: Queueing asks for the action by name
+      Given a task "Add due dates" that can be queued
+      When the agent queues it
+      Then Factory was asked to queue that task
+
+    Scenario: Queueing before anybody accepted the disclaimer carries the disclaimer
+      # An agent cannot accept it. Somebody has to read what an agent run can
+      # reach and agree to it, and the text is what they are agreeing to.
+      Given Factory has not been told what an agent run can reach
+      When the agent queues a task
+      Then it is refused as NOT_ACCEPTED
+      And the refusal carries the disclaimer
+      And it says a person has to accept it
+
+    Scenario: An action the task does not offer comes back with the ones it does
+      Given a task that cannot be queued because it is already running
+      When the agent queues it
+      Then it is refused as ACTION_NOT_AVAILABLE
+      And the refusal lists the actions it does offer
+
+  Rule: an agent can say one task waits for another
+
+    An agent that plans three pieces of work can already create all three, and
+    until now could only describe their order in prose nobody enforces. The
+    ordering is a fact about the work, so it belongs beside the work rather than
+    in a description — the scheduler reads it, doctor reports on it, and the
+    board draws it.
+
+    None of the rules are here. The store refuses a ring, a task waiting for
+    itself, and a link across projects, and it says why in its own words; this
+    tool carries the sentence rather than composing a second one that could
+    drift from it.
+
+    Scenario: A task is made to wait for another
+      Given a task "Ship it" that can be queued
+      When the agent makes "Ship it" wait for "task-groundwork"
+      Then Factory was asked to make it wait for "task-groundwork"
+
+    Scenario: The waiting can be taken back off
+      Given a task "Ship it" that can be queued
+      When the agent stops "Ship it" waiting for "task-groundwork"
+      Then Factory was asked to remove that dependency
+
+    Scenario: A ring comes back in the store's own words
+      # Not "a cycle was detected". The store already writes the sentence a
+      # person reads on the board, and two wordings for one refusal is one
+      # wording that goes stale.
+      Given a task "Ship it" that can be queued
+      And Factory refuses the dependency as "Groundwork already waits for Ship it."
+      When the agent makes "Ship it" wait for "task-groundwork"
+      Then the refusal says "Groundwork already waits for Ship it."
+
+  Rule: a workflow is copied rather than assembled
+
+    Assembling one out of phase names is how an agent produces a workflow that
+    parses and does nothing useful. Copying one the project already runs keeps
+    everything nobody thought to ask about — what it needs, what it provides,
+    what happens when it fails, and its variables.
+
+    Scenario: Copying keeps everything the original had
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent copies it as "development-fast"
+      Then Factory was asked to write "development-fast"
+      And what was written still needs "analysis"
+
+    Scenario: A workflow with no phases and nothing to copy is refused
+      When the agent writes a workflow with no phases
+      Then it is refused
+      And nothing was written
+
+    Scenario: It goes into the project unless somebody says otherwise
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent copies it as "development-fast"
+      Then it was written into the project's own scope
+
+    Scenario: A workflow can say what it needs when it is written
+      # Without this an agent chaining analysis → design → implement has to
+      # list all of them on every task, in order, and nothing enforces the
+      # order it listed.
+      When the agent writes a workflow "design" that needs "analysis"
+      Then what was written needs "analysis"
+
+    Scenario: What a copy needs beats what the original needed
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent copies it as "development-fast" needing "design"
+      Then what was written needs "design"
+
+    Scenario: The reply says where the workflow landed
+      # It said nothing at all: the write route answers with the file at the
+      # top level and the reply was reading it from `ref`, which is the shape
+      # the *read* route returns.
+      When the agent writes a workflow "design" that needs "analysis"
+      Then the reply names the file it wrote
+
+  Rule: what a workflow needs can be said after it was written
+
+    `factory_workflow_create` can say it, which covers the workflow an agent
+    writes itself and nothing else. The ordinary case is the pipeline a person
+    already has: five workflows that run in an order everybody knows and no file
+    records, so every task lists all five by hand and nothing checks the order.
+
+    There is no patch-one-field door in Factory, deliberately — a definition is
+    written whole, and an existing file is written only against the etag it was
+    read at. So this tool does what a person's editor does: read, change the one
+    field, write back with the etag. That round trip is the feature and not
+    overhead, because the thing it prevents is this tool overwriting an edit
+    made between the read and the write.
+
+    Scenario: A workflow that already exists can be told what it needs
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent says "development" needs "design"
+      Then Factory was asked to write "development"
+      And what was written needs "design"
+
+    Scenario: The write carries the etag the read returned
+      # Without it the write route answers `exists` and changes nothing, which
+      # would look from here like a workflow that refused to be edited.
+      Given the project has a workflow "development" that needs "analysis"
+      When the agent says "development" needs "design"
+      Then the write carried the etag
+
+    Scenario: A workflow edited underneath the agent is not overwritten
+      Given the project has a workflow "development" that needs "analysis"
+      And somebody edits it before the write lands
+      When the agent says "development" needs "design"
+      Then it is refused
+      And the refusal says the file changed
+
+  Rule: approving is a person's, and the surface says so by not offering it
+
+    Factory can tell an agent it launched from a person's own session: the
+    first carries the run it is inside, the second carries nothing. What it
+    cannot tell apart is a person's session from an agent acting unasked in
+    that session, because they are the same process with the same environment.
+
+    An approval an agent can give is not a gate, only a delay. So it is not
+    offered here at all — which is the strongest form the rule can take, and
+    the only one that does not depend on knowing who is typing.
+
+    The daemon still refuses an approval from inside the branch that asked for
+    the work, because this surface is not its only client.
+
+    Scenario: The action list does not include approving
+      Then an agent may not ask to "approve"
+      And an agent may not ask to "reject"
+
+    Scenario: Everything else a person can ask for is offered
+      Then an agent may ask to "queue"
+      And an agent may ask to "cancel"
+      And an agent may ask to "mark_done"
+
+  Rule: a refusal says which refusal it is
+
+    The reader is a program deciding what to do next, and the difference
+    between "the daemon said no" and "you are four levels deep" is the whole
+    value of the reply. The codes come from core rather than a list kept here,
+    because a list kept here is a list that was once missing `FAN_OUT_LIMIT` —
+    and a run that had asked for eleven tasks was told `FACTORY_ERROR`.
+
+    Scenario: A coded refusal carries its code, not its sentence twice
+      Given a Factory that refuses with RECURSION_LIMIT
+      When the agent creates a task
+      Then it is refused as RECURSION_LIMIT
+      And the refusal does not repeat the sentence in place of the code
+
+    Scenario: Every refusal the orchestration rules can make is recognised
+      Then "RECURSION_LIMIT" is a code this surface knows
+      And "FAN_OUT_LIMIT" is a code this surface knows
+      And "SELF_ORCHESTRATION_BLOCKED" is a code this surface knows
+      And "APPROVAL_SEPARATION" is a code this surface knows
+
+  Rule: an agent can ask what it is allowed to work on next
+
+    The owner on a driver is what makes this surface worth having. An agent that
+    can ask "what is the highest-value thing I can do about this task without a
+    person" is an agent that can keep going, and the answer is a list it can act
+    on rather than a number it can only report.
+
+    Scenario: A task nobody has judged says so rather than scoring zero
+      Given a task nobody has judged
+      When the agent asks how reliable it is
+      Then it comes back "unassessed"
+      And it carries no score
+      And it says how to get one
+
+    Scenario: A judged task comes back with what is waiting for whom
+      Given a task judged at 88 with two agent drivers and one for a developer
+      When the agent asks how reliable it is
+      Then the score is 88
+      And it says 2 are the agent's
+      And it says 1 needs a developer
+
+    Scenario: The reply says to ask what to do next
+      Given a task judged at 88 with two agent drivers and one for a developer
+      When the agent asks how reliable it is
+      Then it points at the next actions
+
+    Scenario: Nothing outstanding says so plainly
+      Given a task judged at 98 with nothing outstanding
+      When the agent asks how reliable it is
+      Then it says nothing is outstanding
+
+  Rule: an agent may say a finding stopped being true, not that it does not matter
+
+    Resolving is a claim evidence can check. Accepting is a decision about what
+    matters, and an acceptance an agent can grant itself is not a gate — the
+    same argument that keeps approving off this surface entirely.
+
+    Scenario: Resolving carries the run the agent is inside
+      Given a task with a driver
+      When the agent resolves it
+      Then the daemon was told which run asked
+
+    Scenario: Accepting carries it too, so the daemon can refuse
+      Given a task with a driver
+      When the agent accepts it
+      Then the daemon was told which run asked
+
+    Scenario: Accepting demands a reason
+      # It is the record. An acceptance nobody explained is indistinguishable
+      # afterwards from one nobody meant.
+      When the agent tries to accept a driver without a reason
+      Then the call is refused before it is sent
+
+  Rule: no tool sets a score
+
+    Scenario: There is no tool that sets a score
+      Then no tool is named "factory_reliability_set"
+      And no tool takes a score
+
+    Scenario: The reliability tools are read-first
+      Then 4 of the reliability tools only read
+

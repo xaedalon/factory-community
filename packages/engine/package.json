@@ -1,6 +1,6 @@
 {
   "name": "@factory/engine",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "Turns a task and its workflows into runs, and picks them back up after a restart.",

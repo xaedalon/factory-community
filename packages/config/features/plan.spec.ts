@@ -737,6 +737,54 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
     })
   })
 
+  Rule('the project namespace is complete too, for the same reason', ({ RuleScenario }) => {
+    const usingToken = (token: string) => (): void => {
+      box.phase(project, 'vocabulary', `name: vocabulary\nsteps: [{run: 'echo ${token}'}]\n`)
+    }
+    const planNoProject = (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      // No `project`, exactly what `factory run` hands over.
+      result = planWorkflow({ chain, host, workflow: 'vocabulary', workspace: box.dir('work') })
+    }
+    const stillUnresolved = (): readonly string[] =>
+      result.problems
+        .filter((problem) => problem.rule === 'variables.unknownKey')
+        .map((problem) => problem.message)
+
+    RuleScenario('A documented project token nobody supplied is empty, not literal', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('a phase whose step uses "{{ project.check }}"', usingToken('{{ project.check }}'))
+      And('the project scope defines a workflow "vocabulary" with that phase', () =>
+        workflow('vocabulary', 'vocabulary'),
+      )
+      When('the workflow "vocabulary" is planned with no project at all', planNoProject)
+      Then('no token was left unresolved', () => expect(stillUnresolved()).toEqual([]))
+      // The rendered argv, because the warning going away is not the point —
+      // the literal `{{ … }}` reaching bash is.
+      And('no token survived into the command', () =>
+        expect(result.plan?.phases[0]?.steps[0]?.planned.args.join(' ')).not.toContain('{{'),
+      )
+    })
+
+    RuleScenario('A misspelled project token is still a warning', ({ Given, And, When, Then }) => {
+      Given('a phase whose step uses "{{ project.chekc }}"', usingToken('{{ project.chekc }}'))
+      And('the project scope defines a workflow "vocabulary" with that phase', () =>
+        workflow('vocabulary', 'vocabulary'),
+      )
+      When('the workflow "vocabulary" is planned with no project at all', planNoProject)
+      Then('a problem names the unresolved token "{{ project.chekc }}"', () =>
+        expect(stillUnresolved().join('\n')).toContain('{{ project.chekc }}'),
+      )
+    })
+  })
+
   Rule('one session per plan, started by the first agent step that needs it', ({
     RuleScenario,
   }) => {
@@ -1038,6 +1086,425 @@ describeFeature(feature, ({ Background, Rule, Scenario, BeforeEachScenario, Afte
       Then('planning succeeds', () => expect(errors()).toEqual([]))
       And("a warning names the phase's working directory", named('warning'))
       And('phase "escape" runs in "/tmp"', () => expect(phase('escape')?.cwd).toBe('/tmp'))
+    })
+  })
+  Rule('a workflow that would run nothing is refused rather than run', ({ RuleScenario }) => {
+    const nothingToRun = () =>
+      expect(anyMessage('nothing to run')).toBe(true)
+
+    RuleScenario('A workflow with no phases at all', ({ Given, When, Then, And }) => {
+      Given('the project scope defines a workflow "design" with no phases', () => {
+        box.workflow(project, 'design', 'name: design\nphases: []\n')
+      })
+      When('the workflow "design" is planned', () => plan('design'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the workflow has nothing to run', nothingToRun)
+    })
+
+    RuleScenario('A workflow whose only phase has no steps', ({ Given, And, When, Then }) => {
+      Given('the project scope defines a phase "think" with no steps', () => {
+        box.phase(project, 'think', 'name: think\nsteps: []\n')
+      })
+      And('the project scope defines a workflow "design" with the phase "think"', () =>
+        workflow('design', 'think'),
+      )
+      When('the workflow "design" is planned', () => plan('design'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the workflow has nothing to run', nothingToRun)
+    })
+
+    RuleScenario('One empty phase beside a real one is not refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines a phase "think" with no steps', () => {
+        box.phase(project, 'think', 'name: think\nsteps: []\n')
+      })
+      And('the project scope defines a phase "work" that prints "building"', () => {
+        box.phase(project, 'work', 'name: work\nsteps: [{run: echo building}]\n')
+      })
+      And('the project scope defines a workflow "design" with the phases "think, work"', () => {
+        box.workflow(project, 'design', 'name: design\nphases: [think, work]\n')
+      })
+      When('the workflow "design" is planned', () => plan('design'))
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+    })
+  })
+
+  Rule('a project runs under the profile it names, or refuses to plan', ({ RuleScenario }) => {
+    const planning = (profile?: string) => (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      result = planWorkflow({
+        chain,
+        host,
+        workflow: 'building',
+        workspace: box.dir('work'),
+        ...(profile === undefined ? {} : { profile }),
+      })
+    }
+    const agentPhase = (): void => {
+      box.phase(
+        project,
+        'build',
+        'name: build\nsteps: [{uses: agent, provider: claude, prompt: Build it}]\n',
+      )
+    }
+    const succeeds = (): void =>
+      expect(result.plan, JSON.stringify(result.problems)).toBeDefined()
+    const fails = (): void => expect(result.plan).toBeUndefined()
+    const said = (): string => result.problems.map((p) => p.message).join(' ')
+    /** The rendered argv of the one agent step. */
+    const argv = (): readonly string[] => {
+      const step = result.plan?.phases[0]?.steps[0]
+      expect(step, JSON.stringify(result.problems)).toBeDefined()
+      return step?.planned.args ?? []
+    }
+
+    RuleScenario("A named profile's commands reach the agent's command line", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines the profile "development" allowing "cargo"', () => {
+        box.profile(
+          project,
+          'development',
+          'kind: factory.profile/v1\nname: development\ncommands: [cargo]\n',
+        )
+      })
+      And('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned under the profile "development"', planning('development'))
+      Then('planning succeeds', succeeds)
+      And('the step\'s command allows "Bash(cargo *)"', () => {
+        expect(argv().join(' ')).toContain('Bash(cargo *)')
+      })
+      And("the step's command still confines it", () => {
+        // The profile widens commands and nothing else: `--restricted` is what
+        // keeps the file tools inside the workspace, and it is still there.
+        expect(argv()).toContain('--restricted')
+      })
+    })
+
+    RuleScenario('A profile no scope defines refuses to plan', ({ Given, And, When, Then }) => {
+      Given('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned under the profile "nowhere"', planning('nowhere'))
+      Then('planning fails', fails)
+      And('a problem says no scope defines that profile', () => {
+        expect(said()).toContain('no scope defines one by that name')
+      })
+      And('the problem says Factory will not fall back', () => {
+        expect(said()).toContain('will not fall back')
+      })
+    })
+
+    RuleScenario('A profile that does not parse refuses to plan, and says why', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines the profile "broken" with an unknown key', () => {
+        box.profile(
+          project,
+          'broken',
+          'kind: factory.profile/v1\nname: broken\ncommand: [cargo]\n',
+        )
+      })
+      And('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned under the profile "broken"', planning('broken'))
+      Then('planning fails', fails)
+    })
+
+    RuleScenario('The built-in profiles need no definition', ({ Given, And, When, Then }) => {
+      Given('the project scope defines a phase "build" with an agent step', agentPhase)
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned', planning())
+      Then('planning succeeds', succeeds)
+    })
+  })
+
+  Rule('a step cannot argue its way past the profile it runs under', ({ RuleScenario }) => {
+    const planUnder = (profile: ExecutionProfile) => (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      result = planWorkflow({
+        chain,
+        host,
+        workflow: 'review',
+        workspace: box.dir('work'),
+        profile,
+      })
+    }
+    const phasePassing = (name: string, args: string) => (): void => {
+      box.phase(
+        project,
+        name,
+        `name: ${name}\nsteps: [{uses: agent, prompt: Do it, args: [${args}]}]\n`,
+      )
+    }
+    const tooMuchAuthority = (): void => {
+      const matching = result.problems.filter(
+        (problem) => problem.rule === 'plan.argsWidenProfile',
+      )
+      expect(matching, JSON.stringify(result.problems)).toHaveLength(1)
+      expect(matching[0]?.severity).toBe('error')
+      expect(matching[0]?.message).toContain('bypassPermissions')
+    }
+
+    RuleScenario('A step whose args would grant Full Access is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"',
+        phasePassing('sneaky', "'--permission-mode', 'bypassPermissions'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "sneaky"', () =>
+        workflow('review', 'sneaky'),
+      )
+      When('the workflow "review" is planned', () => plan('review'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And(
+        'a problem says the step asks for more authority than the profile allows',
+        tooMuchAuthority,
+      )
+    })
+
+    RuleScenario('A named agent cannot do it either', ({ Given, And, When, Then }) => {
+      Given(
+        'the project scope defines an agent "sneaky" passing "--permission-mode bypassPermissions"',
+        () => {
+          box.agent(
+            project,
+            'sneaky',
+            "name: sneaky\nprovider: claude\nargs: ['--permission-mode', 'bypassPermissions']\n",
+          )
+        },
+      )
+      And('the project scope defines a phase "build" whose step names the agent "sneaky"', () => {
+        box.phase(project, 'build', 'name: build\nsteps: [{agent: sneaky, prompt: Do it}]\n')
+      })
+      And('the project scope defines a workflow "building" with the phase "build"', () =>
+        workflow('building', 'build'),
+      )
+      When('the workflow "building" is planned', () => plan('building'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And(
+        'a problem says the step asks for more authority than the profile allows',
+        tooMuchAuthority,
+      )
+    })
+
+    const refusal = (): string => {
+      const found = result.problems.find((problem) => problem.rule === 'plan.argsWidenProfile')
+      expect(found, JSON.stringify(result.problems)).toBeDefined()
+      return (found as { message: string }).message
+    }
+
+    RuleScenario('The refusal says what the profile already passes for that flag', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "eager" passing "--allowedTools Bash(pnpm *)"',
+        phasePassing('eager', "'--allowedTools', 'Bash(pnpm *)'"),
+      )
+      And('the project scope defines a workflow "build" with the phase "eager"', () =>
+        workflow('build', 'eager'),
+      )
+      When('the workflow "build" is planned', () => plan('build'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('the problem names the flag the step passed', () => {
+        expect(refusal()).toContain('--allowedTools')
+      })
+      And('the problem shows what the profile already passes for it', () => {
+        // The whole list, so a reader can see their own entry is in it and the
+        // answer is to delete their line rather than to widen the profile.
+        expect(refusal()).toContain('Bash(pnpm *)')
+        expect(refusal()).toContain('Bash(npm *)')
+      })
+      And('the problem says a shell step is not governed by that list', () => {
+        expect(refusal()).toContain('shell')
+      })
+    })
+
+    RuleScenario('A flag the profile passes nothing for is refused without a suggestion', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given(
+        'the project scope defines a phase "reckless" passing "--dangerously-skip-permissions"',
+        phasePassing('reckless', "'--dangerously-skip-permissions'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "reckless"', () =>
+        workflow('review', 'reckless'),
+      )
+      When('the workflow "review" is planned', () => plan('review'))
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('the problem does not claim the profile already passes it', () => {
+        expect(refusal()).not.toContain('already passes')
+      })
+    })
+
+    RuleScenario('Under Full Access the same step plans', ({ Given, And, When, Then }) => {
+      Given(
+        'the project scope defines a phase "sneaky" passing "--permission-mode bypassPermissions"',
+        phasePassing('sneaky', "'--permission-mode', 'bypassPermissions'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "sneaky"', () =>
+        workflow('review', 'sneaky'),
+      )
+      When('the workflow "review" is planned under Full Access', planUnder('full-access'))
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+    })
+
+    RuleScenario('An ordinary argument still works', ({ Given, And, When, Then }) => {
+      Given(
+        'the project scope defines a phase "verbose" passing "--verbose"',
+        phasePassing('verbose', "'--verbose'"),
+      )
+      And('the project scope defines a workflow "review" with the phase "verbose"', () =>
+        workflow('review', 'verbose'),
+      )
+      When('the workflow "review" is planned', () => plan('review'))
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+      And('phase "verbose" step 0 passes "--verbose"', () =>
+        expect(phase('verbose')?.steps[0]?.planned.args).toContain('--verbose'),
+      )
+    })
+  })
+
+  Rule("the gate runs the project's own command, or refuses to run at all", ({ RuleScenario }) => {
+    /**
+     * Planned the way the daemon plans.
+     *
+     * `check` is always present and empty when the project has never set one —
+     * that is `projectVariables`, and it is what makes "no check command" an
+     * *empty command* rather than an unknown token. A scenario that left the
+     * key out would be describing a caller Factory does not have.
+     */
+    const planWithCheck = (check: string) => (): void => {
+      const chain = resolveScopes({
+        cwd: box.dir('work', 'src'),
+        env: { FACTORY_HOME: box.scope('home', 'user') },
+      })
+      result = planWorkflow({
+        chain,
+        host,
+        workflow: 'validate',
+        workspace: box.dir('work'),
+        project: { check },
+      })
+    }
+    let check = ''
+    const setCheck = (value: string) => (): void => {
+      check = value
+    }
+    const planned = (): void => planWithCheck(check)()
+    const noCommand = (): void => {
+      const matching = result.problems.filter((problem) => problem.rule === 'plan.emptyCommand')
+      expect(matching, JSON.stringify(result.problems)).toHaveLength(1)
+      expect(matching[0]?.severity).toBe('error')
+    }
+
+    RuleScenario("The built-in gate runs the project's check command", ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project\'s check command is "pnpm test"', setCheck('pnpm test'))
+      And(
+        'the project scope defines a workflow "validate" with the phase "project-check"',
+        () => workflow('validate', 'project-check'),
+      )
+      When('the workflow "validate" is planned', planned)
+      Then('planning succeeds', () => expect(errors()).toEqual([]))
+      // The rendered argv, not the phase file: what a step actually runs is
+      // the only thing that can disagree with what it was supposed to.
+      And("phase \"project-check\" step 0 runs the project's check command", () =>
+        expect(phase('project-check')?.steps[0]?.planned.args).toEqual(['-c', 'pnpm test']),
+      )
+    })
+
+    RuleScenario('A project with no check command cannot plan the gate', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project has no check command', setCheck(''))
+      And(
+        'the project scope defines a workflow "validate" with the phase "project-check"',
+        () => workflow('validate', 'project-check'),
+      )
+      When('the workflow "validate" is planned', planned)
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the step has no command to run', noCommand)
+    })
+
+    RuleScenario('A run with no project at all cannot plan the gate either', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given(
+        'the project scope defines a workflow "validate" with the phase "project-check"',
+        () => workflow('validate', 'project-check'),
+      )
+      When('the workflow "validate" is planned with no project at all', () => {
+        const chain = resolveScopes({
+          cwd: box.dir('work', 'src'),
+          env: { FACTORY_HOME: box.scope('home', 'user') },
+        })
+        result = planWorkflow({ chain, host, workflow: 'validate', workspace: box.dir('work') })
+      })
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the step has no command to run', noCommand)
+    })
+
+    RuleScenario('Any step whose command resolves to nothing is refused', ({
+      Given,
+      And,
+      When,
+      Then,
+    }) => {
+      Given('the project scope defines a phase "empty" running "{{ project.check }}"', () => {
+        box.phase(project, 'empty', "name: empty\nsteps: [{run: '{{ project.check }}'}]\n")
+      })
+      And('the project has no check command', setCheck(''))
+      And('the project scope defines a workflow "validate" with the phase "empty"', () =>
+        workflow('validate', 'empty'),
+      )
+      When('the workflow "validate" is planned', planned)
+      Then('planning fails', () => expect(result.plan).toBeUndefined())
+      And('a problem says the step has no command to run', noCommand)
     })
   })
 })

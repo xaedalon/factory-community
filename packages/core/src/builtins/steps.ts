@@ -15,8 +15,15 @@ import {
   type ProviderCapability,
   type RenderRequest,
 } from '../providers/capability.js'
+import {
+  permissionArgsFor,
+  profileWideningArgs,
+  type ProviderDescriptor,
+} from '../providers/descriptor.js'
+import { DEFAULT_PROFILE, type ExecutionProfile } from '../security/profile.js'
 import { worktreeStepKind } from './worktree.js'
 import type { Problem } from '../problems.js'
+import { grantsFor } from '../schema/profile.js'
 import { MODEL_ROLES, type ModelRole } from '../model-roles.js'
 import { artifactFile, artifactsRoot, joinPath } from '../task/paths.js'
 
@@ -64,8 +71,27 @@ export const shellStepKind: StepKindCapability = defineStepKind({
   schema: shellSchema,
   // Lets `- run: npm test` stand on its own, which is most steps.
   sugarKey: 'run',
-  plan(step): PlannedStep {
+  plan(step): PlannedStep | PlanFailure {
     const shell = step as ShellStep
+    // `bash -c ''` exits 0. A step that resolved to nothing would therefore be
+    // a tick beside work that never happened — the exact shape of every defect
+    // on this branch. The schema cannot catch it: `run` is non-empty in the
+    // file and becomes empty during substitution, which is what
+    // `{{ project.check }}` does on a project that has never set one.
+    if (shell.run.trim() === '') {
+      return {
+        problems: [
+          {
+            severity: 'error',
+            message:
+              'This step has no command to run. A `{{ … }}` in it resolved to nothing — most ' +
+              'often `{{ project.check }}` on a project that has not been given a check command.',
+            field: 'run',
+            rule: 'plan.emptyCommand',
+          } satisfies Problem,
+        ],
+      }
+    }
     // A shell step genuinely wants a shell -- pipes, globs and && are the point.
     return { describe: shell.run, command: 'bash', args: ['-c', shell.run] }
   },
@@ -166,6 +192,40 @@ export const agentStepKind: StepKindCapability = defineStepKind({
     const chosen = chooseProvider(agent, context)
     if ('problems' in chosen) return chosen
 
+    // Before the command is rendered, because the whole point is that this
+    // argv is never built. `args` is appended *after* `permissionArgs`, so an
+    // agent file saying `args: ['--permission-mode', 'bypassPermissions']`
+    // used to get Full Access under the Default profile by editing a file in
+    // the repository the agent can write to — no setting changed, nothing
+    // said. Refusing at plan time means the run is recorded `refused` and the
+    // task blocked with a reason, which is the loud path a bad definition
+    // already takes.
+    const widening = profileWideningArgs(
+      chosen.provider.descriptor,
+      context.profile ?? DEFAULT_PROFILE,
+      agent.args ?? [],
+    )
+    if (widening.length > 0) {
+      const profile = context.profile ?? DEFAULT_PROFILE
+      return {
+        problems: [
+          {
+            severity: 'error',
+            message:
+              `This step passes ${widening.map((argument) => `"${argument}"`).join(', ')} to ` +
+              `${chosen.provider.id}, which decides authority rather than asking for it: ` +
+              `arguments are appended after the flags that confine the agent, so the ` +
+              `${profile} profile refuses them. ` +
+              alreadyPassed(chosen.provider.descriptor, profile, widening) +
+              `Run the command in a \`shell\` step, which an agent's allow-list does not govern, ` +
+              `or run this project under Full Access if the agent itself needs it.`,
+            field: 'args',
+            rule: 'plan.argsWidenProfile',
+          } satisfies Problem,
+        ],
+      }
+    }
+
     const request: RenderRequest = {
       prompt: withArtifactInstruction(agent, context),
       ...(agent.model === undefined ? {} : { model: agent.model }),
@@ -188,6 +248,11 @@ export const agentStepKind: StepKindCapability = defineStepKind({
       allowedDirectories: [
         ...new Set([artifactsRootFor(context), ...(context.allowedDirectories ?? [])]),
       ],
+      // What a custom profile adds, narrowed to the provider that is about to
+      // run. Absent under a built-in, where it is a no-op anyway.
+      ...(context.profileDefinition === undefined
+        ? {}
+        : { grants: grantsFor(context.profileDefinition, chosen.provider.id) }),
     }
     const rendered = chosen.provider.render(request)
 
@@ -217,6 +282,11 @@ export const agentStepKind: StepKindCapability = defineStepKind({
       ...(rendered.denialPatterns === undefined
         ? {}
         : { denialPatterns: rendered.denialPatterns }),
+      // Off the capability rather than the rendered command: a reader belongs
+      // to the CLI, not to one invocation of it. The provider that has none
+      // contributes nothing and its output is read as text, which is what every
+      // provider did before this existed.
+      ...(chosen.provider.stream === undefined ? {} : { stream: chosen.provider.stream }),
       ...(rendered.stdin === undefined ? {} : { stdin: rendered.stdin }),
       ...(resuming === undefined ? {} : { retryArgs: resuming.args }),
       ...(rendered.session === undefined
@@ -366,6 +436,45 @@ function chooseProvider(
       `(${installed.map((p) => p.id).sort().join(', ')}). Set "provider:" on the step, or a ` +
       `default in the scope configuration.`,
     'plan.ambiguousProvider',
+  )
+}
+
+/**
+ * What the profile already passes for the flags a step tried to pass itself.
+ *
+ * Reported because the common case is not somebody reaching for authority: it
+ * is somebody told — by a stale note, or by an agent that read a measurement
+ * table as an instruction — that a step needs `--allowedTools 'Bash(pnpm *)'`
+ * to run pnpm. The Default profile has passed exactly that since the package
+ * managers were measured, and `--allowedTools` is variadic, so the step's copy
+ * would have *replaced* the list rather than added to it.
+ *
+ * A refusal that only says "more authority" and points at Full Access sends
+ * that person at the most dangerous lever in the building, when the answer is
+ * to delete the line. So: show what is granted, and let them see their own
+ * entry in it.
+ *
+ * Empty when the profile passes nothing for that flag — `--permission-mode` is
+ * not in the Default profile's arguments at all, and inventing a line for it
+ * would be worse than saying nothing.
+ */
+function alreadyPassed(
+  descriptor: ProviderDescriptor,
+  profile: ExecutionProfile,
+  widening: readonly string[],
+): string {
+  const passed = permissionArgsFor(descriptor, profile)
+  const shown: string[] = []
+  for (const flag of widening) {
+    const at = passed.indexOf(flag)
+    if (at === -1) continue
+    const value = passed[at + 1]
+    shown.push(value === undefined || value.startsWith('--') ? flag : `${flag} '${value}'`)
+  }
+  if (shown.length === 0) return ''
+  return (
+    `The ${profile} profile already passes ${shown.join(', ')} — ` +
+    `if that covers what this step needs, remove the argument. `
   )
 }
 

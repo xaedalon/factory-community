@@ -77,8 +77,15 @@ export interface Task {
    * "empty" are the same thing for prose.
    */
   readonly description: string
-  /** The project this work happens in. Absent for a task nobody located. */
-  readonly projectId?: string
+  /**
+   * The project this work happens in.
+   *
+   * Required. It used to be optional, and a task without one ran in whatever
+   * directory the daemon was started in, could not be queued as a batch and
+   * could not be given a worktree. It decides where, so there is no task
+   * without it.
+   */
+  readonly projectId: string
   readonly ticketId?: string
   readonly branch?: string
   /** Directory name for a worktree, when the task has one. */
@@ -129,6 +136,17 @@ export interface Task {
    * an edit to a phase disagree with what actually ran.
    */
   readonly session?: { readonly id: string; readonly provider: string }
+  /**
+   * Who asked for this task, when it was not a person at a keyboard.
+   *
+   * A label an MCP client gave for itself — `mcp:claude-code/2.1` — which is
+   * self-reported and is read by people, never by a rule. What the rules use is
+   * the run below, which a client cannot claim because Factory stamped it into
+   * the environment of the process it launched.
+   */
+  readonly createdBy?: string
+  /** The run whose agent asked for this task. Absent when a person did. */
+  readonly createdByRunId?: string
 }
 
 /**
@@ -231,6 +249,26 @@ const MOVES: Record<TaskAction, Move> = {
   restore: { from: ['archived'], to: 'draft', label: 'Restore' },
 }
 
+/**
+ * The actions a client may ask for at all.
+ *
+ * Derived from the table, never written out again. "A published list of what is
+ * currently allowed so no client has to re-derive any of it" is what this
+ * module already promised, and it was two thirds true: a *task* publishes the
+ * actions it offers right now, but which actions exist to ask for was not
+ * published — so the CLI kept its own copy of the eight a person can type, with
+ * a comment saying the daemon had the final say. That comment is how a list
+ * drifts: it is correct right up until somebody adds a ninth move.
+ *
+ * The engine's own moves are absent, which is the point. `start`, `idle`,
+ * `await_approval`, `block` and `complete` belong to the scheduler and the
+ * engine; a client asking for one would put a task past the concurrency cap or
+ * mark a run done while its agent was still writing.
+ */
+export const REQUESTABLE_ACTIONS: readonly TaskAction[] = TASK_ACTIONS.filter(
+  (action) => MOVES[action].internal !== true,
+)
+
 export interface AvailableAction {
   readonly action: TaskAction
   readonly label: string
@@ -331,6 +369,20 @@ export function applyAction(
 
   return { from: task.state, action, task: next as unknown as Task }
 }
+
+/**
+ * Work is happening on this task right now.
+ *
+ * `awaiting_approval` counts: the run is parked mid-plan holding uncommitted
+ * changes in a working copy, and the phases after the gate are still to come.
+ * Anything that would change what a run is doing or where it happens — the
+ * plan, the project — is refused while a task is in one of these.
+ *
+ * Here rather than in the route that first needed it, because the store makes
+ * the same refusal and two lists could disagree about which states mean
+ * "busy".
+ */
+export const IN_FLIGHT: readonly TaskState[] = ['running', 'awaiting_approval']
 
 /** Terminal for the board's purposes: nothing further happens on its own. */
 export const isSettled = (state: TaskState): boolean =>

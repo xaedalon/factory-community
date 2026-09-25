@@ -41,7 +41,10 @@ export type TaskToolRun = 'terminal' | 'detached'
  */
 export interface TaskToolContext {
   readonly task: Task
-  /** Absent for a task belonging to no project: there is nowhere to act. */
+  /**
+   * Absent when the task's project could not be resolved — which means the row
+   * is not in the database, since a task cannot exist without one.
+   */
   readonly workspace?: TaskWorkspace
   readonly host: CapabilityLookup
   /** Handed over, so a plugin never reads `process.env` itself. */
@@ -197,10 +200,10 @@ export function requestFor(offer: TaskToolOffer, cwd: string): TerminalRequest {
 /**
  * The line to show for an offer.
  *
- * `cd` only when there is somewhere to go: a tool on a task with no project
- * has no directory, and `cd ''` is a worse answer than none. Built through the
- * same two functions that build what the host runs, so what you copy and what
- * happens cannot differ.
+ * `cd` only when there is somewhere to go: a tool asked about a task whose
+ * project cannot be resolved has no directory, and `cd ''` is a worse answer
+ * than none. Built through the same two functions that build what the host
+ * runs, so what you copy and what happens cannot differ.
  */
 function lineFor(offer: TaskToolOffer, cwd: string | undefined): string {
   if (cwd !== undefined) return terminalCommand(requestFor(offer, cwd))

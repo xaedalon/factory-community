@@ -25,8 +25,19 @@ export default {
   `provider`, `doctor-rule`, `setup-step`, `terminal` and `task-tool` are the ones Factory looks
   for, and nothing stops a plugin defining its own kind for another plugin to consume. A capability
   id must match `/^[a-z][a-z0-9-]*$/`: they appear in YAML and in URLs.
-- **`hook(name, fn)`** — take part in a decision. There are exactly two: `validateDefinition` and
-  `beforeDefinitionWrite`.
+- **`hook(name, fn)`** — take part in a decision. There are exactly two, and both run on the one
+  path every definition takes to disk — the API, the CLI, a bundle import and the copies a project
+  is given when it turns worktrees on:
+  - **`validateDefinition`** is asked first, and collects problems. Any of severity `error` refuses
+    the write. Every handler runs even if an earlier one threw, so a broken plugin cannot hide the
+    real reasons; a handler that throws contributes a problem naming itself.
+  - **`beforeDefinitionWrite`** is the last chance to adjust or refuse. Return
+    `{ action: 'continue', value }` — with `value.definition` replaced, if you are adjusting — or
+    `{ action: 'reject', problems }`. The first rejection wins, and a handler that throws is read as
+    a rejection: carrying on would write a value somebody was in the middle of refusing.
+
+  What a hook returns is still read back from disk before the write is kept, so a definition a
+  plugin adjusted into something Factory cannot load is refused like any other.
 - **`events`** — the event bus. Events report what already happened; a subscriber cannot veto one.
 - **`host`** — ask what else is installed. `host.has('terminal')` is how a feature degrades by
   absence rather than by checking which edition it is running in.
@@ -155,6 +166,54 @@ one CI keeps honest.
 Mark a descriptor `provisional: true` if you have not verified it against the real CLI. `doctor`
 reports provisional providers, because a flag someone guessed is worse than one nobody wrote.
 
+A step's own `args:` cannot widen the profile it runs under. Anything in your `full-access` list
+that the confined profile does not already pass is refused at plan time, derived — you write
+nothing. Add `forbiddenArgs:` for what derivation cannot see: a flag that grants authority without
+appearing in either list, or one whose *repetition replaces* what Factory passed. Claude Code's
+`--allowedTools` is the second kind: it is variadic, so a step passing it again does not add to the
+allow-list, it becomes the allow-list.
+
+### Reading a structured transcript
+
+One part of a provider cannot be data: a transcript format is a parser. If your CLI can emit its
+session as machine-readable events, pass a reader and Factory will use it.
+
+```js
+import { LineBuffer } from '@factory/plugin-sdk'
+
+const acmeStream = () => {
+  const lines = new LineBuffer()
+  const read = (raw) => raw.flatMap((line) => {
+    const event = JSON.parse(line)
+    if (event.kind === 'denied') {
+      return [{ refused: { tool: event.tool, command: event.command, evidence: event.reason } }]
+    }
+    if (event.kind === 'say') return [{ log: { text: `${event.text}\n`, stream: 'stdout' } }]
+    return []
+  })
+  return { push: (chunk) => read(lines.push(chunk)), end: () => read(lines.end()) }
+}
+
+export default defineProviderPlugin({ /* … */ stream: acmeStream })
+```
+
+Three things come out of a reader, and each has one job:
+
+| | |
+|---|---|
+| `log` | what a person reads. Put the agent's prose on `stdout` and anything you add on `stderr`. |
+| `scan` | text the log does not carry, offered to the descriptor's `denialPatterns`. A tool *result* belongs here: it is where the CLI's own wording lives. |
+| `refused` | a refusal stated as a fact. With a `command`, Factory **parks the run** — see [`security/default-profile.md`](security/default-profile.md). |
+
+Report `refused` only for a genuine permission refusal, never for a command that merely exited
+non-zero: a failing test suite is not a permissions problem, and parking every red build is the
+fastest way to have this turned off. Prefer whatever your CLI states structurally — an event kind,
+a field — over its wording. Factory's own reader was written after a wording pattern was measured
+missing the exact run it was written for, because the CLI said "no approval surface" and the agent's
+summary of it said "no approval interface".
+
+A provider with no reader is read as plain text, exactly as before.
+
 ## A doctor rule
 
 ```js
@@ -171,6 +230,42 @@ context.provide('doctor-rule', {
 A rule that throws is reported and the other rules still run. Losing every check because one plugin
 misbehaved is the opposite of what `doctor` is for.
 
+## A reliability evaluator
+
+An evaluator classifies what Factory observed and proposes findings. It **cannot** return a score —
+there is no field for one, and everything it returns crosses `normalize()` before anything else sees
+it. That is deliberate: an agent asked how good its own work is answers 98, every time.
+
+```js
+context.provide('reliability-evaluator', {
+  id: 'acme-lint-history',
+  summary: 'Checks whether this task touched files that keep coming back.',
+  // Optional. Absent means always. The agent evaluator uses it to decline a
+  // run that produced nothing worth paying to read.
+  wants: ({ latest }) => latest.some((o) => o.kind === 'artifact'),
+  evaluate: ({ observations, drivers }) => ({
+    dimensions: { regressionSafety: { score: 70, rationale: 'three of these files churn weekly' } },
+    drivers: [{
+      title: 'checkout.ts has changed in five of the last six tasks',
+      type: 'regression', severity: 'medium', owner: 'developer',
+      dimension: 'regressionSafety', scoreImpact: -4,
+    }],
+    // Ids of existing drivers this evaluator believes are no longer true.
+    resolves: [],
+    summary: 'Churn is the weak part.',
+  }),
+})
+```
+
+Every evaluator registered runs, and one that throws is a warning on the run rather than a failed
+run — the deterministic one's judgement still stands. What `normalize()` refuses, and why the bound
+on `scoreImpact` is the important one, is in
+[`reliability/evaluators.md`](reliability/evaluators.md).
+
+To ask an agent, use `input.agent` rather than spawning anything: the host renders the command,
+filters the environment and enforces the deadline, and hands you back text. It is absent when there
+is nothing to ask — say so through `wants` and be skipped.
+
 ## A task tool
 
 A tool is a button on a task. It answers with a directory and, optionally, argv — and performs
@@ -186,7 +281,7 @@ context.provide('task-tool', {
   run: 'detached',
   offer: ({ task, workspace, env }) =>
     workspace === undefined
-      ? { unavailable: 'This task belongs to no project.' }
+      ? { unavailable: 'Factory cannot find the project this task belongs to.' }
       : { command: { command: 'open', args: [`https://runbook.acme.test/${task.id}`] } },
 })
 ```

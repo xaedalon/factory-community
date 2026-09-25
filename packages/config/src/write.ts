@@ -1,16 +1,30 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
-import type { Agent, CapabilityLookup, Phase, Problem, Workflow } from '@factory/core'
+import type {
+  Agent,
+  CapabilityLookup,
+  HookRegistry,
+  Phase,
+  Problem,
+  Profile,
+  ProviderCapability,
+  Workflow,
+} from '@factory/core'
 import {
+  PROVIDER_KIND,
   parseAgentFile,
   parsePhaseFile,
+  parseProfileFile,
   parseWorkflowFile,
+  profileProblems,
   updateExistingAgent,
   updateExistingPhase,
+  updateExistingProfile,
   updateExistingWorkflow,
   writeNewAgent,
   writeNewPhase,
+  writeNewProfile,
   writeNewWorkflow,
 } from '@factory/core'
 import type { ScopeChain, ScopeKind } from './scopes.js'
@@ -33,8 +47,18 @@ export function etagOf(raw: string): string {
 export interface WriteRequest {
   readonly chain: ScopeChain
   readonly host: CapabilityLookup
+  /**
+   * The hooks a plugin may have registered, if this caller has any.
+   *
+   * Optional, and absence means no hooks run — the same degrade-by-absence as
+   * everything else here, and what lets a bundle be written without a host
+   * that loaded plugins. `CapabilityLookup` deliberately does not carry them:
+   * a capability is a thing to call, a hook is a thing that gets called, and
+   * only a caller that owns the host has the second.
+   */
+  readonly hooks?: HookRegistry
   readonly kind: DefinitionKind
-  readonly definition: Workflow | Phase | Agent
+  readonly definition: Workflow | Phase | Agent | Profile
   readonly scope?: ScopeKind
   /**
    * The etag the caller last read. When it no longer matches, the file changed
@@ -60,11 +84,60 @@ interface DefinitionHandler {
   read(text: string): { problems: readonly Problem[] }
 }
 
-export function writeDefinition(request: WriteRequest): WriteOutcome {
-  const { chain, kind, definition } = request
+export async function writeDefinition(request: WriteRequest): Promise<WriteOutcome> {
+  const { chain, kind } = request
   const target = writeTarget(chain, request.scope)
-  const file = definitionPath(target, kind, definition.name)
+  const file = definitionPath(target, kind, request.definition.name)
   const exists = existsSync(file)
+
+  // The two hooks the plugin SDK has always declared, run where every write
+  // passes through — the API, the CLI, a bundle import and scaffolding a
+  // project all get the same answer. They were declared, documented, counted
+  // in conformance reports and never called once.
+  //
+  // Validation first, because a definition somebody's plugin considers invalid
+  // should be refused before anything is asked to adjust it. Then the write
+  // hook, which may replace the definition or refuse outright. What it returns
+  // is still read back below: a hook that adjusts a definition into something
+  // Factory cannot load is refused by the same check that catches a bad client.
+  let definition = request.definition
+
+  // A profile is the one kind whose validity depends on what is *installed*:
+  // whether its arguments would reach Full Access is a question about each
+  // provider's own flags. `parseProfile` has no host on purpose — a profile
+  // names providers and none of them has to be present for it to be written
+  // down — so the check happens here, where the host is, and before a plugin
+  // is asked to adjust something that is going to be refused anyway.
+  if (kind === 'profile') {
+    const providers = request.host
+      .list<ProviderCapability>(PROVIDER_KIND)
+      .map((entry) => entry.capability.descriptor)
+    const problems = profileProblems(definition as Profile, providers, { file })
+    const refusals = problems.filter((problem) => problem.severity === 'error')
+    if (refusals.length > 0) return { status: 'refused', problems: refusals }
+  }
+
+  if (request.hooks !== undefined) {
+    const problems = (
+      await request.hooks.collect('validateDefinition', {
+        kind,
+        name: definition.name,
+        definition,
+        file,
+      })
+    ).filter((problem) => problem.severity === 'error')
+    if (problems.length > 0) return { status: 'refused', problems }
+
+    const outcome = await request.hooks.transform('beforeDefinitionWrite', {
+      kind,
+      name: definition.name,
+      definition,
+      scope: target.kind,
+      file,
+    })
+    if (outcome.action === 'reject') return { status: 'refused', problems: outcome.problems }
+    definition = outcome.value.definition as typeof definition
+  }
 
   /**
    * How each kind is written and read back.
@@ -89,6 +162,11 @@ export function writeDefinition(request: WriteRequest): WriteOutcome {
       write: () => writeNewAgent(definition as Agent),
       patch: (raw) => updateExistingAgent(raw, definition as Agent),
       read: (text) => parseAgentFile(text, file),
+    },
+    profile: {
+      write: () => writeNewProfile(definition as Profile),
+      patch: (raw) => updateExistingProfile(raw, definition as Profile),
+      read: (text) => parseProfileFile(text, file),
     },
   }
   const handler = handlers[kind]

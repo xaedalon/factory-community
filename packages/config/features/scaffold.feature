@@ -6,8 +6,9 @@ Feature: A project gets its own copy of the built-ins that ask for one
 
   Copying rather than warning, because the warning on its own leaves someone to
   work out which file to create and what to put in it. The copy is the answer
-  to both, and it arrives committed with the repository so everyone who clones
-  it gets the same one.
+  to both, and it lands in the repository ready to share the moment that
+  project shares its Factory directory — whereupon everyone who clones it gets
+  the same one.
 
   Background:
     Given a project scope and a user scope

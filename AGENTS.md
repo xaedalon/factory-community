@@ -17,6 +17,24 @@ Two of its rules before you begin: **explain the whole plan to the person before
 and **never accept Factory's security disclaimer for them**. Nothing runs until a human has read
 what an agent run can reach, and that gate exists for every client, including you.
 
+## Driving Factory
+
+Factory serves the Model Context Protocol, so you can operate it rather than only install it:
+resolve the project you are standing in, see what it can run, create a task, queue it, follow the
+run. Point your client at `factory mcp` and read [`docs/mcp.md`](docs/mcp.md).
+
+Two things it will not let you do, before you try: it will not accept the security disclaimer —
+that is a person's, and the refusal says so — and it will not approve anything, because an
+approval an agent can give itself is not a gate.
+
+Setting that up is a runbook of its own:
+[`skills/factory-mcp-install/SKILL.md`](skills/factory-mcp-install/SKILL.md). It asks one question
+before it writes anything — everywhere on this machine, or only in one repository — and defaults to
+everywhere. A repository install writes a `.mcp.json` that will appear in somebody's `git status`,
+which it says before writing rather than after.
+[`skills/factory-mcp-uninstall/SKILL.md`](skills/factory-mcp-uninstall/SKILL.md) is the other
+direction, and removes no Factory data at all.
+
 ## Removing Factory
 
 Read [`skills/factory-uninstall/SKILL.md`](skills/factory-uninstall/SKILL.md) and follow it exactly.

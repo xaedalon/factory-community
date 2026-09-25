@@ -19,25 +19,120 @@
   --color-raised: #16161c;
   --color-overlay: #1d1d24;
 
-  /* Hairlines. Borders here are separators, not decoration. */
-  --color-line: #252525;
-  --color-line-strong: #34343c;
+  /*
+   * Hairlines. Borders here are separators, not decoration.
+   *
+   * They were decoration. On these surfaces a card's fill is 1.04:1 against the
+   * page behind it — invisible, by design, because the border was meant to do
+   * the separating. #252525 did it at 1.31:1, and the table rows that faded it
+   * to 60% separated at 1.14:1, which is nothing at all. "Elements have no
+   * clear distinction" was the most common piece of feedback on this interface,
+   * and this is the whole mechanism behind it.
+   *
+   * #35353f is 1.65:1 against `base` and 1.59:1 against `surface`. That is
+   * still a hairline and not a frame, and it is the cheapest available fix:
+   * lifting the *surfaces* instead would separate them the same amount and cost
+   * a second pass over every text colour, because `ink-faint` clears AA on
+   * `surface` by 0.05 and nothing else has much room either.
+   */
+  --color-line: #35353f;
+  --color-line-strong: #4a4a57;
 
-  /* Text. Three weights is enough; a fourth just makes things muddy. */
+  /*
+   * Text. Three weights is enough; a fourth just makes things muddy.
+   *
+   * `ink-faint` was #5c5c66, which is 2.9:1 on `surface` — under WCAG AA's
+   * 4.5:1, and under even the 3:1 large-text floor, at the 11px it is always
+   * used at. It sets every table column header, all seven section headings on
+   * the task page and the nav tagline, so the whole labelling layer of the app
+   * was below the line. #7a7a86 is 4.6:1 and reads the same.
+   */
   --color-ink: #f0f0f0;
   --color-ink-muted: #9a9aa4;
-  --color-ink-faint: #5c5c66;
+  --color-ink-faint: #7a7a86;
 
-  /* The one accent. */
+  /*
+   * The one accent — and the one thing it cannot do.
+   *
+   * #6d5cf5 is 4.7:1 behind white, so it is a sound *fill*: buttons, the active
+   * nav row. As *ink* on `surface` it is 4.1:1 and fails, which is what it was
+   * doing on every task name's hover in the board table and in the project
+   * scope badge. So the fill and the ink are two tokens now. Reach for
+   * `accent-text` whenever the accent is the colour of letters.
+   */
   --color-accent: #6d5cf5;
+  --color-accent-text: #8f83f7;
   --color-accent-soft: #6d5cf526;
 
 
-  /* Status. Also used for scope badges, so they read consistently. */
+  /*
+   * Status. Also used for scope badges, so they read consistently.
+   *
+   * `pending` is the sixth: queued work, which the interface reference draws
+   * purple and which had no token at all, so four files spelled it #a78bfa by
+   * hand. It is deliberately *not* `accent` — colour means status here and
+   * interaction there, and one hue doing both is how the two meanings blur.
+   *
+   * All six are ≥4.5:1 on `surface`; `danger` is the closest at 4.9:1, so it
+   * is the one to re-measure if these surfaces are ever lightened.
+   */
+  --color-pending: #a78bfa;
   --color-ok: #18b870;
   --color-info: #00c8d8;
   --color-warn: #f0a020;
   --color-danger: #e5484d;
+
+  /*
+   * The ranks, so a heading can outrank the labels inside it.
+   *
+   * 292 text-size utilities and 287 of them were 14px or smaller, which is a
+   * page where nothing outranks anything. Two ranks were missing and two were
+   * redundant: `text-[10px]` and `text-[11px]` were one rank spelled twice,
+   * 118 times between them, and there was no section heading at all.
+   *
+   * Written here because the alternative is what happened while these pages
+   * were being converted: `text-lg leading-snug font-medium` typed out eleven
+   * times across four files, which is the drift the top of this file exists to
+   * complain about. Tailwind 4 reads the modifiers too, so one utility carries
+   * size, leading and weight together.
+   *
+   * `label` keeps `font-mono` and `uppercase` at the call site: neither is in
+   * this namespace, and a label is not always uppercase.
+   */
+  --text-display: 28px;
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.01em;
+  --text-display--font-weight: 500;
+
+  --text-title: 18px;
+  --text-title--line-height: 1.3;
+  --text-title--font-weight: 500;
+
+  --text-metric: 30px;
+  --text-metric--line-height: 1;
+
+  --text-label: 11px;
+  --text-label--line-height: 1;
+  --text-label--letter-spacing: 0.08em;
+
+  /*
+   * The other mono rank: facts *about* a thing rather than the thing itself.
+   *
+   * A version, a count, a byte size, a timestamp, a state. It was spelled
+   * `text-[10px]` forty-five times and `text-[11px]` twenty-three more — the
+   * same rank written two ways, which is the half of the audit's type finding
+   * that `--text-label` did not cover.
+   *
+   * Same size as `label` and deliberately not the same utility: a label is
+   * tracked and upper-cased because it names a column, and a version number
+   * spaced out like a heading is just harder to read.
+   *
+   * Above it sits `.value` at 13px, which is for text a person will later see
+   * in a file — a name, a path, a command. That distinction is worth keeping:
+   * one is content, this is the annotation beside it.
+   */
+  --text-meta: 11px;
+  --text-meta--line-height: 1.35;
 
   --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
   --font-mono: 'DM Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -116,9 +211,22 @@
   --color-ink-faint: #75757f;
 
   --color-accent: #5231d6;
+  /*
+   * In light the accent is dark enough to be ink on its own, so the two are
+   * the same value here. The split exists because #6d5cf5 on a dark surface is
+   * 4.1:1; #5231d6 on white is 7.6:1 and needs no lighter twin.
+   */
+  --color-accent-text: #5231d6;
   --color-accent-soft: #5231d61a;
 
-  --color-ok: #0f9d5e;
+  /*
+   * Each status re-darkened for white. Without an entry here a token keeps its
+   * dark-palette value and is read on white: #a78bfa is 2.7:1 that way, which
+   * is how `pending` would have arrived — invisible — the moment the two
+   * palettes met.
+   */
+  --color-pending: #6d4fd8;
+  --color-ok: #087544;
   --color-info: #00647a;
   --color-warn: #8f5308;
   --color-danger: #b8262d;
@@ -193,6 +301,30 @@ body {
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+}
+
+/**
+ * The page's own rhythm, declared once.
+ *
+ * Every page had `px-8 py-6` and then decided the distance between its
+ * sections for itself: Settings was `space-y-8`, Plugins `space-y-6`, and
+ * Scopes and Setup had nothing at all, standing their sections apart with an
+ * `mt-4` here and an `mb-6` there. Four pages of the same shape, four
+ * rhythms, and the difference is visible the moment you move between them.
+ *
+ * The same argument as `--text-title` above it: a value repeated by hand in
+ * fifteen files is a value that will disagree with itself, and this one had
+ * already started.
+ *
+ * A flex gap rather than `space-y-*`, because a gap belongs to the container
+ * and cannot be half-cancelled by a child's own margin — which is how the
+ * ad-hoc versions drifted in the first place.
+ */
+.page-body {
+  padding: 1.5rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
 }
 
 /**

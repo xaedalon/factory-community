@@ -12,8 +12,14 @@ import {
 import { PROVIDER_KIND, checkAgentStep, type ProviderCapability } from '../providers/capability.js'
 import { isAgentStep, type AgentStep } from '../builtins/steps.js'
 import type { Approval, Phase } from '../schema/phase.js'
+import type { Profile } from '../schema/profile.js'
 import { artifactFile, artifactsRoot, joinPath } from '../task/paths.js'
-import type { Scheduling, Workflow, WorkflowMode } from '../schema/workflow.js'
+import type {
+  Scheduling,
+  Workflow,
+  WorkflowMode,
+  WorkflowReliability,
+} from '../schema/workflow.js'
 import { substituteDeep, type VariableScope } from './variables.js'
 import {
   lexicalCanonical,
@@ -22,7 +28,7 @@ import {
   type Canonicalise,
 } from '../security/boundary.js'
 import { DEFAULT_PROFILE, isConfined, type ExecutionProfile } from '../security/profile.js'
-import { blankTaskTokens } from './tokens.js'
+import { blankProjectTokens, blankTaskTokens } from './tokens.js'
 
 /**
  * Turn definitions into something that could actually be run.
@@ -87,6 +93,13 @@ export interface PlanRequest {
    * decision. Everything else the profile affects is decided at render time.
    */
   readonly profile?: ExecutionProfile
+  /**
+   * The profile's definition, when it is a custom one.
+   *
+   * Resolved by whoever has a scope chain — core cannot read one. Absent under a
+   * built-in profile, which is every run that has not chosen otherwise.
+   */
+  readonly profileDefinition?: Profile
   /**
    * How to resolve a path before comparing it to the workspace.
    *
@@ -159,6 +172,13 @@ export interface ResolvedPlan {
   /** Flags cleared from the task when this run completes. */
   readonly clears: readonly string[]
   readonly onFail?: string
+  /**
+   * What the workflow said it contributes to reliability, carried through.
+   *
+   * A schema field nothing consumes is a defect here, and this is where it is
+   * consumed: the engine hands it to whoever judges the run.
+   */
+  readonly reliability?: WorkflowReliability
   readonly phases: readonly ResolvedPhase[]
 }
 
@@ -219,11 +239,20 @@ export function resolvePlan(request: PlanRequest): PlanResult {
       // prompt and the collector came to name different files once already.
       // There is one derivation, and both halves read it.
       task: asStrings({ ...blankTaskTokens(), ...(request.task ?? {}), artifacts }),
-      project: request.project ?? {},
+      // The same floor the task namespace has had since it was needed. Without
+      // it a foreground run left `{{ project.check }}` in the command as
+      // literal text, which is neither the project's gate nor a failure worth
+      // reading.
+      project: { ...blankProjectTokens(), ...(request.project ?? {}) },
       workflow: workflow.variables,
       phase: phase.variables,
       // Phase values win over workflow values, which win over project values.
-      variables: { ...request.project, ...workflow.variables, ...phase.variables },
+      variables: {
+        ...blankProjectTokens(),
+        ...request.project,
+        ...workflow.variables,
+        ...phase.variables,
+      },
     }
 
     const cwd = phase.workingDir === undefined ? workspace : join(workspace, phase.workingDir)
@@ -290,6 +319,9 @@ export function resolvePlan(request: PlanRequest): PlanResult {
         cwd,
         artifacts,
         profile,
+        ...(request.profileDefinition === undefined
+          ? {}
+          : { profileDefinition: request.profileDefinition }),
         ...(request.allowedDirectories === undefined
           ? {}
           : { allowedDirectories: request.allowedDirectories }),
@@ -324,6 +356,35 @@ export function resolvePlan(request: PlanRequest): PlanResult {
     phases.push({ name: phase.name, approval: phase.approval, cwd, steps })
   }
 
+  // A plan that would run nothing is refused rather than executed.
+  //
+  // It used to be executed, and it looked exactly like success: `runPlan` walks
+  // zero phases, returns `completed`, and the run lands in the database three
+  // milliseconds later with no steps and no artifact. A supervised run of ten
+  // tasks had a `design` workflow shaped like this on every one of them —
+  // `phases: []`, which the schema accepts — and the board showed a tick beside
+  // work that had not happened.
+  //
+  // Counted in steps rather than phases, so a workflow listing only phases that
+  // are themselves empty is caught by the same check. Both are the same claim:
+  // there is nothing here to run, and saying so is the only honest outcome.
+  //
+  // An error, so it takes the path a missing phase already takes — no plan, a
+  // run recorded `refused`, and the task blocked with a reason somebody can act
+  // on.
+  if (phases.every((phase) => phase.steps.length === 0)) {
+    problems.push({
+      severity: 'error',
+      message:
+        `Workflow "${workflow.name}" has nothing to run: ` +
+        (workflow.phases.length === 0
+          ? 'it lists no phases.'
+          : `every phase it lists (${workflow.phases.join(', ')}) has no steps.`),
+      field: 'phases',
+      rule: 'plan.nothingToRun',
+    })
+  }
+
   if (!isClean(problems)) return { problems }
 
   return {
@@ -338,6 +399,7 @@ export function resolvePlan(request: PlanRequest): PlanResult {
       provides: workflow.conditions?.provides ?? [],
       clears: workflow.conditions?.clears ?? [],
       ...(workflow.onFail === undefined ? {} : { onFail: workflow.onFail }),
+      ...(workflow.reliability === undefined ? {} : { reliability: workflow.reliability }),
       phases,
     },
     problems,

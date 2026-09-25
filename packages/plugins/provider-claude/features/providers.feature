@@ -19,7 +19,15 @@ Feature: Agent providers
 
   Scenario: A model role resolves to the provider's own identifier
     Then "strong" resolves to "opus" for "claude"
-    And "strong" resolves to "claude-opus-5" for "copilot"
+    And "strong" resolves to "claude-opus-5.5" for "copilot"
+
+  Scenario: Copilot dots a model's minor version rather than hyphenating it
+    # Both of these were once hyphenated. `claude-opus-5-5` was refused outright
+    # — "Model ... from --model flag is not available" — and `claude-haiku-4-5`
+    # would have been, the first time anybody asked for the fast role. GitHub's
+    # own SDK documents the form: `e.g. "claude-haiku-4.5"`.
+    Then "fast" resolves to "claude-haiku-4.5" for "copilot"
+    And "balanced" resolves to "claude-sonnet-5" for "copilot"
 
   Scenario: A literal model identifier passes through untouched
     Then "claude-fable-5" resolves to "claude-fable-5" for "claude"
@@ -169,6 +177,32 @@ Feature: Agent providers
       And the arguments name the tools the agent needs
       And the arguments include "--permission-prompts none"
       And the arguments do not include "bypassPermissions"
+
+    Scenario: The Default profile lets the agent run the project's package manager
+      # Measured on 2.1.281: `--tools` still grants Bash, but `acceptEdits`
+      # auto-approves edits and not commands, so `pnpm install` needed approval
+      # and `--permission-prompts none` denied it. An agent that cannot run
+      # your tests writes a report full of ticks instead.
+      Given an agent step with the prompt "Analyse WW2-1234"
+      When it is rendered for "claude" under "default"
+      Then the arguments allow "pnpm"
+      And the arguments allow "npm"
+
+    Scenario: No interpreter is on the allow-list
+      # `--restricted` confines Factory's file tools and the shell's own
+      # redirection. It cannot confine what a child process does with its own
+      # syscalls, so `Bash(node *)` hands that command the whole filesystem —
+      # measured: `node -e writeFileSync('/tmp/x')` wrote the file.
+      Given an agent step with the prompt "Analyse WW2-1234"
+      When it is rendered for "claude" under "default"
+      Then the arguments do not allow "node"
+      And the arguments do not allow "python"
+      And the arguments do not allow a bare tool name
+
+    Scenario: Full Access needs no allow-list
+      Given an agent step with the prompt "Analyse WW2-1234"
+      When it is rendered for "claude" under "full-access"
+      Then the arguments do not include "--allowedTools"
 
     Scenario: The Full Access profile removes the restriction
       Given an agent step with the prompt "Analyse WW2-1234"

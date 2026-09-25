@@ -36,7 +36,9 @@ export const diffityTool: TaskToolCapability = {
   offer: (context) => {
     const workspace = context.workspace
     if (workspace === undefined) {
-      return { unavailable: 'This task belongs to no project, so there is nothing to diff.' }
+      return {
+        unavailable: 'Factory cannot find the project this task belongs to, so there is nothing to diff.',
+      }
     }
     // `isRepository` already answers this. Probing the filesystem for a `.git`
     // would be a second implementation of a question the project row settled

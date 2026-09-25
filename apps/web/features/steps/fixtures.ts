@@ -1,5 +1,10 @@
+// The one workspace import in this file, and it is a *test* dependency: these
+// scenarios are about what the board draws, and building a five-phase pipeline
+// with a real agent to get a graph with a dip in it would make them about
+// something else. The engine's own scenarios cover the judging.
+import { MIGRATIONS, ReliabilityRepository, RunRepository, openStore } from '@factory/store'
 import { spawn, type ChildProcess } from 'node:child_process'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
@@ -38,6 +43,8 @@ export class World {
   readonly root = mkdtempSync(join(tmpdir(), 'factory-web-'))
   readonly workDir = join(this.root, 'work')
   readonly projectScope = join(this.workDir, '.xaedalon', '.factory')
+  /** The project the daemon starts with, which every task lands in by default. */
+  defaultProject = ''
   readonly userScope = join(this.root, 'home', '.xaedalon', '.factory')
   /**
    * A second repository, with definitions of its own.
@@ -151,6 +158,10 @@ export class World {
     this.write(join(scope, 'phases', `${name}.phase.yaml`), body)
   }
 
+  profile(scope: string, name: string, body: string): void {
+    this.write(join(scope, 'profiles', `${name}.profile.yaml`), body)
+  }
+
   /**
    * A third-party plugin, on disk, loaded the way a real one would be.
    *
@@ -245,6 +256,7 @@ export default {
 
   async startDaemon(): Promise<void> {
     if (this.disabled || this.#daemon !== undefined) return
+    await refuseIfTaken()
 
     const env: NodeJS.ProcessEnv = {
       ...process.env,
@@ -272,6 +284,10 @@ export default {
       stdio: 'ignore',
     })
     await waitForHealth()
+    // A task cannot be created without a project, so the working directory is
+    // registered as one. Scenarios that are about projects add their own; this
+    // is the one everything else lands in.
+    this.defaultProject = await this.addProject('workspace', this.workDir)
   }
 
   /** Create a task the way the board would, so a scenario can start from one. */
@@ -282,11 +298,160 @@ export default {
       body: JSON.stringify({
         name,
         workflows,
-        ...(projectId === undefined ? {} : { projectId }),
+        projectId: projectId ?? this.defaultProject,
       }),
     })
     const body = (await response.json()) as { task: { id: string } }
     return body.task.id
+  }
+
+  /**
+   * The database the daemon actually opened.
+   *
+   * `writableRoot` picks the default write scope, which is the project's when
+   * the working directory has one — so hard-coding the user scope here wrote a
+   * judgement into a second, empty database and the task's foreign key had
+   * nothing to point at. Asked of the filesystem rather than reimplemented, so
+   * a change to that rule cannot leave this silently judging the wrong file.
+   */
+  #database(): string {
+    for (const scope of [this.projectScope, this.userScope]) {
+      const file = join(scope, 'state', 'factory.db')
+      if (existsSync(file)) return file
+    }
+    throw new Error('The daemon has not opened a database yet: start it before judging a task.')
+  }
+
+  /**
+   * Put a judgement on a task, the way a run would have.
+   *
+   * Written straight into the database rather than by running a workflow: these
+   * scenarios are about what the board *draws*, and building a five-phase
+   * pipeline with a real agent to get a graph with a dip in it would make them
+   * about something else. The engine's own scenarios cover the judging.
+   */
+  async judge(
+    taskId: string,
+    assessments: readonly {
+      score: number
+      coverage: number
+      delta: number
+      workflow?: string
+      summary?: string
+      consideredRunId?: string
+      caps?: { type: string; value: number; reason: string }[]
+      causes?: { summary: string; amount: number }[]
+    }[],
+  ): Promise<void> {
+    const store = openStore({
+      file: this.#database(),
+      migrations: MIGRATIONS,
+    })
+    try {
+      const reliability = new ReliabilityRepository({ db: store.db })
+      for (const entry of assessments) {
+        reliability.record({
+          taskId,
+          trigger: 'run',
+          ...(entry.workflow === undefined ? {} : { workflow: entry.workflow }),
+          ...(entry.consideredRunId === undefined
+            ? {}
+            : { consideredRunId: entry.consideredRunId }),
+          score: entry.score,
+          rawScore: entry.score,
+          coverage: entry.coverage,
+          delta: entry.delta,
+          summary: entry.summary ?? '',
+          dimensions: {
+            understanding: 90,
+            precedent: 88,
+            design: 91,
+            implementation: 89,
+            regressionSafety: 84,
+            verification: 80,
+          },
+          caps: entry.caps ?? [],
+          explanation: {
+            contributions: [],
+            rawScore: entry.score,
+            caps: entry.caps ?? [],
+            effectiveScore: entry.score,
+            causes: entry.causes ?? [],
+          },
+          scoringModelVersion: '1.0',
+        })
+      }
+    } finally {
+      store.close()
+    }
+  }
+
+  /**
+   * Finish a run on a task without running one.
+   *
+   * Staleness is the one thing on this card that is about two facts rather than
+   * one: an assessment considered a run, and another has finished since. A
+   * scenario that could not produce the second fact could only assert the
+   * absence of the warning, which is the half that never breaks.
+   */
+  async finishedRun(taskId: string, workflow: string): Promise<string> {
+    const store = openStore({ file: this.#database(), migrations: MIGRATIONS })
+    try {
+      const runs = new RunRepository({ db: store.db })
+      const run = runs.start({ workflow, taskId })
+      runs.finish(run.id, 'completed')
+      return run.id
+    } finally {
+      store.close()
+    }
+  }
+
+  /** Put a finding on a task, so the drivers list has something to draw. */
+  async addDriver(
+    taskId: string,
+    driver: { title: string; severity: string; owner: string; scoreImpact?: number },
+  ): Promise<string> {
+    const store = openStore({
+      file: this.#database(),
+      migrations: MIGRATIONS,
+    })
+    try {
+      const reliability = new ReliabilityRepository({ db: store.db })
+      const created = reliability.addDriver({
+        taskId,
+        title: driver.title,
+        type: 'regression',
+        severity: driver.severity as 'high',
+        owner: driver.owner as 'agent',
+        dimension: 'regressionSafety',
+        scoreImpact: driver.scoreImpact ?? -3,
+      })
+      return created.id
+    } finally {
+      store.close()
+    }
+  }
+
+  /**
+   * A directory that looks like a git repository and has no Factory scope.
+   *
+   * Registering one is what a person does the first time, and it is the case
+   * where Factory writes into their repository.
+   */
+  makeRepository(name: string): string {
+    const path = join(this.root, name)
+    mkdirSync(join(path, '.git'), { recursive: true })
+    return path
+  }
+
+  /** Back to an installation with nothing registered. */
+  async removeEveryProject(): Promise<void> {
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/projects`)
+    const body = (await response.json()) as { items: { id: string }[] }
+    for (const item of body.items) {
+      await fetch(`http://127.0.0.1:${PORT}/api/projects/${item.id}`, { method: 'DELETE' })
+    }
+    this.defaultProject = ''
   }
 
   /** Register a project the way the projects page would. */
@@ -331,6 +496,34 @@ export default {
     rmSync(this.root, { recursive: true, force: true })
     await waitForPortFree()
   }
+}
+
+/**
+ * Refuse to run against a daemon this suite did not start.
+ *
+ * `FACTORY_PORT` lets a run avoid a real Factory on 7317; it did not stop one
+ * *attaching* to whatever answers. A scenario that ran against a developer's
+ * own installation is how that was found: it passed and failed against their
+ * data, and the only clue was 404s for tasks the suite had never created.
+ *
+ * Avoiding a collision is not the same as refusing one, and the difference
+ * matters most on the default ports, which is where somebody who has not read
+ * this file will be.
+ */
+async function refuseIfTaken(): Promise<void> {
+  try {
+    const response = await fetch(`http://127.0.0.1:${PORT}/api/health`, {
+      signal: AbortSignal.timeout(1_000),
+    })
+    if (!response.ok) return
+  } catch {
+    // Nothing is listening, which is what this wants.
+    return
+  }
+  throw new Error(
+    `Something is already serving 127.0.0.1:${PORT}, and this suite did not start it. ` +
+      `Stop it, or run on ports of your own: FACTORY_PORT=7417 FACTORY_WEB_PORT=5417 pnpm test:e2e`,
+  )
 }
 
 async function waitForHealth(): Promise<void> {

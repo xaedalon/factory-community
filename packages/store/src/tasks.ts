@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { EventBus } from '@factory/events'
 import {
+  IN_FLIGHT,
   applyAction,
   availableActions,
   queueOrder,
@@ -55,6 +56,8 @@ interface TaskRow {
   completed_at: string | null
   session_id: string | null
   session_provider: string | null
+  created_by: string | null
+  created_by_run_id: string | null
 }
 
 export interface TaskRepositoryOptions {
@@ -100,11 +103,16 @@ export interface CreateTask {
   readonly name: string
   /** What the work is for. Stored as '' when unwritten, never NULL. */
   readonly description?: string
-  readonly projectId?: string
+  /** Required. A task with nowhere to happen runs wherever the daemon started. */
+  readonly projectId: string
   readonly ticketId?: string
   readonly branch?: string
   readonly directory?: string
   readonly workflows?: readonly WorkflowSelection[]
+  /** A label for whoever asked, when it was not a person. Read by people only. */
+  readonly createdBy?: string
+  /** The run whose agent asked for this, from the environment Factory stamped. */
+  readonly createdByRunId?: string
 }
 
 export class TaskRepository {
@@ -121,6 +129,11 @@ export class TaskRepository {
   }
 
   create(input: CreateTask): Task {
+    // Checked here rather than left to the NOT NULL column, so the refusal says
+    // what is missing instead of surfacing a constraint name.
+    if (input.projectId === undefined || input.projectId.trim() === '') {
+      throw new Error('A task needs a project: it decides where the work happens.')
+    }
     const now = this.#now()
     const id = this.#newId()
     // Slugged whether it was supplied or derived, and then made unique.
@@ -138,15 +151,19 @@ export class TaskRepository {
 
     return this.#db.transaction(() => {
       this.#db.run(
-        `INSERT INTO tasks (id, name, description, project_id, ticket_id, branch, directory, state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)`,
+        `INSERT INTO tasks
+           (id, name, description, project_id, ticket_id, branch, directory, state,
+            created_by, created_by_run_id, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?)`,
         id,
         input.name,
         input.description?.trim() ?? '',
-        input.projectId ?? null,
+        input.projectId,
         input.ticketId ?? null,
         input.branch ?? null,
         directory,
+        input.createdBy ?? null,
+        input.createdByRunId ?? null,
         now,
         now,
       )
@@ -161,6 +178,24 @@ export class TaskRepository {
   get(id: string): Task | undefined {
     const row = this.#db.get<TaskRow>('SELECT * FROM tasks WHERE id = ?', id)
     return row === undefined ? undefined : this.#hydrate(row)
+  }
+
+  /**
+   * How many tasks one run's agent has asked for.
+   *
+   * Counted rather than kept on the run, because the answer has to survive a
+   * task being deleted: a counter would say ten after somebody tidied five
+   * away, and an agent would be refused work it had every right to ask for.
+   *
+   * Archived ones are counted. A task that was archived still happened, and a
+   * run that could reset its own budget by archiving is not budgeted.
+   */
+  countCreatedBy(runId: string): number {
+    const row = this.#db.get<{ total: number }>(
+      'SELECT COUNT(*) AS total FROM tasks WHERE created_by_run_id = ?',
+      runId,
+    )
+    return row?.total ?? 0
   }
 
   /**
@@ -386,6 +421,74 @@ export class TaskRepository {
   }
 
   /**
+   * Move a task to another project.
+   *
+   * A task has to be created in *some* project now, so choosing the wrong one
+   * is an ordinary mistake — and the only remedy used to be deleting it and
+   * making it again, which throws away its history, its runs and everything
+   * they recorded.
+   *
+   * Refused while work is happening. Moving changes where the work happens:
+   * the task may be in a worktree of the old project and the run in flight is
+   * spawning steps there, so the row that decides the directory must not
+   * change underneath it.
+   *
+   * Refused while anything depends on it, either way round. An edge may only
+   * join two tasks in the same project — `dependOn` says why — so moving one
+   * end would leave behind an edge the store would refuse to create.
+   *
+   * The directory is left alone, for the reason `rename` gives: it is the
+   * task's identity on disk. A moved task's worktree goes under the new
+   * project's root the next time one is made, and the old one is somebody
+   * else's to remove — which is what `doctor.worktreeMissing` is for.
+   */
+  move(id: string, projectId: string): Task {
+    return this.#db.transaction(() => {
+      const task = this.get(id)
+      if (task === undefined) throw new Error(`No task ${id}.`)
+      if (task.projectId === projectId) return task
+
+      if (IN_FLIGHT.includes(task.state)) {
+        throw new Error(
+          `"${task.name}" is ${task.state}: a task cannot change project while work is happening.`,
+        )
+      }
+
+      const project = this.#db.get<{ name: string }>(
+        'SELECT name FROM projects WHERE id = ?',
+        projectId,
+      )
+      if (project === undefined) throw new Error(`No project ${projectId}.`)
+
+      const edges = this.#db.get<{ n: number }>(
+        'SELECT count(*) AS n FROM task_dependencies WHERE task_id = ? OR depends_on_id = ?',
+        id,
+        id,
+      )
+      if ((edges?.n ?? 0) > 0) {
+        throw new Error(
+          `"${task.name}" waits for something, or something waits for it. ` +
+            `A dependency between projects has no owner, so remove the edges first.`,
+        )
+      }
+
+      this.#db.run(
+        'UPDATE tasks SET project_id = ?, updated_at = ? WHERE id = ?',
+        projectId,
+        this.#now(),
+        id,
+      )
+      const moved = this.get(id)
+      if (moved === undefined) throw new Error(`No task ${id}.`)
+      // No event of its own: every listener that cares about where a task is
+      // reloads on `task.transitioned` already, and inventing `task.moved`
+      // would be a second name for "this task changed" that half of them
+      // would not know about.
+      return moved
+    })
+  }
+
+  /**
    * What the task is for.
    *
    * Its own method rather than a second argument to `rename`, because the two
@@ -540,10 +643,9 @@ export class TaskRepository {
       if (id === blockerId) {
         throw new Error(`"${task.name}" cannot depend on itself.`)
       }
-      // Ids, so this compares what the graph is keyed by. Both undefined — two
-      // tasks belonging to no project — counts as the same project: they are
-      // equally unowned, and refusing would make dependencies impossible for
-      // anyone not using projects yet.
+      // Ids, so this compares what the graph is keyed by. Both are always set
+      // now — a task cannot exist without a project — so this is the plain
+      // question it looks like.
       if (task.projectId !== blocker.projectId) {
         throw new Error(
           `"${task.name}" and "${blocker.name}" are in different projects, ` +
@@ -789,6 +891,8 @@ export class TaskRepository {
     if (row.session_id !== null && row.session_provider !== null) {
       task.session = { id: row.session_id, provider: row.session_provider }
     }
+    if (row.created_by !== null) task.createdBy = row.created_by
+    if (row.created_by_run_id !== null) task.createdByRunId = row.created_by_run_id
     return task as unknown as Task
   }
 }

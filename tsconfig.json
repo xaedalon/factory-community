@@ -35,10 +35,16 @@
       "path": "./packages/plugins/task-diffity"
     },
     {
+      "path": "./packages/plugins/reliability-agent"
+    },
+    {
       "path": "./packages/plugins/provider-codex"
     },
     {
       "path": "./packages/plugins/provider-copilot"
+    },
+    {
+      "path": "./packages/mcp"
     },
     {
       "path": "./apps/cli"

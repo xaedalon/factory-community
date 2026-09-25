@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 import {
   closedWithExtensions,
+  DEFAULT_ORCHESTRATION_LIMITS,
   DEFAULT_PROFILE,
   EXECUTION_PROFILES,
   problemsFromZod,
@@ -85,6 +86,49 @@ const shape = {
      */
     profile: z.enum(EXECUTION_PROFILES).default(DEFAULT_PROFILE),
   }).default({ profile: DEFAULT_PROFILE }),
+  /**
+   * What reads the work, for a project that has not said.
+   *
+   * All three optional with **no default**. A default model here would spend
+   * somebody's tokens on a decision nobody made, and the whole point of the
+   * agent evaluator being opt-in is that the free deterministic one always runs.
+   *
+   * A project overrides any of the three on its own page; `resolveJudge` in
+   * `@factory/core` is the one place that decides which wins.
+   */
+  reliability: closedWithExtensions({
+    provider: z.string().min(1).optional(),
+    /** A role — `strong`, `balanced`, `fast` — or a literal id, as `RenderRequest.model` takes. */
+    model: z.string().min(1).optional(),
+    effort: z.string().min(1).optional(),
+  }).default({}),
+  orchestration: closedWithExtensions({
+    /**
+     * How far work may start work.
+     *
+     * An agent Factory launched can reach the daemon, so it can ask for a task,
+     * whose agent can ask for a task. Three is deep enough for the shape this
+     * is for — delegate, verify, stop — and shallow enough that a runaway is
+     * over in seconds rather than after an afternoon of agents. Zero means only
+     * a person may start work, which is a legitimate thing to want.
+     */
+    maxDepth: z.number().int().min(0).max(10).default(DEFAULT_ORCHESTRATION_LIMITS.maxDepth),
+    /**
+     * How many tasks one run's agent may ask for.
+     *
+     * The other half of the same bound: depth alone leaves a single run free to
+     * queue a thousand.
+     */
+    maxTasksPerRun: z
+      .number()
+      .int()
+      .min(0)
+      .max(1000)
+      .default(DEFAULT_ORCHESTRATION_LIMITS.maxTasksPerRun),
+  }).default({
+    maxDepth: DEFAULT_ORCHESTRATION_LIMITS.maxDepth,
+    maxTasksPerRun: DEFAULT_ORCHESTRATION_LIMITS.maxTasksPerRun,
+  }),
   plugins: closedWithExtensions({
     /**
      * Plugins the installation has switched off.
@@ -108,6 +152,22 @@ export interface SettingsPatch {
   readonly security?: {
     readonly acceptedVersion?: number
     readonly profile?: ExecutionProfile
+  }
+  readonly orchestration?: {
+    readonly maxDepth?: number
+    readonly maxTasksPerRun?: number
+  }
+  /**
+   * `null` clears a value; `undefined` leaves it alone.
+   *
+   * The only group with optional values and no default, so it is the only one
+   * that can be *un*-set — and an installation default nobody can un-set is a
+   * default they cannot stop paying for.
+   */
+  readonly reliability?: {
+    readonly provider?: string | null
+    readonly model?: string | null
+    readonly effort?: string | null
   }
 }
 
@@ -187,24 +247,40 @@ export function writeSettings(
   }
 
   const current = readSettings(chain).settings
-  // Merged one level down, per named group. The cost of that is this function:
-  // a new top-level group not added here is written nowhere and *silently* —
-  // the call succeeds, the file is rewritten, and the new value is gone. Worth
-  // replacing with something that cannot be forgotten; until then it is held by
-  // scenarios that write one group and check the others survived.
-  const merged = {
-    ...current,
-    kind: SETTINGS_KIND,
-    ui: { ...current.ui, ...(patch.ui ?? {}) },
-    security: { ...current.security, ...(patch.security ?? {}) },
-    plugins: {
-      ...current.plugins,
-      ...(patch.plugins === undefined
-        ? {}
-        : patch.plugins.disabled === undefined
-          ? {}
-          : { disabled: [...patch.plugins.disabled] }),
-    },
+
+  /**
+   * Merged one level down, so saving the interface scale does not discard the
+   * execution profile.
+   *
+   * Over the patch's own keys rather than a list of groups kept here. The list
+   * was the cost: a new top-level group added to `SettingsPatch` and not added
+   * to it was written nowhere, and *silently* — the call succeeded, the file
+   * was rewritten, and the value was gone. There is nothing left to forget.
+   *
+   * `undefined` inside a group means "not mentioned", never "clear it": a
+   * caller that spreads an optional field in under `exactOptionalPropertyTypes`
+   * would otherwise erase what is already there.
+   *
+   * `null` is how "clear it" is spelled, and it is spelled at all because one
+   * group — `reliability` — has optional values with no default. Without this
+   * there was no way to take a value back out of the file: writing `undefined`
+   * left it, and writing `null` was refused by the schema.
+   *
+   * The result is parsed against the schema below before anything is written,
+   * which is what makes the indexing here safe to do dynamically.
+   */
+  const groups = current as unknown as Record<string, Record<string, unknown>>
+  const merged: Record<string, unknown> = { ...current, kind: SETTINGS_KIND }
+  for (const [name, values] of Object.entries(patch)) {
+    if (values === undefined) continue
+    const entries = Object.entries(values as Record<string, unknown>).filter(
+      ([, value]) => value !== undefined,
+    )
+    const stated = Object.fromEntries(entries.filter(([, value]) => value !== null))
+    const cleared = entries.filter(([, value]) => value === null).map(([key]) => key)
+    const group: Record<string, unknown> = { ...groups[name], ...stated }
+    for (const key of cleared) delete group[key]
+    merged[name] = group
   }
 
   const text = `${JSON.stringify(merged, undefined, 2)}\n`

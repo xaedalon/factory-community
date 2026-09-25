@@ -3,9 +3,17 @@ import type { Capability } from '../capabilities.js'
 import type { Problem } from '../problems.js'
 import type { AgentStep, SessionScope } from '../builtins/steps.js'
 import { MODEL_ROLES } from '../model-roles.js'
-import { permissionArgsFor, type ProviderDescriptor, type ProviderFeature } from './descriptor.js'
+import {
+  NO_GRANTS,
+  commandArgsFor,
+  permissionArgsFor,
+  type ProfileGrants,
+  type ProviderDescriptor,
+  type ProviderFeature,
+} from './descriptor.js'
 import { DEFAULT_PROFILE, isConfined, type ExecutionProfile } from '../security/profile.js'
 import type { DenialPattern } from '../security/denials.js'
+import type { StreamReaderFactory } from './stream.js'
 
 export const PROVIDER_KIND = 'provider'
 
@@ -87,6 +95,15 @@ export interface RenderRequest {
    * profile — under Full Access there is nothing to grant.
    */
   readonly allowedDirectories?: readonly string[]
+  /**
+   * What a custom profile adds, already resolved for this provider.
+   *
+   * Absent under a built-in profile, which is every run that has not chosen
+   * one. Resolved by whoever planned the step, because that is what knows which
+   * provider is about to run and therefore which share of the profile's
+   * `providers:` map applies.
+   */
+  readonly grants?: ProfileGrants
 }
 
 export interface ProviderCapability extends Capability {
@@ -99,6 +116,19 @@ export interface ProviderCapability extends Capability {
     env: Readonly<Record<string, string | undefined>>,
     options?: { extraDirectories?: readonly string[]; configFile?: string },
   ) => Availability
+  /**
+   * How to read this CLI's structured output, if it emits any.
+   *
+   * Code rather than data, and on the capability rather than the descriptor,
+   * because a transcript format is a parser and a parser is not expressible in
+   * YAML. It sits here rather than in its own capability kind for one reason: a
+   * reader without the provider whose output it reads is meaningless, and a
+   * separate kind would make that pairing something to get wrong.
+   *
+   * Absent means "read the output as text", which is every provider that has
+   * not been measured. Degrading by absence, as everywhere else here.
+   */
+  readonly stream?: StreamReaderFactory
 }
 
 /**
@@ -152,9 +182,55 @@ export function resolveModel(
   return model
 }
 
+/**
+ * The confined list with the flags a profile is about to re-issue taken out.
+ *
+ * `commandArgsFor` folds what the profile allows *into* what the profile
+ * already allowed and emits one flag. Leaving the original in place would emit
+ * two, and for a variadic option the second replaces the first — so the merge
+ * would silently drop exactly the entries it was written to preserve.
+ */
+function withoutFlagsRewritten(
+  args: readonly string[],
+  descriptor: ProviderDescriptor,
+  grants: ProfileGrants,
+): readonly string[] {
+  const rewritten = new Set<string>()
+  if (grants.commands.length > 0 && descriptor.commandAllowFlag !== undefined) {
+    rewritten.add(descriptor.commandAllowFlag)
+  }
+  if (grants.denyCommands.length > 0 && descriptor.commandDenyFlag !== undefined) {
+    rewritten.add(descriptor.commandDenyFlag)
+  }
+  if (rewritten.size === 0) return args
+
+  const kept: string[] = []
+  for (let at = 0; at < args.length; at++) {
+    const argument = args[at] as string
+    if (rewritten.has(argument)) {
+      at++ // its value goes with it
+      continue
+    }
+    kept.push(argument)
+  }
+  return kept
+}
+
 export function render(descriptor: ProviderDescriptor, request: RenderRequest): RenderedCommand {
   const profile = request.profile ?? DEFAULT_PROFILE
-  const args: string[] = [...permissionArgsFor(descriptor, profile), ...descriptor.extraArgs]
+  const confined = permissionArgsFor(descriptor, profile)
+
+  // A custom profile's grants are merged **here**, against the confined list
+  // that has just been read, because the allow flag may already be in it — and
+  // a second copy of a variadic flag replaces the first rather than extending
+  // it. This is the only place that holds both halves, so it is the only place
+  // that can join them without one silently winning.
+  const granted = commandArgsFor(descriptor, request.grants ?? NO_GRANTS, confined)
+  const args: string[] = [
+    ...withoutFlagsRewritten(confined, descriptor, request.grants ?? NO_GRANTS),
+    ...granted,
+    ...descriptor.extraArgs,
+  ]
 
   // Before the model and the prompt, so the grant is adjacent to the rest of
   // the authority this argv carries and reads as one decision.
@@ -236,6 +312,59 @@ function sessionArgs(
  * by `doctor`, not discovered when the second step arrives with no memory of
  * the first.
  */
+/**
+ * Whether this CLI takes the settings it is being handed.
+ *
+ * Extracted from `checkAgentStep` because a step is no longer the only thing
+ * that carries a model and an effort: a project names them for the agent that
+ * judges its work, and that answer has to be the same answer. One
+ * implementation of "does this CLI take these settings", so a descriptor gaining
+ * a flag cannot make one caller right and the other wrong.
+ *
+ * Warnings, never errors. An ignored setting is a setting that does nothing,
+ * which is worth saying and is not worth refusing a run over.
+ */
+export function checkProviderSettings(
+  provider: ProviderCapability,
+  settings: {
+    readonly model?: string | undefined
+    readonly effort?: string | undefined
+    readonly subagent?: string | undefined
+  },
+): Problem[] {
+  const problems: Problem[] = []
+  const { descriptor } = provider
+
+  if (settings.effort !== undefined && descriptor.effortFlag === undefined) {
+    problems.push({
+      severity: 'warning',
+      message: `"${provider.id}" has no effort setting, so "effort: ${settings.effort}" is ignored.`,
+      field: 'effort',
+      rule: 'provider.effortUnsupported',
+    })
+  }
+
+  if (settings.subagent !== undefined && descriptor.subagentFlag === undefined) {
+    problems.push({
+      severity: 'warning',
+      message: `"${provider.id}" has no sub-agent setting, so "subagent: ${settings.subagent}" is ignored.`,
+      field: 'subagent',
+      rule: 'provider.subagentUnsupported',
+    })
+  }
+
+  if (settings.model !== undefined && descriptor.modelFlag === undefined) {
+    problems.push({
+      severity: 'warning',
+      message: `"${provider.id}" has no model setting, so "model: ${settings.model}" is ignored.`,
+      field: 'model',
+      rule: 'provider.modelUnsupported',
+    })
+  }
+
+  return problems
+}
+
 export function checkAgentStep(provider: ProviderCapability, step: AgentStep): Problem[] {
   const problems: Problem[] = []
   const { descriptor } = provider
@@ -251,33 +380,13 @@ export function checkAgentStep(provider: ProviderCapability, step: AgentStep): P
     })
   }
 
-  if (step.effort !== undefined && descriptor.effortFlag === undefined) {
-    problems.push({
-      severity: 'warning',
-      message: `"${provider.id}" has no effort setting, so "effort: ${step.effort}" is ignored.`,
-      field: 'effort',
-      rule: 'provider.effortUnsupported',
-    })
-  }
-
-  if (step.subagent !== undefined && descriptor.subagentFlag === undefined) {
-    problems.push({
-      severity: 'warning',
-      message: `"${provider.id}" has no sub-agent setting, so "subagent: ${step.subagent}" is ignored.`,
-      field: 'subagent',
-      rule: 'provider.subagentUnsupported',
-    })
-  }
-
-  const model = step.model
-  if (model !== undefined && descriptor.modelFlag === undefined) {
-    problems.push({
-      severity: 'warning',
-      message: `"${provider.id}" has no model setting, so "model: ${model}" is ignored.`,
-      field: 'model',
-      rule: 'provider.modelUnsupported',
-    })
-  }
+  problems.push(
+    ...checkProviderSettings(provider, {
+      ...(step.effort === undefined ? {} : { effort: step.effort }),
+      ...(step.subagent === undefined ? {} : { subagent: step.subagent }),
+      ...(step.model === undefined ? {} : { model: step.model }),
+    }),
+  )
 
   if (descriptor.provisional) {
     problems.push({

@@ -42,8 +42,16 @@ export function registerEventRoutes(app: FastifyInstance, runtime: Runtime): voi
     })
     reply.raw.write(': connected\n\n')
 
+    // No `event:` field, deliberately. A named SSE frame only reaches a client
+    // that already knows to listen for that name, so naming them made every
+    // consumer keep its own copy of the event vocabulary — and the board's copy
+    // had 14 of the 23 names in it. An event missing from such a list is not an
+    // error anywhere; the client simply stops updating for it, silently.
+    //
+    // The name is in the payload, where a client that wants to filter can read
+    // it, and where it cannot go out of date.
     const off = runtime.events.onAny((event) => {
-      reply.raw.write(`event: ${event.name}\ndata: ${JSON.stringify(event)}\n\n`)
+      reply.raw.write(`data: ${JSON.stringify(event)}\n\n`)
     })
 
     // A comment line every 15 seconds, so an idle connection is not closed by

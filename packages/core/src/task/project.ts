@@ -11,6 +11,17 @@ import type { ExecutionProfile } from '../security/profile.js'
  * spell it the same way. Nothing here touches the filesystem — that belongs to
  * whoever writes the row.
  */
+/**
+ * How many hues a project's square can be.
+ *
+ * The real source of truth is `--color-project-1` to `-6` in the board's
+ * `tokens.css`, which neither this package nor the daemon can import — so the
+ * number is written here for the sides that validate it, and the board keeps
+ * its own copy for the sides that draw it. If a seventh hue is ever added it
+ * has to be added in both, and the store will refuse it until it is.
+ */
+export const PROJECT_TONES = 6
+
 export interface Project {
   readonly id: string
   /** Unique, and what a person types. */
@@ -62,6 +73,32 @@ export interface Project {
    */
   readonly profile?: ExecutionProfile
   /**
+   * The hue this project's square uses, 1 to 6, when it has chosen one.
+   *
+   * Absent means derived from the name, which is what every project did before
+   * this existed and what a new one still does. An index into the closed set of
+   * `--color-project-N` hues rather than a colour, so a project cannot sit
+   * outside the palette.
+   */
+  readonly tone?: number
+  /** The letters on the square, when chosen. Absent means derived from the name. */
+  readonly initials?: string
+  /**
+   * The one command that says whether this project's work is sound.
+   *
+   * `npm test`, `make check`, `cargo test` — whatever this repository already
+   * runs in CI. It reaches a phase as `{{ project.check }}`, and the built-in
+   * `project-check` phase is nothing but that command, so a workflow ending in
+   * a real gate is one word in its phase list.
+   *
+   * Absent means nobody has said, which is not the same as "there is nothing
+   * to run": `project-check` then refuses to plan rather than running an empty
+   * command and reporting success, which is the failure this whole field
+   * exists to stop. `detectCheckCommand` fills it in where a repository says
+   * plainly enough what it is.
+   */
+  readonly check?: string
+  /**
    * Directories this project has allowed beyond its workspace, for good.
    *
    * What "allow for this project" leaves behind. Directories rather than
@@ -74,6 +111,39 @@ export interface Project {
    * something different depending on which task was running.
    */
   readonly grantedDirectories: readonly string[]
+  /**
+   * The model that judges this project's work, when one does.
+   *
+   * The deterministic evaluator is free and always runs. An agent evaluator
+   * costs tokens on every run that produced something, and what that is worth
+   * spending differs between a weekend project and a payments service — so the
+   * choice is the project's, and a powerful model is usually the right one.
+   *
+   * Absent means nobody has said, which is why it is not the same as
+   * `reliabilityEnabled: false`: one of them starts working the moment a model
+   * is named, and the other does not.
+   *
+   * A role (`strong`, `balanced`, `fast`) or a literal model id, because that
+   * is what `RenderRequest.model` already accepts and a second vocabulary for
+   * the same field would be one to keep in step.
+   */
+  readonly reliabilityModel?: string
+  /**
+   * Which agent CLI reads the work. Absent follows the installation's choice,
+   * and absent there too means whichever provider is installed.
+   */
+  readonly reliabilityProvider?: string
+  /** How hard it should think. Absent follows the installation, then nothing. */
+  readonly reliabilityEffort?: string
+  /**
+   * Whether this project's work is judged at all.
+   *
+   * On by default: a task that says how much to trust it is the feature, and a
+   * project that has to opt in is one where the answer is missing precisely
+   * where nobody thought to look. Off keeps the model that was chosen, so
+   * turning it back on is one click rather than two decisions.
+   */
+  readonly reliabilityEnabled: boolean
   readonly createdAt: string
 }
 
@@ -229,12 +299,10 @@ export function unavailableFor(
  */
 export function workspaceFor(
   task: { readonly directory?: string | undefined },
-  project: (ProjectFacilities & Pick<Project, 'path' | 'worktreesRoot'>) | undefined,
+  project: ProjectFacilities & Pick<Project, 'path' | 'worktreesRoot'>,
   exists: (path: string) => boolean,
   join: Join,
-): Workspace | undefined {
-  if (project === undefined) return undefined
-
+): Workspace {
   // A project that works in place skips the first step entirely. That is not
   // only the setting doing its job: a directory left over under
   // `worktreesRoot` from before the setting changed cannot silently win.

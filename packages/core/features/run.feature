@@ -251,3 +251,33 @@ Feature: Running a plan
       When the plan is run
       Then the run completed
       And the output says "ANTHROPIC_API_KEY" was present
+
+  Rule: a step that asks for stdin gets it
+
+    `stdin:` comes from a provider descriptor — several agent CLIs hang forever
+    headless without one — and it was declared, carried onto the planned step,
+    printed by `--dry-run` as `< file`, and then dropped: the runner hard-coded
+    `stdio: ['ignore', …]` and never opened anything. `/dev/null` made that
+    harmless by accident, and a descriptor asking for a real prompt file would
+    have been silently ignored while the printed command said otherwise.
+
+    Scenario: The file a step asks for arrives on its stdin
+      Given a file "prompt.txt" holding "hello from the file"
+      And a phase "ask" whose step reads stdin and takes "prompt.txt" as input
+      When the plan is run
+      Then the run completed
+      And the output says "hello from the file"
+
+    Scenario: A step that asks for nothing still gets a closed stdin
+      Given a phase "ask" whose step reads stdin
+      When the plan is run
+      # Closed rather than inherited: a step waiting on input nobody will send
+      # should fail now rather than at the deadline.
+      Then the run completed
+      And the output is empty
+
+    Scenario: A file that is not there is the step's failure, not the runner's
+      Given a phase "ask" whose step takes a missing file as input
+      When the plan is run
+      Then the run failed
+      And the step says it could not open its input

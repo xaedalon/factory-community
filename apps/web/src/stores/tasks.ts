@@ -224,6 +224,18 @@ export const useTasks = defineStore('tasks', () => {
     task.workflows.find((entry) => entry.enabled)?.workflow
 
   /**
+   * What to put in the Workflow column, whatever state the task is in.
+   *
+   * Every finished row drew an em dash, because the current workflow is the
+   * *next* one and a finished task has none — so the column read as missing
+   * data on exactly the rows where the answer is most obvious. A task with
+   * nothing left to run shows the last one it ran instead, and only a task
+   * with no workflows at all has nothing to say.
+   */
+  const workflowLabel = (task: TaskListItem): string | undefined =>
+    currentWorkflow(task) ?? task.workflows.at(-1)?.workflow
+
+  /**
    * The tasks the board is about.
    *
    * The project is not one of the filter controls: it is chosen in the rail and
@@ -293,6 +305,7 @@ export const useTasks = defineStore('tasks', () => {
     summary,
     workflows,
     currentWorkflow,
+    workflowLabel,
     load,
     connect,
     disconnect,

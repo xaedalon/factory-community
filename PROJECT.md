@@ -15,13 +15,17 @@ This document is the source of truth, written as the project is built.
 
 ## Status
 
-**Eighteen increments in, and the whole loop works**: author a workflow in the browser or by hand,
-point a task at a repository, queue it, and the daemon gives it a worktree, runs the agents, keeps
-what they printed and what they produced, stops at the gate you asked for, and continues when you
-approve. From a terminal, from the board, or from Pro's desktop app — the same API either way.
-**5,457 Gherkin steps green below the browser** across 50 feature files, 157 of them in a real
-browser, and smoke runs against the real agent CLIs. Every one of those runs in CI, on macOS and
-Linux, alongside a job that installs from a clean clone and asks the daemon for a page.
+**Eighteen increments and a release in, and the whole loop works**: author a workflow in the browser
+or by hand, point a task at a repository, queue it, and the daemon gives it a worktree, runs the
+agents, keeps what they printed and what they produced, stops at the gate you asked for, and
+continues when you approve. From a terminal, from the board, or from Pro's desktop app — the same API
+either way. Since 0.1.0 it also says how much to trust what came back, runs under a profile the
+repository wrote, and can be driven over MCP.
+
+**8,660 Gherkin steps green below the browser** across 62 feature files, and **235 scenarios in a
+real browser** across five more, plus smoke runs against the real agent CLIs. Every one of those runs
+in CI, on macOS and Linux, alongside a job that installs from a clean clone and asks the daemon for a
+page.
 
 Since increment 17 an agent is also **confined to the workspace it was given**, handed an
 environment with the credentials taken out, and stoppable — process tree and all. What that
@@ -36,6 +40,13 @@ task when what it waits for is done. *Stop all* halts a project's work in one re
 `factory setup` is where a new machine starts: what is still missing, and the command that fixes
 each one. It is a registry, so the answer comes from whoever knows it — the provider plugins, the
 engine, and Pro.
+
+Since `factory mcp` Factory can also be **driven by an agent**: sixteen Model Context Protocol
+tools over stdio, so Claude Code, Codex or Copilot can resolve the project you are standing in,
+create a task, queue it and read what came back. It is a client of the same HTTP API the board and
+the CLI use, so it inherits the disclaimer gate, the execution profile and the workspace boundary
+rather than repeating them — and work that starts work is bounded by the daemon, because a rule
+only one client enforces is advice. [`docs/mcp.md`](docs/mcp.md) is the feature.
 
 Increment 1 — **capability core + definition layer**. Authoring, storing, resolving, validating and
 sharing workflow and phase definitions, plus a foreground runner that proves the contract is
@@ -779,6 +790,704 @@ aspirational standard moved to `docs/proposals/`, so its path says what its
 banner always said. No token-shaped string appears in any commit of the
 history; no absolute home path does either.
 
+## After 0.1.0 — a task belongs to a project
+
+| # | What | State |
+|--:|------|-------|
+| 91 | **`tasks.project_id` is `NOT NULL`**, with the migration that gets an existing database there | ✅ done |
+| 92 | **Removing a project is refused** while anything is left in it, with the count | ✅ done |
+| 93 | **The fallbacks deleted** — a dozen of them, across core, engine, daemon, board and CLI | ✅ done |
+| 94 | **The scheduler's gates ask about the workflow about to run** | ✅ done |
+| 95 | **Worktree removal leaves the worktree first** | ✅ done |
+
+The column was nullable, and everything downstream carried a fallback for the
+case. A task with no project ran **wherever the daemon happened to be started**
+— `service.ts` spelled it out twice, for the workspace and again for artifacts
+— which is what the doctor's own setup rule calls "fine for a demonstration and
+wrong for work". Removing a project orphaned its tasks rather than refusing, so
+this was not hypothetical: 21 tasks ended up project-less on one installation
+simply because somebody tidied a list.
+
+The justification, written into `projects.feature`, was that `factory run` in a
+directory needs no project. **It was false.** `factory run` creates no task at
+all — `apps/cli/src/commands/run.ts` touches neither repository; it plans
+against the scope chain of wherever it was invoked and runs in the foreground.
+So nothing was ever kept on a task's behalf by allowing one to belong nowhere.
+
+Decisions, each with a defensible alternative:
+
+- **Refuse the removal rather than cascade.** Deleting a project would delete
+  the record of work that really happened; orphaning kept the record in a form
+  nobody could use. Refusing keeps it by keeping the project, and the message
+  names the count — including archived tasks, because the foreign key counts
+  those too and a count that skipped them would promise a removal the database
+  then refuses.
+- **Delete the rows that are already orphaned.** There is nothing to give them.
+  The migration says how many at boot, which is why `up()` can now return a
+  note: deleting somebody's rows is a one-way door that runs unattended when a
+  daemon starts, and "it is in the schema" is not telling them.
+- **The definition library stays browsable without a project.**
+  `chains.for(projectId?)` keeps its optionality — `factory --serve` has no
+  projects at all, and the builder is useful before the first repository is
+  added.
+- **What remains of "no project" is corruption.** A project row that is not
+  there now means a hand-edited database. Read paths tolerate it so the board
+  can still draw the task and say what is wrong; anything that would *run*
+  refuses and names the project it cannot find.
+
+**The landmine, found by measuring rather than by worrying.** `migrate()` opens
+its transaction before `up()` runs, and `PRAGMA foreign_keys` is a documented
+no-op inside one. `DROP TABLE tasks` with enforcement on deletes the parent
+rows first, firing every `ON DELETE CASCADE` child: every run, step, log,
+artifact, flag, history row and dependency edge of **every task**, including the
+ones being kept. A rebuild without the new `rebuildsForeignKeys` opt-in reports
+`expected +0 to be 1` in its own scenario — the child row destroyed. That opt-in
+toggles the pragma outside the transaction, and the migration ends with `PRAGMA
+foreign_key_check` rather than assuming, in the same spirit as migration 15's
+cycle check. It earned its place immediately: `task_flags` had been left out of
+the orphan cleanup, and the check is what said so.
+
+**Verified against a real database**, not only a seeded one — a copy of an
+installation's own file at version 15, with 11 tasks, 1 orphan and 42 runs. The
+orphan and its four runs went; the ten owned tasks kept all 38 runs, 38 steps,
+63 logs, 37 artifacts, 44 history rows, 50 workflow entries and 9 edges, and
+`foreign_key_check` came back empty.
+
+**Two defects landed in the same branch**, because they live in the files this
+one touched.
+
+The scheduler's `#factsFor` read the *newest run's* workflow, falling back to
+`workflows[0]`. Neither is what a queued task is about to run, so a task whose
+first workflow had finished was admitted on the lane and the requirements of
+work that was already over — agents ran in a project's own checkout because the
+flag gate was asked about a workflow needing no worktree, and two `merge`
+workflows overlapped because the lane gate was asked about the parallel one
+before them. No scenario caught it: every one gave its task a single workflow,
+so all three readings coincided. It now follows the task's state, mirroring
+`Engine.start` — a running task is on its newest run's workflow, which after an
+`on_fail` is a recovery workflow that is not in the list at all; anything else
+is on what `start` would pick.
+
+Worktree removal ran **inside the worktree it was removing**: the workspace is
+resolved when the plan is made, while the worktree is still there. Git was left
+with no current directory to read, so the prune never ran, the step failed, and
+`clears: [hasWorktree]` never took effect — the task kept a flag for a worktree
+that was gone. The step kind is given only a path, so the script now finds the
+repository from the worktree while it still exists and moves there first. Both
+halves are asserted with real git, because the old script exited 0 while
+printing `fatal: Unable to read current working directory`.
+
+**Mutation testing found two gaps and two equivalent mutants.** Dropping `NOT
+NULL` from the rebuilt table and swapping `RESTRICT` back to `SET NULL` both
+survived: every path to the database went through a repository that refused
+first, so the constraints themselves were never exercised — the "declared and
+inert" shape this codebase keeps paying for. Two scenarios now write straight
+to the database and expect it to refuse. Afterwards, dropping `NOT NULL` fails;
+`SET NULL` still survives and is genuinely equivalent, because SQLite refuses a
+`SET NULL` action against a `NOT NULL` column. Reordering the orphan cleanup is
+equivalent too, and for a reason worth writing down: the ids go into a temp
+table first, so no delete reads `tasks` and the order cannot matter.
+
+## After 0.1.0 — the things noticed while building something else
+
+| # | What | State |
+|--:|------|-------|
+| 96 | **The two definition hooks run** — declared, documented and never called | ✅ done |
+| 97 | **`stdin:` is honoured**, and `RunState 'declined'` has a writer | ✅ done |
+| 98 | **One copy of the event vocabulary**, one of the hook names, `process.env` banned | ✅ done |
+| 99 | **A project gets a scope**; a missing one is a 400 rather than a 500 | ✅ done |
+| 100 | **A setting cannot be dropped silently** by a merge that was not told about it | ✅ done |
+| 101 | **A step records the command it ran** | ✅ done |
+| 102 | **A task can be moved to another project** | ✅ done |
+| 103 | **Doctor reports a dead blocker** before the queue reaches it | ✅ done |
+| 104 | **Export follows `needs`** | ✅ done |
+| 105 | **The board says what to add first**, and `pnpm mutate` makes the discipline a command | ✅ done |
+
+Things noticed while building something else are written down as they are
+found — each one a file and a line rather than a feeling — and the list is kept
+outside this repository, because most of its entries are about work in
+progress. This is the session that worked through it: twenty-four entries
+closed, each with the commit that closed it, and two of those closed as
+decisions to leave them alone.
+
+Four findings are worth repeating here, because they are about how this
+codebase fails rather than about any one defect.
+
+**A seam that is declared and never called is the recurring shape.** Both
+definition hooks had been on the plugin SDK since the host was built: counted
+in every conformance report, described in `docs/plugins.md`, and never invoked
+once. `PlannedStep.stdin` was set from a descriptor, carried onto the planned
+step, printed by `--dry-run` as `< file`, and dropped by a runner that
+hard-coded `stdio: ['ignore', …]`. `RunState 'declined'` had no writer — and
+that one was not cosmetic: `reject` left its run paused for ever, so a retry
+*resumed past the gate that had just been refused*. A comment promising
+`beforeStepRun` "once there is a Step type" was the same defect in prose, and
+says why there is no third hook now instead.
+
+**A guarantee enforced at one point is a hint everywhere else.**
+`scheduling: sequential` was checked where the scheduler admits a task, and a
+task stays `running` from its first workflow to its last — so a sequential
+workflow anywhere but first was serialised against nothing. Two `merge`
+workflows ran 20ms apart, twice. The lane is held by the engine now, around the
+execution of each plan that asks for one, which is the unit the field is about.
+
+**A constraint nothing exercises can be dropped without anybody noticing.** Two
+mutations survived their first round — removing `NOT NULL` from the rebuilt
+`tasks` table, and swapping `RESTRICT` back to `SET NULL` — because every path
+to the database went through a repository that refused first. Two scenarios now
+write straight to the database and expect it to refuse. (The second is an
+equivalent mutant: SQLite raises on a `SET NULL` action against a `NOT NULL`
+column, so the two spellings cannot be told apart.)
+
+**A wire format that needs the receiver to know the vocabulary guarantees a
+second copy of it.** `GET /api/events` named each SSE frame after its event,
+which only reaches a client already listening for that name — so the board kept
+its own list, with 14 of the 23 names in it, and an event missing from it was
+one the board silently stopped updating for. Unnamed frames need no list at all.
+
+The discipline itself is a command now. `pnpm mutate` takes a file, a string, a
+replacement and a suite — or a JSON file of them — restores the source whatever
+happens, and exits non-zero if a mutation survived *or could not be applied*,
+because a mutation nobody ran is not a mutation that passed.
+
+## After 0.1.0 — a repository is the user's
+
+| # | What | State |
+|--:|------|-------|
+| 106 | **`.xaedalon/` is ignored the moment Factory creates it** — including the ignore file itself | ✅ done |
+| 107 | **The narrow ignore covers the database and bundle backups**, which were never ignored | ✅ done |
+| 108 | **Doctor asks git** what it can see of a project, and says nothing when both answers are coherent | ✅ done |
+| 109 | **`factory doctor` merges the daemon's report**, which nothing had ever printed | ✅ done |
+
+Two questions, and the first one had no code in it.
+
+**Does `.xaedalon` belong in a worktree?** No, and it never did: a task's
+artifacts, their dated copies and the ignore file are all written under the
+*project*, whatever workspace the steps ran in, and worktrees live outside the
+repository entirely. Evidence is copied into the database as well as left on
+disk for exactly this reason. What does land in a worktree is whatever the
+steps themselves write — a project's own environment build, deliberately — and
+`.xaedalon/.factory` as **tracked files git checked out**, when the definitions
+are committed. The one exception is `factory run`, which has no project and so
+writes beside whatever workspace it is given. All of that is now said in
+`docs/workflows.md` rather than only implied by comments.
+
+**Should Factory write an ignore file?** It already did, and it was the wrong
+one. `.xaedalon/.gitignore` ignored `.factory/tasks/`, which left the
+definitions untracked-and-visible — so registering a project dropped a
+directory of unexplained files into somebody's `git status` and invited a
+commit they had not decided to make.
+
+The default is reversed. The file Factory writes when it **creates** the
+directory contains `*`, which hides everything under it including the file
+itself, so adding a project leaves a repository exactly as it was. Sharing is
+then a decision, and it costs one edit — which is why most of that file is a
+comment explaining how to make it. This is deliberately the opposite of the
+recipe written everywhere else, `*` followed by `!.gitignore`; the point here
+is that git sees nothing at all, and the constant carries a note saying so
+before somebody "fixes" it.
+
+Decisions taken with the owner:
+
+- **The same rule for `factory init` and for the board.** Both go through
+  `createScope`, so there is one behaviour to explain and one file to delete.
+- **A directory Factory did not create keeps the narrow ignore.** It may
+  already be committed and shared, and hiding it wholesale would hide that
+  team's *next* workflow while leaving the ones already committed in plain
+  sight — the half-state the new doctor rule exists to catch. That narrow body
+  also gained `.factory/state/` and `.factory/.trash/`: the database and the
+  backups a bundle import takes were never ignored, so a shared repository had
+  them sitting in `git status` all along.
+- **Doctor may spawn git.** Only git can answer what git ignores, and matching
+  `.gitignore` files here would be a second implementation of a specification
+  we do not own — the shape this codebase keeps paying for. It is the first
+  thing outside the step runner to spawn anything, and every way of failing to
+  get an answer is classified in one place so a caller never reads an exit
+  code.
+
+**The rule would have been invisible, which is its own finding.** Rules that
+need the database are registered only inside the daemon; `factory doctor`
+builds its own host without one, and the board declares `api.doctor()` and
+calls it from nowhere. So `doctor.taskBlocked`, `doctor.worktreeMissing` and
+`doctor.runRecovered` have never been printed by anything a person runs.
+`factory doctor` now asks the daemon and merges, deduplicating on the rule and
+the sentence because both halves run the installation rules over their own
+scope chains.
+
+**What the mutations taught, again.** Six survived the first round. Two were
+equivalent — a guard whose outcome the next guard already produced, and a
+spawn-failure branch the status check subsumed — and both were *deleted*
+rather than explained, because a line no scenario can distinguish is a line
+that can be dropped in a rewrite without anybody noticing. Two were assertions
+that iterated the very constant under test: dropping two of the three output
+directories from `PRODUCT_OUTPUT_DIRS` changed what the file said *and* what
+the test expected, so it passed. They name the three literally now. The last
+two were scenarios that passed for the wrong reason — one never set up the
+condition it was about, and one could not tell "the rule said nothing" from
+"the rule threw and doctor swallowed it".
+
+## After 0.1.0 — Factory can be driven by an agent
+
+| # | What | State |
+|--:|------|-------|
+| 96 | **`packages/mcp`** — JSON-RPC over stdio, sixteen tools, no new dependency | ✅ done |
+| 97 | **`factory mcp`** — the first command that owns its streams | ✅ done |
+| 98 | **`GET /api/projects/at`** — which project a directory is in, served not re-derived | ✅ done |
+| 99 | **Run ancestry** — migration 19, and the four names stamped into an agent's environment | ✅ done |
+| 100 | **Bounded orchestration** — depth, fan-out, self-orchestration, approval separation | ✅ done |
+| 101 | **`REQUESTABLE_ACTIONS`** — core publishes which of its moves a client may ask for | ✅ done |
+| 102 | **`factory-mcp-install` and `factory-mcp-uninstall`** — runbooks that ask where before writing | ✅ done |
+
+The request was a 48-section implementation standard for adding a Model Context
+Protocol server. Most of it survives; three things in it do not fit this
+codebase and were adapted rather than followed. The standard itself is
+`docs/proposals/mcp.md`, marked a target rather than a description, with a
+header saying which sections are built.
+
+**Its §1 asks for MCP handlers over the application services directly**, and the
+application layer here is importable, so that is mechanically possible and
+operationally wrong. `createService()` unconditionally reconciles on the way in,
+which finishes every running run as failed and blocks its task — a second
+process opening the live database corrupts a running installation at startup.
+The event bus and the process registry are per-process too: that server's writes
+would never reach the board's stream, and its `stopAll` would report nothing
+signalled while the agents kept working. `apps/cli/src/daemon.ts` had already
+settled this for the CLI and said why. MCP is the third client of one contract.
+
+**Its §7 asks for `factory_run_start` and `factory_run_cancel`.** Nothing here
+starts a run directly: queueing a task is what starts work, cancelling it is
+what stops work, and `Engine.watch()` kills the process group on any transition
+to `cancelled` whoever asked for it. Both are `factory_task_act`, and a scenario
+asserts neither tool exists — "we decided not to" is the kind of decision that
+gets quietly reversed.
+
+**And it assumes nouns Factory does not have.** There is no Approval entity: a
+phase declares a gate, the engine parks the run, and `approve` is a task action.
+There is no Resource entity, and no bug-fix/feature/research strategy
+vocabulary — so `factory_delegate` would put a vocabulary in the control surface
+that the board and the CLI do not have, which its own §1 forbids. §35 of the
+proposal says what that is waiting on instead of inventing it.
+
+**No SDK.** `@modelcontextprotocol/sdk` brings express, hono, jose, ajv, cors
+and a dozen more into every install of a local-first tool, to speak a
+line-based protocol over a pipe — and this repository writes a forty-line web
+route rather than take a static-file dependency. The cost is named rather than
+hidden: we own conformance, so the supported protocol revisions are a written
+list with a scenario behind the negotiation. `zod` was already here, and
+`z.toJSONSchema()` was already how step-kind schemas reach the builder, so a
+tool's input schema is published the same way as everything else.
+
+Decisions, each with a defensible alternative:
+
+- **Path resolution is the daemon's.** The CLI resolves a project by *name*,
+  with a prefix rule; the board will want the same answer. A client that worked
+  it out for itself would disagree with this one the first time the rule
+  changed. Longest match wins, so a project inside another resolves to the
+  inner one; two with an equal claim are refused by name rather than picked
+  between, because a wrong answer here queues somebody's work against the wrong
+  repository. Both sides are canonicalised, which is load-bearing rather than
+  tidy: a macOS temporary directory is a symlink and so is many a home
+  directory.
+- **A worktree resolves to its project and names its task.** More than a
+  convenience — it is an identity Factory can check against a path, which
+  matters wherever a caller's account of itself cannot be trusted.
+- **Ancestry comes from the environment, not from the client.** Every agent
+  process is told `FACTORY_RUN_ID`, `FACTORY_TASK_ID`, `FACTORY_PROJECT_ID` and
+  `FACTORY_ORCHESTRATION_DEPTH`. A client can omit them, which makes it look
+  like a person — the direction that loses authority rather than gains it. The
+  label it gives for itself is read by people and by no rule.
+- **The limits live in the daemon.** The disclaimer gate settled that argument
+  once and its comment is still the reason: a rule only the web app enforces is
+  advice, with `curl` as the exception.
+- **`approve` and `reject` are not offered over MCP at all.** Stronger than the
+  ancestry rule, and the only form that does not depend on knowing who is
+  typing: Factory can tell an agent it launched from a person's own session, but
+  not a person's session from an agent acting unasked inside it. The daemon's
+  rule stays, because this surface is not its only client.
+- **No MCP doctor rule.** Considered and refused: a directory that resolves to
+  no project is the ordinary case in a home directory, and a check that fires on
+  normal use is a check people learn to ignore. `factory doctor` already says
+  when no daemon is answering, which is the only MCP-relevant *problem*.
+
+**Three API additions**, recorded because this API is the contract a commercial
+edition builds on: `GET /api/projects/at?path=` is new; `POST /api/tasks` and
+`POST /api/tasks/:id/actions/:action` accept an optional `initiator` and answer
+409 with a code when a limit is reached; `POST /api/projects/:id/queue` accepts
+one too and skips the task its caller is running inside rather than failing the
+batch.
+
+**One duplicate deleted on the way through.** The CLI kept its own list of the
+eight actions a person can type, with a comment saying the daemon had the final
+say — true, and exactly how a list drifts, because it is right until somebody
+adds a ninth move. Core publishes `REQUESTABLE_ACTIONS` now, derived from the
+move table, and `tasks.feature` names the eight literally rather than filtering
+the list under test.
+
+**A defect found by a scenario that ran a real command.** `factory_run_logs`
+returned an empty string for any run. A run's own log holds what the engine
+wrote; everything a command printed is attached to the step that printed it, and
+`GET /api/runs/:id/logs` without a step returns only the first. It walks the
+steps now, as `factory task logs` does for a person, and each line says which
+step it came from. Nothing below a real process would have caught it.
+
+**Verified against a real MCP client, which is the half no suite can answer.** The official
+`@modelcontextprotocol/sdk` client — installed outside the repository, so Factory still takes no
+dependency on it — drove `factory mcp` over a real pipe against a throwaway installation on its own
+port and scope. It connected, negotiated, listed the sixteen tools, resolved the project from three
+directories down as `matchedBy: "ancestor"`, created a task, queued it, and watched a real
+`hello-world` run park at its approval gate with *"A person has to approve or reject this before it
+goes any further."* An agent stamped as running inside that task was refused when it tried to cancel
+it; one stamped with a run at depth 3 was refused a new task; and asking to approve was refused by
+the schema before it reached the server. stdout carried frames and nothing else throughout.
+
+**Three defects it found that every scenario had passed over**, each because a fixture was wrong
+about the real thing rather than because a rule was:
+
+- `factory_run_logs` returned an empty string for any run. A run's own log holds what the engine
+  wrote; everything a command printed is attached to the step that printed it. It walks the steps
+  now, as `factory task logs` does for a person.
+- The disclaimer never reached the agent. `DISCLAIMER` is a document — a version, a summary, five
+  points and a caveat — and the check was for a string, so the one refusal an agent cannot act on
+  alone came back as a generic error. The scenario now uses the real constant rather than a
+  sentence somebody made up.
+- A coded refusal said the same sentence twice and named no code, because the body's own `error`
+  key won the spread that was meant to add detail to it. And `FAN_OUT_LIMIT` was missing from the
+  code list entirely — a run that had asked for eleven tasks was told `FACTORY_ERROR`. The list is
+  spread from core's now.
+
+**Two runbooks, because a config file is not a procedure.** `docs/mcp.md` gives a person the two
+lines to paste; `factory-mcp-install` and `factory-mcp-uninstall` give a coding agent the steps,
+including the question this whole pair exists to ask — everywhere on this machine, or one
+repository — asked before anything is written, defaulting to everywhere. They configure whichever
+agents Factory says can consume an MCP server, read from `factory provider list --json` rather than
+a list kept in the prose, so a provider added later is covered without an edit.
+
+The vocabulary needed guarding. Factory's scopes are `project → user → builtin` and decide which
+workflows a project gets; a coding agent's scopes decide where *it* keeps a list of servers. An
+uninstall runbook that reasoned from "installed at user level" could go looking in
+`~/.xaedalon/.factory`, which is the one directory `factory-uninstall` exists to protect. So neither
+runbook says "user level": they name the file, and each says the distinction once at the top. The
+glossary's three meanings of "tool" is the same device.
+
+**Following them found four things the writing had got wrong**, which is the argument for following
+a runbook rather than reviewing it:
+
+- The Copilot CLI does **not** read a workspace `.mcp.json`. Its own help lists one as a
+  configuration source, and `copilot mcp list` reports neither it nor `.github/mcp.json`, in either
+  that file's shape or Copilot's own. "One file, both clients" was written, measured, and deleted.
+- `claude mcp remove factory` with no scope **refuses** when two scopes hold it, naming both and
+  changing nothing. The runbook had said it takes it out of whichever one has it, which is true only
+  when one does.
+- Claude Code edits a shared `.mcp.json` itself and leaves every other server in it alone — so the
+  instruction to inspect and hand-edit was replaced by one that says to use the CLI and check the
+  result. Removing the last server leaves `{"mcpServers": {}}` behind rather than deleting the file.
+- The two clients disagree about a second removal: Claude says so and carries on, Copilot answers
+  `Error: Server "factory" not found.` An agent that treated that as a fault would go looking for
+  one.
+
+Verified end to end against both real clients in an isolated `HOME`, against a throwaway daemon on
+its own port: `claude mcp list` reported `✔ Connected` for the `node <checkout>/…/bin.js mcp` form
+carrying `FACTORY_PORT`, and `copilot mcp list` named it under *User servers*.
+
+**Forty-four mutations broken and watched to fail** across the ten commits.
+Three found scenarios that passed for the wrong reason, and all three are the
+same shape — an assertion that counted rather than identified. A frame split
+across two chunks was asserted by counting frames, and a server that threw the
+first piece away answers the second with a parse error, which is also one frame.
+`factory mcp` printing nothing was asserted the same way. And a missing `?path=`
+was asserted by its status alone, which a `TypeError` about a string also
+produces.
+
+## After 0.1.0 — what a supervised run found
+
+Ten tasks were driven through Factory's MCP server end to end on 2026-09-23,
+each checked against a specification before the next started. The work came out
+right — and it took a person watching to make that true. Without one, Factory
+would have said **done** at least four times over broken work.
+
+| # | What | State |
+|--:|------|-------|
+| 110 | **A workflow that would run nothing is refused**, not completed in 3 ms | ✅ done |
+| 111 | **The Default profile can run the project's package manager again**, by an allow-list that was measured entry by entry | ✅ done |
+| 112 | **A refused command is seen, and parks the run** — the CLI's transcript read as events rather than prose | ✅ done |
+| 113 | **A project carries the command that checks its own work**, and a step whose command resolves to nothing is refused | ✅ done |
+| 114 | **A step's own `args` cannot widen the profile it runs under** | ✅ done |
+
+Everything else the report found is in
+[`docs/proposals/supervised-run-findings.md`](docs/proposals/supervised-run-findings.md), with the
+measurements attached and each item marked with what it is waiting on.
+
+**Every defect here had the same shape, and it is worth naming.** Not a crash,
+not a wrong answer — a **tick beside work that never happened**. `runPlan`
+walking zero phases returns `completed`. `bash -c ''` exits 0. `claude -p`
+exits 0 with `"subtype":"success"` on a run where the install was refused. In
+each case Factory was reading *absence of failure* as *evidence of success*,
+and absence of failure is what a thing that did nothing at all produces.
+
+**The measurements changed three of the five fixes**, which is the argument for
+running the real CLI rather than reading its help:
+
+- **A denial pattern on the CLI's wording would not have worked.** The report
+  recommended matching the refusal's phrasing. Factory sees the agent's prose,
+  and the agent paraphrases: the CLI said "no approval *surface*" and the
+  agent's own report of the same event said "no approval *interface*". A
+  pattern on either would have missed the very run that produced the report. So
+  the detector matches an **event kind** — `{"type":"system",
+  "subtype":"permission_denied"}` — which is a fact rather than a sentence.
+- **Most of the suggested allow-list could not be used.** Fifteen entries were
+  proposed, including `node`, `python`, `npx`, `make` and `cargo`, with a note
+  to re-measure each. Re-measuring removed most of them. `--restricted`
+  confines Claude Code's own file tools and the shell's redirection; it cannot
+  confine what a *child interpreter* does with its own syscalls, and
+  `Bash(node *)` wrote to `/tmp` from a confined workspace on the first
+  attempt. So did a bare `Bash`. The list that ships is four package managers,
+  and `docs/security/providers.md` records what was tried and what happened.
+- **Two findings were one defect.** `design.workflow.yaml` on disk was
+  `phases: []`. That is why the run took 3 ms, and it is also why
+  `progress.total` said 4 on five workflows — the same file contributed
+  nothing to both.
+
+**And one thing the report did not find.** `Agent.args` and `AgentStep.args`
+are appended to the argv *after* `permissionArgs`, and nothing checked them. A
+project's own agent file saying `args: ['--permission-mode',
+'bypassPermissions']` got Full Access under the Default profile — no setting
+changed, nothing said, and the only trace a line in a YAML file the agent
+itself can write. The guard is **derived**, not listed: under a confined
+profile, an argument out of that provider's own `full-access` list is refused,
+so it stays true when a descriptor is edited and a third-party provider gets it
+for nothing. `forbiddenArgs` covers what derivation cannot see — chiefly
+`--allowedTools`, which is variadic, so a step passing it does not *add* to
+Factory's allow-list, it *becomes* the allow-list.
+
+Decisions taken while building it:
+
+- **The transcript reader is a provider capability, not a capability kind of
+  its own.** A parser is the one part of a provider that cannot be YAML, so it
+  has to be code — but a reader without the provider whose output it reads is
+  meaningless, and a separate kind would have made that pairing something to
+  get wrong. It sits on `ProviderCapability`, is supplied through
+  `defineProviderPlugin`, and a provider with none is read as text exactly as
+  before. Binding rule 4 holds: the built-in ships through the seam a third
+  party would use.
+- **A refused *command* parks the run; a refused *path* still does not.** This
+  is a deliberate change to documented behaviour and the distinction is the
+  whole of it. A refused path may leave the real work done — the agent writes
+  somewhere else and carries on, and interrupting that would defeat the
+  profile. A refused command means an install, a build or a test did not run,
+  and everything reported afterwards was reported without it.
+- **`is_error` on a tool result is not a refusal.** A failing test suite sets
+  the same flag, and parking every red build is the fastest way to have the
+  feature switched off. Only the permission event counts.
+- **No new schema for the gate.** A shell step whose non-zero exit fails the
+  phase already existed and already blocked the task; nothing was missing from
+  the mechanism. What was missing was anything that knew what to run, so a
+  project carries one command and the built-in `project-check` phase is nothing
+  but that command. The report's suggested `gate: true` field would have been a
+  second way to say what a failing step already says.
+- **An empty command is an error everywhere, not a special case for the gate.**
+  `{{ project.check }}` on a project that never set one resolves to `''`, and
+  `bash -c ''` exits 0. Refusing it at plan time is the same rule as refusing a
+  plan with no steps, one level down.
+- **Detection needs positive evidence.** A `check`/`verify`/`test` script in
+  `package.json` with the package manager read off the *lockfile*, `Cargo.toml`,
+  `go.mod`, a `test:` target in a `Makefile` — and nothing else. A wrong guess
+  is worse than none: it is a command nobody chose, failing for a reason they
+  have to go and find, in a gate they did not know was there.
+- **Left out on purpose.** The plan also called for scaffolded `validate` and
+  `verify` phases and richer default prompts. Factory ships no starter workflow
+  set in the open core, so that means deciding what every new project is
+  given — a product decision rather than an implementation one. It is in the
+  proposal document with the reasoning.
+
+**What the mutations taught this time.** Two survived the first round on the
+stream reader, and both were the same lesson in different clothes: an assertion
+that cannot tell two things apart. Reading the event's `type` and ignoring its
+`subtype` turned every `init` and `thinking_tokens` event into a refusal, and
+every scenario still passed — none of them fed the reader an ordinary run. And
+"the denial is visible in the log" passed with the denial's log line deleted,
+because the *tool call* had already written the command to the same stream one
+line earlier. Both were fixed by asserting on the thing itself: an ordinary run
+produces no refusals, and the refusal's own line reads `refused — <command>`.
+
+## After 0.1.0 — how much to trust a task, and what is still uncertain
+
+Factory could say a task was `done`. It could not say how much that was worth.
+The run record held the artifacts, the exit codes, the refused commands and the
+gate results, and all of it was discarded the moment the task transitioned.
+
+Reliability turns that record into a standing judgement: a score, the coverage
+behind it, the findings holding it down, and who should deal with each.
+
+| | |
+|---|---|
+| **Reliability** | Given the evidence available, how trustworthy does the solution appear? |
+| **Evidence coverage** | How much of the evidence a sufficiently verified solution would have has actually been collected? |
+
+Never one without the other. A 93 with 41% coverage is "nothing has gone wrong
+yet and we have barely looked"; a 93 with 96% is "we looked hard and it is
+good". Showing only the first is how a confidence number becomes flattery.
+
+**The score can go down, and that is the point.** Through the five-stage
+pipeline, measured through the real engine:
+
+```text
+analysis 68.8 → design 75.8 → implement 82.8 → validate 89.8 → verify 95.0
+coverage  25%          45%             70%            90%          100%
+```
+
+A validation that discovers a regression has *learned something*. A model that
+could only rise would hide the most valuable thing the subsystem produces.
+
+**No agent ever sets the score.** An evaluator returns dimensions and findings,
+and there is no field it could return a score in. Everything it says crosses
+`normalize()` once — out-of-range clamped, unknown vocabulary dropped, driver
+impact bounded, every correction recorded as a warning — and the arithmetic is
+Factory's. There is no route, command or MCP tool that sets a score, not even a
+refusing one, and a scenario asserts the tool does not exist.
+
+**An agent may resolve a critical finding. Only a person may accept one.**
+Resolving is a claim about the world that the next assessment will check;
+accepting is a decision to ship with it. The same separation `approve` already
+had, for the same reason: an acceptance an agent can grant itself is not a gate.
+
+**Every run is judged**, including from workflows written this morning that told
+Factory nothing. Any workflow can change the project, so judgement follows what
+a run *did* rather than whether its workflow opted in. The `reliability:` block
+refines — it attributes findings and earns coverage — and its absence never
+means invisible. **A judgement that cannot be made never fails the run**: that
+is a warning and a retry offer, because turning "the evaluator crashed" into
+"your work failed" is how a feature gets switched off.
+
+**Which model reads the work is the project's choice.** The deterministic
+evaluator is free and always runs; the agent evaluator costs tokens on every run
+that produced something, and a weekend project and a payments service do not
+want the same model. Two columns rather than a nullable one, because "nobody has
+said" and "switched off" are different positions and only one of them starts
+working the moment a model is named.
+
+**Nothing is stored that can be derived.** There is no `current` projection —
+it is the newest assessment row plus the open drivers, two indexed queries — and
+staleness is derived too: an assessment records the newest run it considered, and
+a later finished run makes it stale with no write. A stored copy would be the
+second source of truth this codebase keeps paying for.
+
+The five lifecycle workflows ship as an importable bundle rather than as
+built-ins, with one click on the project page: a pipeline that runs `npm test`
+has no business resolving for a Rust repository, and a bundle reachable only by
+typing a path inside `node_modules` is one nobody uses.
+
+**What the mutations taught this time.** Three lessons, each a scenario that
+could not tell two things apart:
+
+- **A field declared and inert.** Drivers carried a `scoreImpact` that produced
+  ceilings but never moved the number — every scenario passed because the caps
+  did the visible work. Making it move the dimension then required *removing*
+  the failure penalty from the evidence model, or one problem was charged twice
+  and resolving it gave back half.
+- **A 400 is not a refusal.** "A judging model that is not text is refused"
+  survived the type check being deleted, because the store then threw on
+  `7.trim()` and the route returned 400 anyway. The scenario now asserts the
+  refusal names the field, which is the difference between a validated refusal
+  and an incidental crash.
+- **Two all-optional shapes pass for each other.** The engine handed the plan's
+  `reliability:` block straight through as the declaration the judgement reads.
+  One is YAML-spelled (`expected_evidence`), the other TypeScript-spelled
+  (`expectedEvidence`); both are entirely optional, so it typechecked and
+  delivered `undefined` for every field whose name differed. A declared workflow
+  earned exactly the coverage an undeclared one did, and nothing said so until a
+  scenario asked a workflow that declares its evidence whether it got any.
+
+**What is deliberately not here.** Team dashboards, merge gates, calibrated
+probability models and telemetry — the specification's own non-goals — and no
+mandatory completion threshold. These are heuristics, not odds: nothing has been
+validated against post-merge defects, and an uncalibrated number should not
+become a gate. What they are is *explainable*, which a hidden model would not be.
+
+[`docs/reliability/`](docs/reliability/) is the whole of it, and
+[`docs/reliability/implementation-summary.md`](docs/reliability/implementation-summary.md)
+says what was built, what was left, and what is uncalibrated.
+
+## After 0.1.0 — a profile between Default and Full Access
+
+The Default profile launches Claude Code with an allow-list of four package
+managers. A Node project is served; a Rust one is not, and neither is a Makefile,
+a Go module or anything that reaches for `docker`. The only lever was Full
+Access, which removes the workspace boundary to buy one command.
+
+So: a third position, and it is a **definition** rather than a setting —
+`.xaedalon/.factory/profiles/`, layered, editable, shareable in a bundle.
+`docs/proposals/execution-profiles.md` specified this in §2, §26 and §27 and
+called it Phase 7; this is that, built at the level Factory can actually enforce.
+
+```yaml
+kind: factory.profile/v1
+name: build-tools
+extends: default
+commands: [cargo, make, go]
+```
+
+**It widens which commands may run and never where they may write.** A custom
+profile is confined by construction: `isConfined` answers by exception, so every
+name that is not `full-access` keeps the boundary, the credential filter and the
+directory grants. There is no key that turns those off.
+
+**It cannot reach Full Access.** A profile passing what Full Access passes is
+refused when it is saved, derived from each installed provider's own flags rather
+than listed, so it stays true as descriptors change — and derived against
+*Default*, because the subtraction filters out what the profile itself passes and
+checking it against its own arguments would let it delete the token that would
+have caught it.
+
+**A project naming a profile no scope defines refuses to plan.** Falling back to
+Default would quietly change what the run may do, which is the failure the
+stored-profile guard already exists to stop, one layer up.
+
+**Only one of the three CLIs can honour it.** Claude Code has `--allowedTools`
+and `--disallowedTools`; Copilot has four coarse switches; Codex expresses
+nothing and its descriptor says so. A profile's commands reach Claude Code and
+change nothing under the others — and Factory reports that, because an absence
+nobody is told about is a flag that reads correctly and does nothing.
+
+**The measurements that shaped it**, taken against Claude Code 2.1.281 while
+planning:
+
+| | |
+|---|---|
+| `git status`, `git log`, `cat`, `find` | **already allowed** under Default |
+| `git -C <path> status`, and `git -C .` | refused — the *flag*, wherever it points |
+| `make check`, Default list | refused |
+| `make check`, with the profile | allowed |
+| a write outside the workspace, either way | refused |
+
+Read-only commands are auto-approved whatever an allow-list says. That is why
+the shipped example lists `cargo`, `make`, `go`, `gradle`, `mvn` and `docker` and
+no read-only tool at all: an entry that changes nothing is an entry that misleads
+whoever wrote it.
+
+It also disproved the feature's first justification. A blocked task's refusals
+looked like a missing allow-list and were not — `git -C` is the boundary working,
+and the fix was a prompt change costing nothing. The feature stands on the owner's
+reasoning instead: the two shipped profiles are untouched, and a third position
+exists for the owner of a repository to take a risk deliberately. The obligation
+that follows is informedness, which is why every surface says what a profile
+widens and what it cannot.
+
+**What the mutations taught this time.** Three, all of them one word wide:
+
+- **A dropped flag has to take its value with it.** Folding a profile's commands
+  into the existing `--allowedTools` means removing the old flag, and a value
+  left behind becomes a positional argument — which for a CLI that takes its
+  prompt positionally *is* the prompt. The agent would have been asked to do
+  `Bash(pnpm *)` instead of the work.
+- **A scenario that does not reach the branch it names.** "The same flag with an
+  equals sign is refused" passed against the whole token and never exercised the
+  split. The mutation survived, and the replacement makes the value half the only
+  thing that can match — which is the real Claude case, where Default and Full
+  Access share the flag and differ only in its value.
+- **`warn` and `refuse` are one word apart.** An interpreter in a profile is a
+  warning on purpose. Making it an error is in the round, because the difference
+  between informing somebody and deciding for them is a single string literal.
+
 ## Glossary
 
 The vocabulary is deliberately small, and it is the vocabulary in the code.
@@ -797,7 +1506,14 @@ The vocabulary is deliberately small, and it is the vocabulary in the code.
 | **Plugin** | A package providing one or more capabilities. Pro is a plugin bundle; so is a provider. |
 | **Provider** | An agent CLI behind a uniform interface: capabilities, model roles, command rendering. A provider is a **descriptor**, not a class — adding one is a YAML file. |
 | **Bundle** | One self-contained YAML file holding a workflow plus every definition it needs. Its inner definitions are written by the same writers that produce definition files, so a bundle contains exactly what would sit on disk. |
-| **Run** | One execution attempt of a workflow. |
+| **Run** | One execution attempt of a workflow. It records where it came from and how deep it is, so work that starts work can be bounded. |
+| **Initiator** | Who asked for a piece of work, when it was not a person. The run and task come from the environment Factory stamped into the agent it launched; the label the client gives for itself is read by people and by no rule. |
+| **Profile** | How much authority a run gets. Two ship — Default and Full Access — and a third kind is a *definition* somebody writes, widening which commands an agent may run and nothing else. |
+| **Reliability** | How much to trust a task's current solution, given the evidence available. A number, its coverage, and the findings behind both. Never a probability — see `docs/reliability/`. |
+| **Evidence coverage** | How much of the evidence a sufficiently verified solution would have has actually been collected. Read beside reliability, never instead of it. |
+| **Driver** | A named reason reliability is lower than it might be — a regression, an ambiguity, something refused. Owned by an agent or a person, and the thing the score exists to point at. |
+| **Evaluator** | Something that classifies evidence and proposes findings. It returns dimensions and drivers and never a score; `normalize()` is where what it says stops being its own. |
+| **MCP tool** | Something an agent can ask Factory to do, over the Model Context Protocol. Not a **task tool**, which is a button on a task, and not a provider's `supports: mcp`, which means that agent CLI can *consume* MCP servers. Three meanings, one word, said apart wherever it matters. |
 
 ---
 
@@ -881,8 +1597,10 @@ factory/                   a layout on a machine, not a checkout — see below
 │   │   ├── events/        the typed event bus
 │   │   ├── config/        scope discovery, layered resolution, settings, the plugin catalogue
 │   │   ├── plugin-sdk/    the only surface plugins — and Pro — import
+│   │   ├── mcp/           Factory as an MCP server: one contract, a third client
 │   │   └── plugins/       provider-claude · provider-codex · provider-copilot
 │   │                      task-terminal · task-session · task-diffity
+│   │                      reliability-agent
 │   └── apps/              daemon (127.0.0.1:7317) · web · cli
 │
 └── factory-pro/           proprietary · separate workspace · depends one-way on the above
@@ -919,21 +1637,24 @@ this repository does not contain.
 | `packages/core/features/located-errors.feature` | Problems carry a file, line and column |
 | `packages/config/features/scope-discovery.feature` | Finding `.factory`; `$HOME` is never a project |
 | `packages/config/features/layered-resolution.feature` | Which definition wins, and what it shadows |
+| `packages/config/features/new-scope.feature` | A scope Factory creates: ignored entirely until somebody shares it, and never written over one that is already there |
+| `packages/core/features/git.feature` | Asking git a read-only question, and every way of not getting an answer looking the same |
 | `packages/config/features/scaffold.feature` | What turning a project setting on copies into the repository, and what it refuses to overwrite |
 | `packages/config/features/scope-plugins.feature` | A project ships its plugins in its own repo |
 | `packages/plugins/provider-claude/features/providers.feature` | Rendering, model roles, capability awareness, conformance |
 | `packages/config/features/plan.feature` | Definitions become runnable processes; nothing executes |
-| `apps/cli/features/cli.feature` | The command surface, exit codes and output, including `factory task`, `factory task depends` and `factory project queue|stop` |
+| `apps/cli/features/cli.feature` | The command surface, exit codes and output, including `factory task`, `factory task depends`, `factory project queue\|stop`, and what a daemon older than the CLI is told to look like |
 | `packages/config/features/bundles.feature` | Sharing a workflow as one self-contained file |
-| `apps/daemon/features/api.feature` | The definitions API: etags, scope-aware delete, registries |
+| `apps/daemon/features/api.feature` | The definitions API: etags, scope-aware delete, registries, the bundles Factory ships, and an API path this daemon does not serve answering as one rather than as the board |
 | `apps/daemon/features/tasks-api.feature` | Tasks, runs, logs and the live stream — a queued task actually running, a project's own definitions, renaming, agents over HTTP, when a plan may be changed, what a task waits for, and queueing or stopping a whole project |
 | `apps/web/features/definition-lists.feature` | What the pages render, in a real browser |
 | `apps/web/features/builder.feature` | Authoring a workflow or phase without writing YAML |
 | `apps/web/features/authoring.feature` | Delete, conflicts, phase references, and the YAML view |
-| `apps/web/features/sharing.feature` | Export a bundle, preview an import, resolve a clash |
-| `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, and the dependency picker |
+| `apps/web/features/sharing.feature` | Export a bundle, preview an import, resolve a clash, take one Factory ships in a click, and where an error is shown when any of it fails |
+| `apps/web/features/task-board.feature` | The board: the project rail, the grouped menu, filters, both views, live updates, a task's ordered plan, renaming, environments, the disclaimer that gates a first run, Queue all and Stop all, the dependency picker, what an installation with no repository is told, and the settings page — theme, scale, and what agents may reach |
 | `packages/core/features/run.feature` | Running a plan: order, failure, deadlines, approval gates |
 | `packages/core/features/execution-profiles.feature` | Which profile applies: project over installation over `default`, and one name for each |
+| `packages/core/features/custom-profiles.feature` | A profile somebody wrote: still confined, cannot reach Full Access, and what a provider that cannot honour it says |
 | `packages/core/features/workspace-boundary.feature` | What counts as inside the workspace, including `..`, a prefix sibling and a real symlink |
 | `packages/core/features/agent-environment.feature` | What a step's process can see: credentials withheld, a provider's own kept, and every name said |
 | `packages/core/features/processes.feature` | Stopping what Factory started: the group not the process, proved on a real grandchild |
@@ -941,18 +1662,33 @@ this repository does not contain.
 | `packages/core/features/task-dependencies.feature` | One task waiting for another: met, waiting, dead; the queue order; a ring caught |
 | Pro's `desktop-capability.feature` *(not in this repository)* | Pro is a plugin: same host, same suite, no core changes |
 | Pro's `shell.feature` *(not in this repository)* | The desktop shell: attach or start, the menu bar, what is worth a notification |
-| `packages/store/features/store.feature` | Migrations, transactions, and the guards around both |
+| `packages/store/features/store.feature` | Migrations, transactions, and the guards around both — including a rebuild that must not take its children with it, and what an upgrade that deletes rows says about it |
 | `packages/store/features/tasks.feature` | The task lifecycle: one table of moves, what each state offers, what changing the plan does to its place in it, one task waiting for another, and finishing one by hand |
 | `packages/store/features/runs.feature` | Runs, their steps, and output kept inside a budget |
 | `packages/engine/features/engine.feature` | A task becomes runs: recording, gates, failure, and what a crash leaves |
-| `packages/engine/features/scheduler.feature` | What runs next: order, capacity, lanes read from the task's own project, a dependent held until its blockers are done, and why anything was skipped |
-| `packages/engine/features/doctor.feature` | Doctor rules that only exist where a database does |
-| `packages/store/features/projects.feature` | Projects: where work happens, checked when it is written |
-| `packages/core/features/worktree-steps.feature` | `uses: worktree` — isolation a workflow asks for, idempotently |
+| `packages/engine/features/scheduler.feature` | What runs next: order, capacity, lanes read from the task's own project, gates asked about the workflow about to run, a dependent held until its blockers are done, and why anything was skipped |
+| `packages/engine/features/doctor.feature` | Doctor rules that only exist where a database does, including what git can see of a project |
+| `packages/store/features/projects.feature` | Projects: where work happens, checked when it is written, and removable only while nothing is left in them |
+| `packages/core/features/worktree-steps.feature` | `uses: worktree` — isolation a workflow asks for, idempotently, and removed from outside the worktree |
 | `packages/core/features/provider-resolution.feature` | Where the agent is on *this* machine, and what to say when it is nowhere |
 | `packages/config/features/provider-config.feature` | `providers.<id>.command` — the way out when discovery cannot help |
 | `packages/config/features/setup.feature` | What is still missing, contributed by whoever knows |
 | `packages/store/features/projects.feature` (extended) | Whether a project gives each task a worktree, and what that costs |
+| `packages/mcp/features/mcp-protocol.feature` | Speaking MCP: the handshake, version negotiation, a bad frame answered rather than thrown, and stdout carrying the protocol and nothing else |
+| `packages/mcp/features/project-context.feature` | Which project a directory is in, including a worktree that names its task, and what is refused rather than guessed |
+| `packages/mcp/features/mcp-tools.feature` | The tool surface: actions served not guessed, bounded logs, what is waiting for a person, and the two tools that deliberately do not exist |
+| `packages/core/features/orchestration.feature` | Work that starts work: how deep, how wide, and the two things an agent may not do to its own |
+
+| `packages/plugins/provider-claude/features/stream.feature` | Reading a CLI's structured transcript: a refusal as an event rather than a sentence, and what is not one |
+| `packages/core/features/project-check.feature` | The one command that checks a project's work, and what a repository has to say before Factory guesses it |
+| `packages/core/features/reliability-scoring.feature` | Weights, ceilings, coverage, deltas, and why a validation that finds something lowers the score and raises coverage at once |
+| `packages/core/features/reliability-drivers.feature` | Findings: the one table of moves, who owns each, what may be resolved and what only a person may accept |
+| `packages/core/features/reliability-evaluator.feature` | The authority boundary: what an evaluator may say, what `normalize` refuses, and the score field that does not exist |
+| `packages/core/features/judge.feature` | Which agent reads the work: project over installation, field by field |
+| `packages/plugins/reliability-agent/features/reliability-agent.feature` | The agent evaluator: when it declines, what it is asked, how an answer is read, and that a score cannot be smuggled through it |
+| `packages/store/features/reliability.feature` | The three tables: append-only history, driver lifecycle, and a hand-edited row that degrades rather than making a task unloadable |
+| `packages/engine/features/reliability.feature` | Judging after a run: every verdict judged, a failed assessment that does not fail the run, what a declaration refines, and staleness derived rather than stored |
+| `packages/store/features/projects.feature` (extended) | Which model judges a project's work, and the difference between naming none and switching judging off |
 
 **Verifying everything** (from `factory-community`, then `factory-pro`):
 
@@ -999,6 +1735,7 @@ pnpm test          # every .feature below the browser
 pnpm test:e2e      # the browser ones (runs bddgen first — always use this script)
 pnpm typecheck
 pnpm lint
+pnpm mutate        # break a guard on purpose and watch a scenario fail
 
 pnpm dev           # the builder, on http://127.0.0.1:5317
 node apps/daemon/dist/bin.js   # the daemon it talks to, on 127.0.0.1:7317

@@ -3,11 +3,17 @@ import type {
   CapabilityLookup,
   ExecutionProfile,
   PlanResult,
+  Profile,
   TaskContext,
 } from '@factory/core'
-import { resolvePlan } from '@factory/core'
+import { DEFAULT_PROFILE, isBuiltInProfile, resolvePlan } from '@factory/core'
 import type { ScopeChain } from './scopes.js'
-import { resolveAgent, resolvePhase, resolveWorkflow } from './store.js'
+import {
+  resolveAgent,
+  resolvePhase,
+  resolveProfileDefinition,
+  resolveWorkflow,
+} from './store.js'
 
 /**
  * Plan a workflow by name, resolving it and its phases through the scope chain.
@@ -56,8 +62,36 @@ export function planWorkflow(options: {
     return { problems: resolved.problems }
   }
 
+  // The profile the run will use, found in the chain. A built-in needs no file;
+  // anything else is a definition, and a name no scope defines is a **refusal**
+  // rather than a fall back to Default. Falling back would be the failure the
+  // stored-profile guard already exists to stop: a project that asked to be
+  // confined in a particular way, quietly running under something else.
+  const profile = options.profile ?? DEFAULT_PROFILE
+  let grants: Profile | undefined
+  if (!isBuiltInProfile(profile)) {
+    const found = resolveProfileDefinition(options.chain, profile)
+    if (found === undefined) {
+      return {
+        problems: [
+          {
+            severity: 'error',
+            message:
+              `This project runs under the profile "${profile}", and no scope defines one by ` +
+              `that name. Write it, or choose a profile that exists — Factory will not fall ` +
+              `back to Default, because that would quietly change what this run may do.`,
+            rule: 'plan.missingProfile',
+          },
+        ],
+      }
+    }
+    if (found.value === undefined) return { problems: found.problems }
+    grants = found.value
+  }
+
   return resolvePlan({
     workflow: resolved.value,
+    ...(grants === undefined ? {} : { profileDefinition: grants }),
     lookupPhase: (name) => resolvePhase(options.chain, options.host, name)?.value,
     // The same chain the phases come from, so a project's own agents work in
     // that project without anything else being told about them.

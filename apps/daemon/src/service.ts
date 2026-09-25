@@ -1,18 +1,34 @@
 import {
   Engine,
   Scheduler,
+  assessReliability,
   reconcile,
   runningInstallationPlugin,
+  stalenessOf,
   type FailureContext,
   type ProjectFacts,
   type ReconcileReport,
   type WorkflowFacts,
 } from '@factory/engine'
-import { definitionPath, planWorkflow, resolveWorkflow } from '@factory/config'
 import {
+  definitionPath,
+  namesIn,
+  planWorkflow,
+  resolveProfileDefinition,
+  resolveWorkflow,
+} from '@factory/config'
+import {
+  DEFAULT_RELIABILITY_POLICY,
+  RELIABILITY_EVALUATOR_KIND,
+  attentionSummary,
+  capsFor,
+  type ReliabilityDriver,
+  type ReliabilityEvaluatorCapability,
+  type ReliabilitySummary,
   artifactsRoot,
   resolveProfile,
   systemCanonical,
+  systemGitQuery,
   taskTokenValues,
   workspaceFor,
 } from '@factory/core'
@@ -21,6 +37,7 @@ import { createChains, type Chains } from './chains.js'
 import {
   MIGRATIONS,
   ProjectRepository,
+  ReliabilityRepository,
   RunRepository,
   TaskRepository,
   openStore,
@@ -29,8 +46,15 @@ import {
 } from '@factory/store'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { ExecutionProfile, Project, Task, TaskWorkspace } from '@factory/core'
+import type {
+  ExecutionProfile,
+  ProfileNames,
+  Project,
+  Task,
+  TaskWorkspace,
+} from '@factory/core'
 import type { Runtime } from '@factory/runtime'
+import { agentFor } from './reliability-agent.js'
 
 /**
  * The running half of a Factory installation.
@@ -47,14 +71,32 @@ export interface Service {
   readonly tasks: TaskRepository
   readonly runs: RunRepository
   readonly projects: ProjectRepository
+  readonly reliability: ReliabilityRepository
+  /**
+   * What a task's reliability is right now, assembled from the history.
+   *
+   * On the service rather than in a route because two surfaces need it — the
+   * task detail payload and the reliability routes — and two assemblies of the
+   * same question is how they come to disagree.
+   */
+  readonly reliabilitySummary: (taskId: string) => ReliabilitySummary
+  /** The workflows a project can run, so a recommendation can name a real one. */
+  readonly workflowNames: (projectId?: string) => readonly string[]
+  /** Built-ins plus what the chain defines, for validating and offering a profile. */
+  readonly profileNames: (projectId?: string) => ProfileNames
   /** Which definitions each project can see. Served by the definition routes. */
   readonly chains: Chains
   /**
    * Where this task's steps run — its worktree, or its project's checkout.
    *
-   * Undefined for a task with no project. The rule is core's; what the Service
-   * adds is the repository, the filesystem and the path join, so a route can
-   * ask the question without assembling it again.
+   * Undefined only when the project the task names is not in the database —
+   * which the foreign key makes impossible through Factory, so it means a
+   * database edited by hand. Read paths tolerate it so the board can still
+   * draw the task and say what is wrong; anything that would *run* refuses.
+   *
+   * The rule is core's; what the Service adds is the repository, the
+   * filesystem and the path join, so a route can ask the question without
+   * assembling it again.
    */
   readonly workspace: (task: Task) => TaskWorkspace | undefined
   readonly engine: Engine
@@ -89,6 +131,7 @@ export async function createService(
   const tasks = new TaskRepository({ db: store.db, events: runtime.events })
   const runs = new RunRepository({ db: store.db, events: runtime.events })
   const projects = new ProjectRepository({ db: store.db, events: runtime.events })
+  const reliability = new ReliabilityRepository({ db: store.db, events: runtime.events })
 
   // Definitions are resolved from the project's own directory, not the one the
   // daemon was started in. Everything that reads or writes a workflow goes
@@ -115,23 +158,35 @@ export async function createService(
    * lines is exactly what moving the rule into core was for.
    */
   const workspace = (task: Task): TaskWorkspace | undefined => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
-    const resolved = workspaceFor(task, project, existsSync, join)
-    // Both or neither: core returns nothing precisely when there is no
-    // project, so the type can promise the project rather than leave a caller
-    // that needs the name to look it up a second time.
-    return resolved === undefined || project === undefined
-      ? undefined
-      : { ...resolved, project }
+    const project = projects.get(task.projectId)
+    return project === undefined ? undefined : { ...workspaceFor(task, project, existsSync, join), project }
   }
 
   /**
-   * The same answer as a path the engine can be handed.
+   * The project a task happens in, or an error naming what is missing.
    *
-   * A task with no project runs where the daemon was started — which is what
-   * `factory run` would have used, and the one part of this core cannot know.
+   * Every path that starts work goes through here. It used to fall back to the
+   * directory the daemon was started in, which meant a task whose project
+   * could not be resolved ran an agent against whatever repository that
+   * happened to be — the doctor's own setup rule calls that "fine for a
+   * demonstration and wrong for work". There is nothing left to fall back for:
+   * a task names a project, and the database will not let go of one that still
+   * has tasks. A row that is not there is corruption, and saying so is better
+   * than running somewhere nobody chose.
    */
-  const workspacePathFor = (task: Task): string => workspace(task)?.path ?? runtime.cwd
+  const projectOf = (task: Task): Project => {
+    const project = projects.get(task.projectId)
+    if (project === undefined) {
+      throw new Error(
+        `Task "${task.name}" belongs to project ${task.projectId}, which is not in the database.`,
+      )
+    }
+    return project
+  }
+
+  /** The same answer as a path the engine can be handed. */
+  const workspacePathFor = (task: Task): string =>
+    workspaceFor(task, projectOf(task), existsSync, join).path
 
   /**
    * Where this task's artifacts go.
@@ -139,14 +194,10 @@ export async function createService(
    * Under the project, deliberately — not under the workspace, which is
    * the worktree when the project uses them. A worktree is deleted when the work
    * in it ends, and an artifact that goes with it is one nobody can read
-   * afterwards. A task with no project has nowhere of its own, so it falls back
-   * to the directory the daemon was started in, the way everything else does.
+   * afterwards.
    */
-  const artifactsFor = (task: Task): string => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
-    const base = project?.path ?? runtime.cwd
-    return artifactsRoot(base, task.directory ?? 'local', join)
-  }
+  const artifactsFor = (task: Task): string =>
+    artifactsRoot(projectOf(task).path, task.directory ?? 'local', join)
 
   /**
    * How much authority this task's run gets.
@@ -155,18 +206,15 @@ export async function createService(
    * between runs, and the next run should use what the board currently says.
    */
   const profileFor = (task: Task): ExecutionProfile => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
+    const project = projectOf(task)
     return resolveProfile({
-      project: project?.profile,
+      project: project.profile,
       installation: runtime.settings.current().security.profile,
     })
   }
 
   /** Directories this task's project has granted beyond its workspace. */
-  const grantsFor = (task: Task): readonly string[] => {
-    const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
-    return project?.grantedDirectories ?? []
-  }
+  const grantsFor = (task: Task): readonly string[] => projectOf(task).grantedDirectories ?? []
 
   const engine = new Engine({
     tasks,
@@ -205,12 +253,62 @@ export async function createService(
         // repository is, what branch work starts from, where worktrees go — and,
         // for a recovery workflow, what went wrong.
         project: {
-          ...projectVariables(
-            task.projectId === undefined ? undefined : projects.get(task.projectId),
-          ),
+          ...projectVariables(projectOf(task)),
           ...(failure === undefined ? {} : failureVariables(failure)),
         },
       }),
+    // Judged after every run that reaches a verdict. The engine assembles the
+    // facts — it is the only thing that sees the plan, the outcomes, the
+    // refusals and the artifacts together — and this supplies everything that
+    // needs a database or a host: the repository, the evaluators, and the
+    // workflows this project actually has so a recommendation can name a real
+    // one.
+    //
+    // Evaluators come off the host rather than a list here, which is what lets
+    // a plugin add one. The deterministic evaluator is a built-in and arrives
+    // the same way.
+    assess: async ({ taskId, facts }) => {
+      const task = tasks.get(taskId)
+      if (task === undefined) return []
+      const project = task.projectId === undefined ? undefined : projects.get(task.projectId)
+      const evaluators = runtime.host
+        .list<ReliabilityEvaluatorCapability>(RELIABILITY_EVALUATOR_KIND)
+        .map((entry) => entry.capability)
+      const judge = agentFor({
+        runtime,
+        project,
+        profile: profileFor(task),
+        cwd: project?.path,
+      })
+      const outcome = await assessReliability({
+        taskId,
+        task: { name: task.name, description: task.description },
+        reliability,
+        evaluators,
+        policy: DEFAULT_RELIABILITY_POLICY,
+        trigger: 'run',
+        // The project's own check command, added here because the engine has a
+        // run and a plan and no idea which project they belong to. A step
+        // running exactly this command and exiting zero *is* the project's
+        // checks passing — the one expectation Factory can satisfy without
+        // being told. It was declared on `RunFacts` and never supplied, so the
+        // credit existed only where a test passed it in by hand.
+        facts: {
+          ...facts,
+          ...(project?.check === undefined ? {} : { checkCommand: project.check }),
+        },
+        workflows: workflowNamesFor(task.projectId),
+        // Absent unless this project chose a model and a CLI is installed to
+        // run it. That is the whole of the cost control: the free evaluator
+        // always runs, and the one that spends money runs when somebody said so.
+        ...(judge.agent === undefined ? {} : { agent: judge.agent }),
+      })
+      // The judge's own problems ride out beside the assessment's, through the
+      // channel `reliability.evaluatorFailed` already uses: a project whose
+      // named CLI is not installed has to hear about it somewhere, and a run
+      // that succeeded is not the place to refuse.
+      return [...outcome.problems, ...judge.problems]
+    },
   })
 
   // Before anything is allowed to start: rows that say "running" from a process
@@ -220,6 +318,77 @@ export async function createService(
 
   // One answer to "what does this workflow say about being scheduled", shared
   // by the scheduler and by the doctor rule that explains why nothing started.
+  /**
+   * The workflows a project can actually run.
+   *
+   * Handed to the evaluators so a recommendation names one that exists — a
+   * suggestion to run something the project does not have is worse than no
+   * suggestion, because the board draws a button behind it.
+   */
+  /**
+   * The profiles this installation would recognise, for a given project.
+   *
+   * Built-ins plus whatever the chain defines, which is what a route needs
+   * before storing a name and what the board needs before offering one. Read
+   * per request rather than cached: a profile can be written while the daemon
+   * runs, and the next save should see it.
+   */
+  const profileNamesFor = (projectId?: string): ProfileNames => {
+    const chain = chains.for(projectId) ?? runtime.chain
+    const names = [...new Set(chain.scopes.flatMap((scope) => namesIn(scope, 'profile')))]
+    return {
+      names,
+      describe: (name) => resolveProfileDefinition(chain, name)?.value?.description || undefined,
+    }
+  }
+
+  const workflowNamesFor = (projectId?: string): readonly string[] => {
+    const chain = chains.for(projectId) ?? runtime.chain
+    // `namesIn` per scope rather than `listDefinitions`, which wants a parser:
+    // this needs the names, not the definitions, and parsing every workflow to
+    // answer "does this one exist" would be work nobody asked for.
+    return [...new Set(chain.scopes.flatMap((scope) => namesIn(scope, 'workflow')))]
+  }
+
+  /**
+   * What a task's reliability is right now.
+   *
+   * Assembled rather than stored — the newest assessment plus the drivers still
+   * active — and assembled *here*, so the task detail payload and the
+   * reliability routes cannot describe the same task differently. A stored
+   * column would be a third answer.
+   */
+  const reliabilitySummary = (taskId: string): ReliabilitySummary => {
+    const newest = reliability.newest(taskId)
+    const drivers = reliability.drivers(taskId)
+    const caps = (list: readonly ReliabilityDriver[]) =>
+      capsFor(list, DEFAULT_RELIABILITY_POLICY, [], [])
+    const attention = attentionSummary(drivers, newest?.score ?? 0, caps)
+    if (newest === undefined) return { taskId, state: 'unassessed', attention }
+
+    // Finished runs oldest first, which is the order staleness compares in.
+    const finished = [...runs.forTask(taskId)]
+      .reverse()
+      .filter((run) => run.state !== 'running')
+      .map((run) => run.id)
+    const stale = stalenessOf(newest, finished)
+
+    return {
+      taskId,
+      state: stale === undefined ? 'assessed' : 'stale',
+      score: newest.score,
+      rawScore: newest.rawScore,
+      coverage: newest.coverage,
+      delta: newest.delta,
+      dimensions: newest.dimensions,
+      caps: newest.caps,
+      assessedAt: newest.createdAt,
+      assessmentId: newest.id,
+      ...(stale === undefined ? {} : { staleReason: stale }),
+      attention,
+    }
+  }
+
   const workflow = (name: string, projectId?: string): WorkflowFacts | undefined => {
     const chain = chains.for(projectId) ?? runtime.chain
     const found = resolveWorkflow(chain, name)
@@ -283,7 +452,17 @@ export async function createService(
   // the catalogue. Loading here would put a plugin in the host that the plugins
   // page cannot see, and a page that omits a loaded plugin is a page that lies.
   await runtime.load(
-    runningInstallationPlugin({ tasks, runs, projects, reconciliation, workflow }),
+    runningInstallationPlugin({
+      tasks,
+      runs,
+      projects,
+      reconciliation,
+      workflow,
+      // The one rule that cannot answer its own question: only git knows what
+      // git ignores. Built from the daemon's environment rather than read from
+      // the process, like every other thing here that reaches outside.
+      git: systemGitQuery(runtime.env),
+    }),
   )
 
   const stopWatching = options.autoStart === false ? () => {} : scheduler.watch()
@@ -298,6 +477,10 @@ export async function createService(
     tasks,
     runs,
     projects,
+    reliability,
+    reliabilitySummary,
+    workflowNames: workflowNamesFor,
+    profileNames: profileNamesFor,
     chains,
     workspace,
     engine,
@@ -338,16 +521,16 @@ export async function createService(
  * list. Adding a variable here without documenting it does not compile.
  */
 const projectVariables = (
-  project: Project | undefined,
-): Partial<Record<keyof typeof PROJECT_TOKENS, string>> =>
-  project === undefined
-    ? {}
-    : {
-        name: project.name,
-        path: project.path,
-        branch: project.defaultBranch,
-        worktrees: project.worktreesRoot,
-      }
+  project: Project,
+): Partial<Record<keyof typeof PROJECT_TOKENS, string>> => ({
+  name: project.name,
+  path: project.path,
+  branch: project.defaultBranch,
+  worktrees: project.worktreesRoot,
+  // Empty when the project has never been given one, which is what makes the
+  // built-in `project-check` phase refuse to plan rather than run nothing.
+  check: project.check ?? '',
+})
 
 const failureVariables = (
   failure: FailureContext,

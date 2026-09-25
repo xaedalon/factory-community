@@ -39,8 +39,8 @@ describeFeature(feature, ({ Background, Scenario, AfterEachScenario }) => {
     })
   })
 
-  const scaffold = (setting: 'worktrees' | 'environments'): void => {
-    result = scaffoldProjectDefinitions({ chain, host, setting })
+  const scaffold = async (setting: 'worktrees' | 'environments'): Promise<void> => {
+    result = await scaffoldProjectDefinitions({ chain, host, setting })
   }
   const written = (name: string) => result.written.some((file) => file.includes(name))
   const projectFile = (kind: 'workflows' | 'phases', name: string) =>

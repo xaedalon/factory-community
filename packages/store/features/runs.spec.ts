@@ -1,8 +1,18 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
+import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { ExecutionProfile, LogStream, Run, RunStep, Task } from '@factory/core'
-import { MIGRATIONS, RunRepository, TaskRepository, openStore, type Store } from '../src/index.js'
+import {
+  MIGRATIONS,
+  ProjectRepository,
+  RunRepository,
+  TaskRepository,
+  openStore,
+  type Store,
+} from '../src/index.js'
 
 const feature = await loadFeature(fileURLToPath(new URL('./runs.feature', import.meta.url)))
 
@@ -18,12 +28,16 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
   let printed: string[]
   let failure: unknown
   let tick = 0
+  let root = ''
 
   const now = () => new Date(Date.UTC(2026, 0, 1, 0, 0, tick++)).toISOString()
   let runNumber = 0
   const newId = () => `run-${++runNumber}`
 
-  AfterEachScenario(() => store?.close())
+  AfterEachScenario(() => {
+    store?.close()
+    rmSync(root, { recursive: true, force: true })
+  })
 
   // In Background, not BeforeEachScenario: the runner executes Background steps
   // first, so anything built in BeforeEachScenario does not exist yet.
@@ -38,8 +52,22 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
       tasks = new TaskRepository({ db: store.db, now, newId: () => 'task-1' })
       runs = new RunRepository({ db: store.db, now, newId })
     })
+    // The project is not in the Gherkin because these scenarios are about runs
+    // and a task cannot exist without one — it is part of what "a task exists"
+    // means, the way the store itself is.
     And('a task "Add due dates" with the workflow "development"', () => {
-      task = tasks.create({ name: 'Add due dates', workflows: ['development'] })
+      root = mkdtempSync(join(tmpdir(), 'factory-runs-'))
+      mkdirSync(join(root, '.git'), { recursive: true })
+      const project = new ProjectRepository({
+        db: store.db,
+        now,
+        newId: () => 'project-1',
+      }).add({ name: 'sample', path: root })
+      task = tasks.create({
+        name: 'Add due dates',
+        workflows: ['development'],
+        projectId: project.id,
+      })
     })
   })
 
@@ -605,6 +633,33 @@ describeFeature(feature, ({ Background, Rule, Scenario, AfterEachScenario }) => 
         run = runs.resume(run.id)
       })
       Then('the run\'s profile is "default"', profileIs('default'))
+    })
+  })
+  Rule('a step records what it actually ran', ({ RuleScenario }) => {
+    RuleScenario('A step keeps the command that was run', ({ When, Then }) => {
+      When('the step "install" runs "npm ci"', () => {
+        startRun()
+        step = runs.startStep(run.id, {
+          phase: 'setup',
+          index: 0,
+          describe: 'install',
+          uses: 'shell',
+          command: 'npm ci',
+        })
+      })
+      Then('the step\'s command is "npm ci"', () =>
+        expect(runs.steps(run.id)[0]?.command).toBe('npm ci'),
+      )
+    })
+
+    RuleScenario('A step that ran nothing records nothing', ({ When, Then }) => {
+      When('the step "install" of phase "setup" runs and succeeds', () => {
+        startRun()
+        ranWith('install', 'setup', 0)
+      })
+      Then('the step states no command', () =>
+        expect(runs.steps(run.id)[0]?.command).toBeUndefined(),
+      )
     })
   })
 })

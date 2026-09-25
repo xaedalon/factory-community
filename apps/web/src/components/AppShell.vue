@@ -3,6 +3,7 @@ import { RouterLink, useRoute } from 'vue-router'
 import { computed } from 'vue'
 import ProjectRail from './ProjectRail.vue'
 import DisclaimerPanel from './DisclaimerPanel.vue'
+import AppIcon, { type IconName } from './AppIcon.vue'
 import { useSettings } from '../stores/settings.js'
 
 const route = useRoute()
@@ -18,30 +19,33 @@ const settings = useSettings()
  * The first has no heading. It is what you open Factory to look at, and a
  * label above it would only name the obvious.
  */
-const nav: { heading?: string; items: { to: string; label: string }[] }[] = [
+const nav: { heading?: string; items: { to: string; label: string; icon: IconName }[] }[] = [
   {
     items: [
-      { to: '/tasks', label: 'Tasks' },
-      { to: '/environments', label: 'Environments' },
+      { to: '/tasks', label: 'Tasks', icon: 'tasks' },
+      { to: '/environments', label: 'Environments', icon: 'environment' },
     ],
   },
   {
     heading: 'Library',
     items: [
-      { to: '/workflows', label: 'Workflows' },
-      { to: '/phases', label: 'Phases' },
-      { to: '/agents', label: 'Agents' },
-      { to: '/bundles/import', label: 'Import' },
+      { to: '/workflows', label: 'Workflows', icon: 'play' },
+      { to: '/phases', label: 'Phases', icon: 'settings' },
+      { to: '/agents', label: 'Agents', icon: 'profile' },
+      // `system` rather than `profile`: that icon is already the agents', and a
+      // profile is about what a run may reach rather than who does the work.
+      { to: '/profiles', label: 'Profiles', icon: 'system' },
+      { to: '/bundles/import', label: 'Import', icon: 'import' },
     ],
   },
   {
     heading: 'System',
     items: [
-      { to: '/projects', label: 'Projects' },
-      { to: '/scopes', label: 'Scopes' },
-      { to: '/plugins', label: 'Plugins' },
-      { to: '/settings', label: 'Settings' },
-      { to: '/setup', label: 'Setup' },
+      { to: '/projects', label: 'Projects', icon: 'project' },
+      { to: '/scopes', label: 'Scopes', icon: 'folder' },
+      { to: '/plugins', label: 'Plugins', icon: 'link' },
+      { to: '/settings', label: 'Settings', icon: 'settings' },
+      { to: '/setup', label: 'Setup', icon: 'check' },
     ],
   },
 ]
@@ -82,7 +86,7 @@ const current = computed(() => route.path)
         class="mx-3 mb-1 rounded-md border border-[var(--color-warn)]/50 bg-[var(--color-warn)]/10 px-3 py-2"
         data-testid="full-access-badge"
       >
-        <p class="font-mono text-[10px] leading-tight tracking-widest text-[var(--color-warn)] uppercase">
+        <p class="font-mono text-label text-[var(--color-warn)] uppercase">
           Full Access
         </p>
         <p class="mt-0.5 text-[10px] leading-tight text-[var(--color-ink-muted)]">
@@ -93,7 +97,7 @@ const current = computed(() => route.path)
       <div v-for="(section, index) in nav" :key="section.heading ?? index" class="px-2">
         <p
           v-if="section.heading"
-          class="mt-5 mb-1 px-3 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase"
+          class="mt-5 mb-1 px-3 font-mono text-label text-[var(--color-ink-faint)] uppercase"
           :data-testid="`nav-section-${section.heading.toLowerCase()}`"
         >
           {{ section.heading }}
@@ -103,20 +107,21 @@ const current = computed(() => route.path)
             <RouterLink
               :to="item.to"
               :data-testid="`nav-${item.label.toLowerCase()}`"
-              class="block rounded-md px-3 py-2 text-sm transition-colors"
+              class="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors"
               :class="
                 current.startsWith(item.to)
                   ? 'bg-[var(--color-accent-soft)] text-[var(--color-ink)]'
                   : 'text-[var(--color-ink-muted)] hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]'
               "
             >
+              <AppIcon :name="item.icon" />
               {{ item.label }}
             </RouterLink>
           </li>
         </ul>
       </div>
 
-      <div class="mt-auto px-5 py-4 font-mono text-[10px] text-[var(--color-ink-faint)]">
+      <div class="mt-auto px-5 py-4 font-mono text-meta text-[var(--color-ink-faint)]">
         Don't replace your tools.<br />Orchestrate them.
       </div>
     </nav>

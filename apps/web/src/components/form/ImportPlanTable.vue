@@ -30,7 +30,7 @@ const tone = (action: ImportItem['action']) =>
         <th
           v-for="heading in ['Action', 'Kind', 'Name', 'Notes']"
           :key="heading"
-          class="pb-2 font-mono text-[10px] font-normal tracking-widest text-[var(--color-ink-faint)] uppercase"
+          class="pb-2 font-mono text-label font-normal text-[var(--color-ink-faint)] uppercase"
         >
           {{ heading }}
         </th>
@@ -40,26 +40,26 @@ const tone = (action: ImportItem['action']) =>
       <tr
         v-for="item in items"
         :key="`${item.kind}:${item.targetName}`"
-        class="border-b border-[var(--color-line)]/60"
+        class="border-b border-[var(--color-line)]"
         :data-testid="`plan-${item.targetName}`"
       >
         <td class="py-2 pr-4">
-          <span class="font-mono text-[11px]" :class="tone(item.action)">{{ item.action }}</span>
+          <span class="font-mono text-meta" :class="tone(item.action)">{{ item.action }}</span>
         </td>
-        <td class="py-2 pr-4 font-mono text-[11px] text-[var(--color-ink-faint)]">
+        <td class="py-2 pr-4 font-mono text-meta text-[var(--color-ink-faint)]">
           {{ item.kind }}
         </td>
         <td class="py-2 pr-4">
           <span class="value">{{ item.targetName }}</span>
           <span
             v-if="item.targetName !== item.name"
-            class="ml-2 font-mono text-[10px] text-[var(--color-ink-faint)]"
+            class="ml-2 font-mono text-meta text-[var(--color-ink-faint)]"
             :data-testid="`plan-${item.targetName}-renamed`"
           >
             was {{ item.name }}
           </span>
         </td>
-        <td class="py-2 font-mono text-[10px]">
+        <td class="py-2 font-mono text-meta">
           <span
             v-if="item.shadows"
             class="text-[var(--color-warn)]"

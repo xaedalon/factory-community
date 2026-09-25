@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { createInterface } from 'node:readline/promises'
 import {
+  denialMessage,
   hasAccepted,
   NOT_ACCEPTED,
   runPlan,
@@ -28,6 +29,15 @@ export interface RunFlags {
   readonly timeoutSeconds?: number
   readonly workspace?: string
   readonly provider?: string
+  /**
+   * Which profile to run under.
+   *
+   * A foreground run has no project, so there is nothing to read a profile
+   * from — the installation's is what it would otherwise get. Naming one here
+   * is how somebody tries a profile they have just written before setting it on
+   * a project, and `--dry-run` shows the argv it produces.
+   */
+  readonly profile?: string
   /**
    * What the run is about.
    *
@@ -72,6 +82,7 @@ export async function run(
     // `started: false` because it has plainly never existed before now.
     session: { id: randomUUID(), started: false },
     ...(flags.provider === undefined ? {} : { defaultProvider: flags.provider }),
+    ...(flags.profile === undefined ? {} : { profile: flags.profile }),
     ...(flags.task === undefined ? {} : { task: flags.task }),
   })
 
@@ -111,7 +122,14 @@ export async function run(
   })
 
   const lines = summarise(result, style)
-  return result.status === 'completed' ? ok(lines, result) : failed(lines, result)
+  // A foreground run has nowhere to park, so the exit code is the whole of what
+  // it can say — and a refused *command* means the run did not do what it was
+  // asked, whatever its steps exited. The engine takes the same view and pauses
+  // the task; this is the same decision at the other entry point.
+  const refusedCommand = result.denials.some((denial) => denial.command !== undefined)
+  return result.status === 'completed' && !refusedCommand
+    ? ok(lines, result)
+    : failed(lines, result)
 }
 
 async function approve(
@@ -169,17 +187,27 @@ async function approve(
 function summarise(result: RunResult, style: Style): string[] {
   const lines: string[] = ['']
   const ran = result.steps.length
+  // A command the agent was refused is not a footnote to "completed". The
+  // install did not happen, so everything the agent reported afterwards was
+  // reported without it — which is the whole failure this exists to end.
+  const refusedCommand = result.denials.some((denial) => denial.command !== undefined)
 
   lines.push(
-    {
-      completed: style.green(`Completed. ${ran} step(s).`),
-      failed: style.red(`Failed after ${ran} step(s).`),
-      'timed-out': style.red(`Timed out after ${ran} step(s).`),
-      declined: style.yellow(`Stopped: approval was not given.`),
-      refused: style.red(`Did not run.`),
-    }[result.status],
+    refusedCommand && result.status === 'completed'
+      ? style.red(`Ran ${ran} step(s), but the agent was refused a command it needed.`)
+      : {
+          completed: style.green(`Completed. ${ran} step(s).`),
+          failed: style.red(`Failed after ${ran} step(s).`),
+          'timed-out': style.red(`Timed out after ${ran} step(s).`),
+          declined: style.yellow(`Stopped: approval was not given.`),
+          refused: style.red(`Did not run.`),
+        }[result.status],
   )
 
+  // Every refusal, whatever the run did. Before this the foreground runner
+  // collected them and printed none, so the one surface a person watches said
+  // nothing at all about the one thing they would want to know.
+  for (const denial of result.denials) lines.push(style.yellow(denialMessage(denial)))
   for (const problem of result.problems) lines.push(renderProblem(problem, style))
   if (result.skipped.length > 0) {
     lines.push(style.dim(`Not reached: ${result.skipped.join(', ')}`))

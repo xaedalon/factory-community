@@ -1,6 +1,6 @@
 {
   "name": "@factory/cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "license": "Apache-2.0",
   "description": "The factory command.",
@@ -23,6 +23,7 @@
     "@factory/config": "workspace:*",
     "@factory/core": "workspace:*",
     "@factory/events": "workspace:*",
+    "@factory/mcp": "workspace:*",
     "@factory/provider-claude": "workspace:*",
     "@factory/provider-codex": "workspace:*",
     "@factory/provider-copilot": "workspace:*",

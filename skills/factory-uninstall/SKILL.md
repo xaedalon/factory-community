@@ -14,7 +14,7 @@ That last clause is the whole job. Factory writes in four places, and only two o
 |---|---|
 | the checkout it was built in | Factory's |
 | the scope in force, and the database inside it | Factory's, but it is **their history** |
-| `.xaedalon/` inside each repository — definitions, some of them committed, and task artifacts | **theirs** |
+| `.xaedalon/` inside each repository — definitions, usually ignored by git rather than committed, and task artifacts | **theirs** |
 | a worktree, at whatever path that project stores, and the branch it was made on | **theirs**, and a git checkout besides |
 
 Do not assume the scope is in their home directory. `FACTORY_HOME` overrides it, `FACTORY_SCOPES`
@@ -87,8 +87,14 @@ find ~ -type d -name .xaedalon -not -path '*/node_modules/*' 2>/dev/null
 - **`<scope>/.trash/<timestamp>/`** — copies of definitions a bundle import replaced, kept as cheap
   insurance. Those are *their previous work*. Say they are there before anything removes the scope.
 - **Copies of these runbooks** in an agent's own configuration:
-  `~/.claude/skills/factory-{setup,uninstall}`, `~/.copilot/skills/…`,
+  `~/.claude/skills/factory-{setup,uninstall,mcp-install,mcp-uninstall}`, `~/.copilot/skills/…`,
   `~/.codex/prompts/factory-*.md`.
+- **An MCP server entry pointing at `factory mcp`**, in that same configuration —
+  `claude mcp list` and `copilot mcp list` say whether there is one, and where. It is not Factory's
+  data and it is not removed here: left behind, it points a coding agent at a command that no longer
+  exists, and the failure it produces at every session start explains itself badly. Name it, and
+  point at [`factory-mcp-uninstall`](../factory-mcp-uninstall/SKILL.md) — which is one command and
+  removes nothing else.
 
 Report it grouped, with sizes — *Factory's own* first, *theirs* second — and stop there until they
 answer.
@@ -151,10 +157,21 @@ Then, only if the inventory found them:
 
 ```bash
 pnpm --filter @factory/cli unlink --global        # if `command -v factory` found a shim
-rm -rf ~/.claude/skills/factory-setup ~/.claude/skills/factory-uninstall
-rm -rf ~/.copilot/skills/factory-setup ~/.copilot/skills/factory-uninstall
-rm -f  ~/.codex/prompts/factory-setup.md ~/.codex/prompts/factory-uninstall.md
+rm -rf ~/.claude/skills/factory-{setup,uninstall,mcp-install,mcp-uninstall}
+rm -rf ~/.copilot/skills/factory-{setup,uninstall,mcp-install,mcp-uninstall}
+rm -f  ~/.codex/prompts/factory-*.md
 ```
+
+The MCP entry, if the inventory found one, comes out with its own command rather than an `rm` —
+each client keeps it in its own format and knows how to edit it:
+
+```bash
+claude mcp remove factory        # from whichever scope holds it
+copilot mcp remove factory
+```
+
+A `.mcp.json` inside one of their repositories is theirs and is **not** removed here: name it, say
+whether `git ls-files .mcp.json` calls it tracked, and leave it.
 
 A desktop application, if there is one: quit it (you did in step 2) and move it to the Bin. Its
 licence lives inside the user scope, so it stays or goes with the scope — not separately.
@@ -184,7 +201,11 @@ difference between a backup and a hope.
 
 - **tracked** definitions — `git -C <repo> rm -r --cached .xaedalon/.factory` and a commit, or
   `git rm -r` to delete them as well. Their repository, their commit.
-- **untracked** ones, and the `.xaedalon/.gitignore` Factory wrote — an ordinary `rm -rf`.
+- **untracked** ones, and the `.xaedalon/.gitignore` Factory wrote — an ordinary `rm -rf`. This is
+  now the usual case, because that file ignores the whole directory including itself: `git status`
+  will not list any of it and `git ls-files` returns nothing. **Say what is there before removing
+  it** — `ls -R <repo>/.xaedalon` — because this is the one step in this runbook where git cannot
+  tell them what they are about to lose.
 
 **Artifacts**, per project, with size:
 

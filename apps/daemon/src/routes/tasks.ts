@@ -1,8 +1,13 @@
 import type { FastifyInstance } from 'fastify'
 import {
+  IN_FLIGHT,
   DISCLAIMER,
   NOT_ACCEPTED,
+  admitAction,
+  admitTask,
   dependencyStatus,
+  isRefusal,
+  parseInitiator,
   TASK_ACTIONS,
   TASK_STATES,
   TASK_TOOL_KIND,
@@ -16,6 +21,8 @@ import {
   type Evidence,
   type Task,
   type TaskEdge,
+  type Initiator,
+  type OrchestrationFacts,
   type TaskAction,
   type TaskState,
   type TaskToolCapability,
@@ -59,6 +66,40 @@ export function registerTaskRoutes(
    * restart, and the holder is the one live copy.
    */
   const accepted = (): boolean => hasAccepted(runtime.settings.current().security.acceptedVersion)
+
+  /**
+   * What the orchestration rules are allowed to know.
+   *
+   * Built per request rather than captured, for the reason `accepted()` is read
+   * fresh: the limits live in settings and a person changing them should not
+   * need a restart.
+   */
+  const facts: OrchestrationFacts = {
+    depthOf: (runId) => runs.get(runId)?.depth,
+    tasksCreatedBy: (runId) => tasks.countCreatedBy(runId),
+    creatorOf: (taskId) => tasks.get(taskId)?.createdByRunId,
+    originOf: (runId) => runs.get(runId)?.originRunId,
+  }
+  const limits = () => runtime.settings.current().orchestration
+
+  /**
+   * Read the initiator off a request, or refuse the request.
+   *
+   * A malformed one is a 400 rather than a shrug, because a half-read initiator
+   * is one whose `taskId` went missing — and the guard that stops an agent
+   * reaching around its own run would then quietly do nothing.
+   */
+  const initiatorOf = (
+    body: { initiator?: unknown } | undefined,
+    reply: { code: (n: number) => { send: (value: unknown) => unknown } },
+  ): Initiator | undefined | typeof REFUSED => {
+    try {
+      return parseInitiator(body?.initiator)
+    } catch (error) {
+      reply.code(400).send({ error: error instanceof Error ? error.message : String(error) })
+      return REFUSED
+    }
+  }
 
   /**
    * Phases carried out over phases the plan contains.
@@ -194,15 +235,25 @@ export function registerTaskRoutes(
       })
       // One read for the whole board, not one per row.
       const blockers = dependencyView(tasks.dependencies())
+      // Likewise. `reliabilitySummary` is three queries and the arithmetic over
+      // every driver, which is right for the one task a card is drawn for and
+      // would be a hundred and twenty statements for a board of forty.
+      const scores = service.reliability.newestScores()
       return {
-        items: items.map((task) => ({
-          ...task,
-          actions: tasks.actions(task.id),
-          // Computed here rather than in the browser, which would need a
-          // request per row to do the same sum.
-          progress: progressOf(task),
-          blockers: blockers(task),
-        })),
+        items: items.map((task) => {
+          const brief = scores.get(task.id)
+          return {
+            ...task,
+            actions: tasks.actions(task.id),
+            // Computed here rather than in the browser, which would need a
+            // request per row to do the same sum.
+            progress: progressOf(task),
+            blockers: blockers(task),
+            // Absent for a task nobody has judged, never `score: 0` — a zero on
+            // a row reads as a verdict rather than as silence.
+            ...(brief === undefined ? {} : { reliability: brief }),
+          }
+        }),
       }
     },
   )
@@ -350,13 +401,39 @@ export function registerTaskRoutes(
     if (typeof body.name !== 'string' || body.name.trim() === '') {
       return reply.code(400).send({ error: 'A task needs a name.' })
     }
-    if (body.projectId !== undefined && service.projects.get(body.projectId) === undefined) {
+    // A task decides nothing about where it runs; its project does. Refused
+    // here rather than defaulted, because the default this used to have was
+    // the directory the daemon happened to be started in.
+    if (typeof body.projectId !== 'string' || body.projectId.trim() === '') {
+      return reply
+        .code(400)
+        .send({ error: 'A task needs a project: it decides where the work happens.' })
+    }
+    if (service.projects.get(body.projectId) === undefined) {
       return reply.code(400).send({ error: `No project ${body.projectId}.` })
     }
+
+    const initiator = initiatorOf(body, reply)
+    if (initiator === REFUSED) return reply
+
+    // How far work may start work, checked here rather than in whichever client
+    // asked — the disclaimer settled that argument once, and a limit only the
+    // MCP server enforced would be advice with `curl` as the exception.
+    //
+    // A refusal touches nothing that is already running. The work in flight is
+    // somebody's, and stopping it because its agent asked for one task too many
+    // would punish the wrong thing.
+    const admitted = admitTask({ initiator, limits: limits(), facts })
+    if (isRefusal(admitted)) {
+      return reply.code(409).send({ error: admitted.message, code: admitted.code })
+    }
+
     const task = tasks.create({
       name: body.name.trim(),
+      projectId: body.projectId,
+      ...(initiator?.label === undefined ? {} : { createdBy: initiator.label }),
+      ...(initiator?.runId === undefined ? {} : { createdByRunId: initiator.runId }),
       ...(body.description === undefined ? {} : { description: body.description }),
-      ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
       ...(body.ticketId === undefined ? {} : { ticketId: body.ticketId }),
       ...(body.branch === undefined ? {} : { branch: body.branch }),
       ...(body.directory === undefined ? {} : { directory: body.directory }),
@@ -378,6 +455,11 @@ export function registerTaskRoutes(
       progress: progressOf(task),
       blockers: dependencyView(tasks.dependencies())(task),
       artifacts: artifactsOf(task.id),
+      // Carried on the detail rather than fetched separately: the board draws
+      // the card, the drivers and the graph on this page, and a second request
+      // for something assembled from rows already read is a round trip for
+      // nothing. `unassessed` is a state here, never a zero.
+      reliability: service.reliabilitySummary(task.id),
       // Only on the detail: one string per task that no list view draws, and
       // resolving it reads the project row.
       workspace: workspaceOf(task),
@@ -503,11 +585,11 @@ export function registerTaskRoutes(
    * A task waiting for approval is in flight too: it is holding a paused run
    * partway through.
    */
-  const IN_FLIGHT: readonly TaskState[] = ['running', 'awaiting_approval']
+
 
   app.patch<{
     Params: { id: string }
-    Body: { name?: string; description?: string; workflows?: unknown }
+    Body: { name?: string; description?: string; workflows?: unknown; projectId?: string }
   }>(
     '/api/tasks/:id',
     async (request, reply) => {
@@ -518,10 +600,14 @@ export function registerTaskRoutes(
       const wantsName = body.name !== undefined
       const wantsDescription = body.description !== undefined
       const wantsWorkflows = body.workflows !== undefined
-      if (!wantsName && !wantsDescription && !wantsWorkflows) {
-        return reply
-          .code(400)
-          .send({ error: 'Send { name }, { description } or { workflows: [...] }.' })
+      const wantsProject = body.projectId !== undefined
+      if (!wantsName && !wantsDescription && !wantsWorkflows && !wantsProject) {
+        return reply.code(400).send({
+          error: 'Send { name }, { description }, { workflows: [...] } or { projectId }.',
+        })
+      }
+      if (wantsProject && (typeof body.projectId !== 'string' || body.projectId.trim() === '')) {
+        return reply.code(400).send({ error: 'projectId is the id of a project.' })
       }
       if (wantsWorkflows && !isSelection(body.workflows)) {
         return reply
@@ -541,6 +627,19 @@ export function registerTaskRoutes(
           error: `Cannot change a task that is ${existing.state}.`,
           state: existing.state,
         })
+      }
+
+      // The move first, and on its own terms: the store refuses a task that
+      // something waits for, and a 409 is the honest answer — the request is
+      // well formed and the state is what will not have it, exactly like the
+      // in-flight refusal above.
+      if (wantsProject) {
+        try {
+          tasks.move(request.params.id, (body.projectId as string).trim())
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          return reply.code(message.startsWith('No project') ? 400 : 409).send({ error: message })
+        }
       }
 
       // Name first, so the task that comes back carries both changes.
@@ -567,7 +666,7 @@ export function registerTaskRoutes(
     },
   )
 
-  app.post<{ Params: { id: string; action: string }; Body: { reason?: string } }>(
+  app.post<{ Params: { id: string; action: string }; Body: { reason?: string; initiator?: unknown } }>(
     '/api/tasks/:id/actions/:action',
     async (request, reply) => {
       const task = tasks.get(request.params.id)
@@ -603,6 +702,17 @@ export function registerTaskRoutes(
         })
       }
 
+      // An agent may not reach around the run it is in, and may not approve
+      // what its own branch of the tree asked for. Both are about an agent and
+      // its own work, and both are refused here rather than in a client for the
+      // same reason as the gate above.
+      const initiator = initiatorOf(request.body, reply)
+      if (initiator === REFUSED) return reply
+      const refusal = admitAction({ initiator, action, taskId: task.id, facts })
+      if (refusal !== undefined) {
+        return reply.code(409).send({ error: refusal.message, code: refusal.code })
+      }
+
       const updated = tasks.act(task.id, action, {
         ...(request.body?.reason === undefined ? {} : { reason: request.body.reason }),
       })
@@ -622,11 +732,17 @@ export function registerTaskRoutes(
    * here would mean two explanations of one rule, and the one nobody reads
    * would be the one in the interface.
    */
-  app.post<{ Params: { id: string }; Body: { dependsOn?: string } }>(
+  app.post<{ Params: { id: string }; Body: { dependsOn?: string; initiator?: unknown } }>(
     '/api/tasks/:id/dependencies',
     async (request, reply) => {
       const task = tasks.get(request.params.id)
       if (task === undefined) return notFound(reply, request.params.id)
+      // Read for the same reason every other mutating task route reads it: a
+      // half-read initiator is one whose `taskId` went missing, and a write
+      // recorded as coming from nobody is indistinguishable from a person's.
+      // Not a gate — an agent may order its own work — but the trail must not
+      // have a hole in it where MCP writes land.
+      if (initiatorOf(request.body, reply) === REFUSED) return reply
       const blockerId = request.body?.dependsOn
       if (typeof blockerId !== 'string' || blockerId.trim() === '') {
         return reply.code(400).send({ error: 'Which task should it wait for?' })
@@ -644,11 +760,12 @@ export function registerTaskRoutes(
     },
   )
 
-  app.delete<{ Params: { id: string; blockerId: string } }>(
+  app.delete<{ Params: { id: string; blockerId: string }; Body: { initiator?: unknown } }>(
     '/api/tasks/:id/dependencies/:blockerId',
     async (request, reply) => {
       const task = tasks.get(request.params.id)
       if (task === undefined) return notFound(reply, request.params.id)
+      if (initiatorOf(request.body, reply) === REFUSED) return reply
       const updated = tasks.independ(task.id, request.params.blockerId)
       return {
         task: updated,
@@ -715,6 +832,9 @@ export function registerTaskRoutes(
  * tickbox through a save, so there is one door into these rows rather than a
  * second route with its own copy of the rules.
  */
+/** "The reply has already been sent." Distinguishable from a real absence. */
+const REFUSED = Symbol('refused')
+
 const isSelection = (value: unknown): value is WorkflowSelection[] =>
   Array.isArray(value) &&
   value.every(
@@ -729,6 +849,8 @@ const isSelection = (value: unknown): value is WorkflowSelection[] =>
   )
 
 interface CreateBody {
+  /** Where the request came from, when it came from inside a run. */
+  initiator?: unknown
   name?: string
   description?: string
   projectId?: string

@@ -12,6 +12,7 @@ Feature: Tasks, runs and live updates over HTTP
   Background:
     Given a running daemon with a project scope
     And a workflow "hello" that prints "hello"
+    And a project to create tasks in
 
   Scenario: Creating a task
     When I create the task "Add due dates"
@@ -90,6 +91,23 @@ Feature: Tasks, runs and live updates over HTTP
     Then the response is 201
     And the project is listed
 
+  Scenario: A repository with no Factory scope is given one
+    When I add the project "fresh" at a repository with no scope
+    Then the response is 201
+    # Without it, every write that asks for the project scope fails — and the
+    # first thing a new project does is copy its worktree workflows in, which
+    # asks for exactly that. It answered 500 with "No project scope in this
+    # chain", and the reply that had already tried said only `written: []`.
+    Then the project has a scope of its own
+    And the response says the scope was created
+
+  Scenario: A repository that already has a scope keeps it
+    Given a repository whose scope says something of its own
+    When I add the project "fresh" at that repository
+    Then the response is 201
+    And the scope still says what it said
+    And the response does not claim to have created one
+
   Scenario: A project at a path that does not exist is refused
     When I add the project "ghost" at a path that does not exist
     Then the response is 400
@@ -100,6 +118,28 @@ Feature: Tasks, runs and live updates over HTTP
     When I create the task "Add due dates" in that project
     Then the response is 201
     And the task belongs to the project
+
+  Scenario: A task without a project is refused
+    When I create the task "Add due dates" naming no project
+    # Not defaulted to anything. The default this used to have was the
+    # directory the daemon happened to be started in, which is how an agent
+    # ended up committing to the wrong repository.
+    Then the response is 400
+    And the response says a task needs a project
+
+  Scenario: A project with nothing in it can be removed
+    Given the project "work" exists
+    When I remove that project
+    Then the response is 204
+
+  Scenario: A project that still has tasks cannot be removed
+    Given the project "work" exists
+    And the task "Add due dates" exists in that project
+    When I remove that project
+    Then the response is 409
+    And the response says 1 task is still in it
+    And the response carries the count
+    And the project is still listed
 
   Scenario: A task in a project runs in that project's directory
     Given a project in a directory the daemon was not started in
@@ -118,7 +158,20 @@ Feature: Tasks, runs and live updates over HTTP
     And a worktree exists for the task
     And the second workflow ran inside the worktree
 
+  Scenario: A worktree is removed even though the step runs inside it
+    Given a project that is a real git repository
+    And the task "Add due dates" in it, on "worktree-create" and then "worktree-delete"
+    When I queue the task
+    And the work finishes
+    # The workspace is resolved when the plan is made, so the removal step runs
+    # in the worktree it is about to remove. Git cannot read a current
+    # directory that has gone, and everything after it in the script is skipped.
+    Then no worktree is left for the task
+    And the task no longer has the flag "hasWorktree"
+    And nothing in the run mentions being unable to read the current directory
+
   Scenario: Setup says what is still missing
+    Given no repositories have been added
     When I ask what setup is left
     Then the response is 200
     And adding a repository is one of the steps
@@ -172,6 +225,13 @@ Feature: Tasks, runs and live updates over HTTP
     Given I am listening to the live stream
     When I create the task "Add due dates"
     Then the stream delivers "task.created"
+    # As an ordinary `message` frame, not one named after the event. A named
+    # frame only reaches a client that already knew to listen for that name, so
+    # naming them made every consumer keep its own copy of the vocabulary — and
+    # the board's copy had 14 of the 23 names in it, which is not an error
+    # anywhere: the board simply stopped updating for the others.
+    And the event was not named on the wire
+    And the event carries its name in the payload
 
   # The board holds this stream open for as long as it is on screen, so this is
   # the ordinary case rather than an edge one: quit the app, and the engine has
@@ -249,6 +309,33 @@ Feature: Tasks, runs and live updates over HTTP
       When I take every workflow off the list
       Then the response is 409
       And the refusal names "hello"
+
+  Rule: a task can be moved to another project
+
+    Created in the wrong project was a mistake with no remedy but deleting the
+    task and making it again, which throws away its history and its runs. A
+    task has to be created in some project, so choosing the wrong one is an
+    ordinary mistake.
+
+    Scenario: A task is moved
+      Given the project "elsewhere" also exists
+      And the task "Add due dates" exists
+      When I move it to "elsewhere"
+      Then the response is 200
+      And the task belongs to "elsewhere"
+
+    Scenario: Moving to a project that is not there is a bad request
+      Given the task "Add due dates" exists
+      When I move it to a project that does not exist
+      Then the response is 400
+
+    Scenario: Moving a task that is running is refused
+      Given the project "elsewhere" also exists
+      And the task "Add due dates" exists
+      And "Add due dates" is running
+      When I move it to "elsewhere"
+      # The request is well formed; the state is what will not have it.
+      Then the response is 409
 
   Rule: A task can be renamed, and agents are definitions like any other
 
@@ -427,6 +514,19 @@ Feature: Tasks, runs and live updates over HTTP
       When I ask for the task
       Then it reports 1 of 1 phases
 
+  Rule: a run says what it actually executed
+
+    A step recorded what the phase said it would do and the kind that ran it.
+    What was executed was nowhere, so "what did this agent run, and with what
+    authority?" could only be answered by reading the phase file back — a
+    different question as soon as anybody has edited it. The profile was
+    recorded for this reason; the argv was still missing.
+
+    Scenario: The step carries the command that ran
+      Given the task "Add due dates" exists with the workflow "hello"
+      When I queue the task and it finishes
+      Then the step says it ran "echo hello"
+
   Rule: a task's artifacts are listed, and one can be read
 
     Artifacts are read out of the evidence rows rather than off disk. That is
@@ -480,13 +580,6 @@ Feature: Tasks, runs and live updates over HTTP
       Then its workspace is that worktree
       And the workspace is a worktree
 
-    Scenario: A task belonging to no project has no workspace
-      Given the task "Add due dates" exists with the workflow "hello"
-      When I ask for the task
-      # The daemon's own directory is where such a task would run, but offering
-      # to open it would be offering a directory nobody chose.
-      Then it has no workspace
-
     Scenario: The task list does not carry it
       Given the project "work" exists at the scope's directory
       And the task "Add due dates" exists in it with the workflow "hello"
@@ -509,12 +602,12 @@ Feature: Tasks, runs and live updates over HTTP
       And each tool says which plugin provided it
 
     Scenario: The tools are beside the actions, not inside the workspace
-      Given the task "Add due dates" exists with the workflow "hello"
+      Given the project "work" exists at the scope's directory
+      And the task "Add due dates" exists in it with the workflow "hello"
       When I ask for the task
-      # A task with no project has no workspace at all, and a tool that needs
-      # no directory would be unreachable nested inside one.
-      Then it has no workspace
-      And it still has tools
+      # A tool that needs no directory — a ticket system, say — would be
+      # unreachable nested inside a workspace.
+      Then its tools are beside its workspace, not inside it
 
     Scenario: A terminal tool only changes directory
       Given the project "work" exists at the scope's directory
@@ -764,6 +857,66 @@ Feature: Tasks, runs and live updates over HTTP
       Then the response is 400
       And the response says what a profile can be
 
+  Rule: a project names the agent that judges it, not only the model
+
+    Scenario: A judging provider can be chosen for a project
+      Given a project to work in
+      When I set the project's judging provider to "claude"
+      Then the response is 200
+      And the project's judging provider is "claude"
+
+    Scenario: A provider nobody registered is refused, and the refusal names the field
+      Given a project to work in
+      When I set the project's judging provider to "nonesuch"
+      Then the response is 400
+      And the refusal names "nonesuch"
+
+    Scenario: An effort that is not text is refused
+      Given a project to work in
+      When I set the project's judging effort to a number
+      Then the response is 400
+
+    Scenario: Clearing the provider returns the project to following the installation
+      Given a project to work in
+      And its judging provider is "claude"
+      When I clear the project's judging provider
+      Then the response is 200
+      And the project names no judging provider
+
+  Rule: a list says how much to trust each task, in two numbers
+
+    The card on a task page assembles three queries; a board of forty rows asking
+    the same three would be a hundred and twenty statements to draw one column.
+    So the list reads a projection of the newest assessment — the score and the
+    evidence coverage — in one statement, and carries both or neither.
+
+    Both, because a 93 with 41% coverage is not the same claim as a 93 with 96%,
+    and a list that showed only the first would be exactly the flattery the card
+    was written to avoid.
+
+    Scenario: The list carries the score and the coverage together
+      Given the task "Add due dates" exists
+      And it has been assessed
+      When I ask for every task
+      Then the response is 200
+      And the row carries a score and a coverage
+
+    Scenario: A task nobody has judged carries no reliability at all
+      Given the task "Add due dates" exists
+      When I ask for every task
+      Then the response is 200
+      And the row carries no reliability
+
+    Scenario: The list and the task agree about the score
+      # Two projections of one row. If they could disagree, the number somebody
+      # scanned a board for would not be the number they opened the task to read.
+      Given the task "Add due dates" exists
+      And it has been assessed
+      When I ask for every task
+      And I read the task
+      Then both say the same score
+      And both say the same coverage
+
   Rule: a task says what it is waiting for
 
     Derived per request rather than stored, the way progress is. The scheduler
@@ -778,6 +931,24 @@ Feature: Tasks, runs and live updates over HTTP
       When I create the task "Add due dates"
       And I ask for the task
       Then it waits for nothing
+
+    Scenario: A dependency written with a half-read initiator is refused
+      # Every other mutating task route reads the initiator, and these two did
+      # not — which was harmless while only a person could reach them. An MCP
+      # tool makes an agent the caller, and a request whose initiator went
+      # missing is the one shape the guards elsewhere exist to catch, so it is
+      # refused here rather than recorded as having come from nobody.
+      Given the task "Scaffold" exists
+      And the task "The model" exists
+      When "The model" is made to wait for "Scaffold" with an initiator of "yes please"
+      Then the response is 400
+
+    Scenario: Undoing a dependency reads the initiator too
+      Given the task "Scaffold" exists
+      And the task "The model" exists
+      And "The model" is made to wait for "Scaffold"
+      When the wait is removed with an initiator of "yes please"
+      Then the response is 400
 
     Scenario: A dependency is written and read back
       Given the task "Scaffold" exists
@@ -916,7 +1087,7 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Queue all ignores another project's tasks
       Given the project "work" exists here
       And the task "One" exists in the project with a workflow
-      And a task "Elsewhere" with a workflow in no project
+      And a task "Elsewhere" with a workflow in another project
       When I queue the whole project
       Then 1 task was queued
 
@@ -981,7 +1152,7 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Stop all ignores another project's tasks
       Given the project "work" exists here
       And the task "One" exists in the project with a workflow
-      And a task "Elsewhere" with a workflow in no project
+      And a task "Elsewhere" with a workflow in another project
       And the whole project is queued
       And "Elsewhere" is queued
       When I stop the whole project
@@ -998,3 +1169,389 @@ Feature: Tasks, runs and live updates over HTTP
     Scenario: Stopping a project that is not there is not found
       When I stop a project that does not exist
       Then the response is 404
+
+  Rule: adding a project leaves the repository exactly as it was
+
+    Most repositories that exist are not using Factory, and somebody may want
+    to use it on this machine only. So registering one writes nothing git can
+    see: the `.xaedalon/.gitignore` Factory creates contains `*`, which hides
+    the family directory and that file with it.
+
+    Asserted against real git rather than against the file's contents, because
+    the contents are the mechanism and `git status` is the promise.
+
+    Scenario: Registering a project adds nothing to git status
+      Given a repository with nothing to commit
+      When I add it as a project
+      Then the response is 201
+      And it has a Factory scope of its own
+      And git still has nothing to say about it
+
+    Scenario: A repository that already shares its definitions is left sharing them
+      Given a repository whose Factory definitions are committed
+      When I add it as a project
+      Then the response is 201
+      # Never over a directory Factory did not create. The other half of that
+      # decision is this: the worktree definitions copied in as the project is
+      # registered are *visible*, because this repository shares its
+      # definitions and its team should see the new ones and commit them.
+      And no ignore file was written
+      And the definitions it copied in are there for the team to commit
+
+  Rule: doctor asks git what it can see of a project
+
+    The rule itself is specified against a stub in the engine's own suite. What
+    only a real repository can answer is whether the question Factory asks git
+    is the one it means — the flags, the NUL-separated records, and every way
+    of not getting an answer at all.
+
+    Scenario: A committed artifact is found in a real repository
+      Given a project that is a real repository with a committed task artifact
+      When I GET "/api/doctor"
+      Then the response is 200
+      And the findings say a run's output is committed
+
+    Scenario: A project that is not a repository produces no finding
+      Given a project that is a plain directory
+      When I GET "/api/doctor"
+      Then the response is 200
+      And the findings say nothing about git
+
+  Rule: a directory can ask which project it is in
+
+    Everything that asks the daemon about a project has so far known its id or
+    its name, because a person picked it. An agent knows the directory it was
+    started in and nothing else, so the question has to be answerable over the
+    wire — and answerable *here*, because the CLI and the board want the same
+    answer and a client that worked it out for itself would disagree with this
+    one the first time the rule changed.
+
+    Scenario: A directory inside a project resolves to it
+      Given a project "factory" at a repository
+      When I ask which project is at a directory inside it
+      Then the response is 200
+      And the project is "factory"
+      And it matched an ancestor
+
+    Scenario: A directory nobody registered is not found
+      Given a project "factory" at a repository
+      When I ask which project is at a directory outside every project
+      Then the response is 404
+
+    Scenario: A task's worktree resolves to the project and the task
+      Given a project "factory" at a repository
+      And a task "Add due dates" in it with a worktree on disk
+      When I ask which project is at that worktree
+      Then the response is 200
+      And the project is "factory"
+      And the answer names the task "Add due dates"
+
+    Scenario: Two projects at one directory are a conflict
+      Given a project "factory" at a repository
+      And a second project "factory-again" at the same repository
+      When I ask which project is at that repository
+      Then the response is 409
+      And both project names are in the answer
+
+    Scenario: Asking without a path is a usage error
+      When I ask which project is at no path at all
+      Then the response is 400
+      # The status alone would pass without the guard: unguarded, the missing
+      # path reaches the repository and comes back as a TypeError about a
+      # string, which is a 400 that tells nobody what to do.
+      And the answer says what to pass instead
+
+  Rule: how far work may start work is the daemon's to decide
+
+    An agent Factory launched can reach this API: it is on 127.0.0.1, there is
+    no authentication, and the address is not credential-shaped so it survives
+    the environment filter. Serving MCP did not create that reach — it made it
+    ergonomic, and an ergonomic way to start work from inside work is an
+    ergonomic way to start work from inside that.
+
+    So the bound is here, for the reason the disclaimer gate is here: a rule
+    only the MCP server enforced would be advice, with `curl` as the exception.
+
+    Scenario: A request with nobody behind it is a person
+      Given a project to work in
+      When I create a task with no initiator
+      Then the response is 201
+
+    Scenario: Work four levels deep is refused
+      Given a project to work in
+      And a run "deep" at depth 3
+      When I create a task from inside "deep"
+      Then the response is 409
+      And the answer is coded RECURSION_LIMIT
+      And no task was created
+
+    Scenario: The eleventh task from one run is refused
+      Given a project to work in
+      And a run "busy" at depth 0 that has already asked for 10 tasks
+      When I create a task from inside "busy"
+      Then the response is 409
+      And the answer is coded FAN_OUT_LIMIT
+
+    Scenario: A task created from inside a run remembers which
+      Given a project to work in
+      And a run "asker" at depth 0
+      When I create a task from inside "asker"
+      Then the response is 201
+      And the task says "asker" asked for it
+      And the task says who the client called itself
+
+    Scenario: An initiator that is not an object is refused rather than half-read
+      Given a project to work in
+      # A half-read initiator is one whose taskId went missing, and the guard
+      # that stops an agent reaching around its own run would then do nothing.
+      When I create a task with an initiator of "yes please"
+      Then the response is 400
+
+    Scenario: An agent cannot queue the task it is running inside
+      Given a project to work in
+      And a task "Add due dates" that can be queued
+      And the disclaimer has been accepted
+      When the agent running that task tries to queue it
+      Then the response is 409
+      And the answer is coded SELF_ORCHESTRATION_BLOCKED
+      And the task was not queued
+
+    Scenario: An agent cannot approve what its own run asked for
+      Given a project to work in
+      And a run "asker" at depth 0
+      And a task "Add due dates" that "asker" asked for, waiting for approval
+      When the agent in "asker" tries to approve it
+      Then the response is 409
+      And the answer is coded APPROVAL_SEPARATION
+      And the task is still waiting for approval
+
+    Scenario: Queue all skips the agent's own task and queues the rest
+      Given a project to work in
+      And the disclaimer has been accepted
+      And two tasks that can be queued
+      When the agent running the first one queues the whole project
+      Then the response is 200
+      And one task was queued
+      And the one it is running inside was skipped with a reason
+
+  Rule: a project is asked what checks its work, and told when it cannot be guessed
+
+    The gate a `validate` workflow needs is a command, and Factory cannot invent
+    one. What it can do is read the repository it was just handed: a `test`
+    script in a `package.json` is not a difficult guess, and asking somebody to
+    fill in a field they were not expecting is how a field ends up empty.
+
+    Detected only when the caller said nothing at all. A caller that sent a
+    blank string meant blank — "this project has no gate" is a real answer, and
+    overruling it with a guess would be help nobody can switch off.
+
+    Scenario: Adding a repository with a test script detects its command
+      Given a directory whose "package.json" declares a "test" script
+      When I add a project at that directory
+      Then the project's check command is "npm test"
+
+    Scenario: A repository that says nothing gets no command
+      Given a directory with nothing Factory recognises
+      When I add a project at that directory
+      Then the project has no check command
+
+    Scenario: A command sent with the request is used as sent
+      Given a directory whose "package.json" declares a "test" script
+      When I add a project at that directory with the check command "make verify"
+      Then the project's check command is "make verify"
+
+    Scenario: The command can be changed afterwards
+      Given a directory whose "package.json" declares a "test" script
+      And a project added at that directory
+      When I set that project's check command to "pnpm verify"
+      Then the response is 200
+      And the project's check command is "pnpm verify"
+
+    Scenario: The command can be cleared afterwards
+      Given a directory whose "package.json" declares a "test" script
+      And a project added at that directory
+      When I clear that project's check command
+      Then the response is 200
+      And the project has no check command
+
+    Scenario: A check command that is not text is refused
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's check command to the number 7
+      Then the response is 400
+
+  Rule: a green project check is evidence, and Factory knows which command it was
+
+    The one expectation Factory can satisfy without being told: a step running
+    exactly the project's own check command and exiting zero *is* the project's
+    checks passing. Everything else waits for a workflow to declare it.
+
+    Knowing which command that was is the daemon's job — the engine has a run
+    and a plan and no idea which project they belong to. It was never handed
+    over, so the credit was reachable only from a unit test that passed the
+    fact in by hand, and no real run ever earned it.
+
+    Scenario: A run of the project's check command earns regression coverage
+      Given the project checks itself with "echo checks passed"
+      And the workflow "check" runs that command
+      And the task "Add due dates" exists with the workflow "check"
+      When I queue the task
+      And the work finishes
+      Then the assessment counts "regression_checks" as collected
+
+    Scenario: A run of some other command earns none
+      Given the project checks itself with "echo checks passed"
+      And the task "Add due dates" exists with the workflow "hello"
+      When I queue the task
+      And the work finishes
+      Then the assessment counts no evidence at all
+
+  Rule: a project says which model judges its work, and whether one does
+
+    The free evaluator always runs. An agent evaluator costs tokens on every run
+    that produced something, so what it costs and whether it is worth it are the
+    project's call — a weekend project and a payments service do not want the
+    same model, and neither wants one chosen for them in Factory's source.
+
+    Naming nothing is not the same as switching it off. One of them starts
+    working the moment a model is named.
+
+    Scenario: A new project names no model and is judged
+      Given a directory with nothing Factory recognises
+      When I add a project at that directory
+      Then the project names no judging model
+      And the project is judged
+
+    Scenario: A model can be chosen
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging model to "claude-opus-5-5"
+      Then the response is 200
+      And the project's judging model is "claude-opus-5-5"
+
+    Scenario: A model can be cleared
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      And that project's judging model is "claude-opus-5-5"
+      When I clear that project's judging model
+      Then the response is 200
+      And the project names no judging model
+
+    Scenario: Judging can be switched off without losing the model
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      And that project's judging model is "claude-opus-5-5"
+      When I stop that project's work being judged
+      Then the response is 200
+      And the project is not judged
+      And the project's judging model is "claude-opus-5-5"
+
+    Scenario: A model that is not text is refused, and the refusal names the field
+      # The status alone does not distinguish a validated refusal from the
+      # store throwing on `7.trim()` — both are 400, and only one of them puts
+      # the error against a field a form can highlight.
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging model to the number 7
+      Then the response is 400
+      And the refusal names the judging model
+
+    Scenario: Judging that is not true or false is refused
+      Given a directory with nothing Factory recognises
+      And a project added at that directory
+      When I set that project's judging to "maybe"
+      Then the response is 400
+
+  Rule: a task carries how much to trust it, and no surface can simply say
+
+    The score is assembled from the history — the newest assessment plus the
+    drivers still active — and assembled in one place, so the task payload and
+    the reliability routes cannot describe the same task differently.
+
+    There is no route that sets a score. There is not going to be one, and a
+    scenario asserts it does not exist.
+
+    Scenario: A task nobody has judged says so rather than scoring zero
+      Given the task "Add due dates" exists
+      When I read the task
+      Then its reliability is "unassessed"
+      And it carries no score
+
+    Scenario: The reliability route agrees with the task payload
+      Given the task "Add due dates" exists
+      When I read the task
+      And I read its reliability
+      Then both say the same state
+
+    Scenario: An assessment can be asked for
+      Given the task "Add due dates" exists
+      When I ask for an assessment
+      Then the response is 200
+      And its reliability is "assessed"
+      And it carries a score
+
+    Scenario: History starts empty and grows
+      Given the task "Add due dates" exists
+      When I read its reliability history
+      Then 0 assessments are listed
+      When I ask for an assessment
+      And I read its reliability history
+      Then 1 assessment is listed
+
+    Scenario: Next actions are offered for a task with nothing to do
+      Given the task "Add due dates" exists
+      When I read its next actions
+      Then the response is 200
+      And no actions are offered
+
+    Scenario: There is no route that sets a score
+      Given the task "Add due dates" exists
+      When I try to set its score to 100
+      Then the response is 404
+
+  Rule: accepting a serious risk is a person's, and the daemon is what knows
+
+    An acceptance an agent can grant itself is not a gate. Factory stamps the
+    run into every agent process it launches, so the daemon can tell — and a
+    client that omits it looks like a person, which is the direction that loses
+    authority rather than gains it.
+
+    Scenario: An agent cannot accept a high risk
+      Given a task with a "high" reliability driver
+      When an agent tries to accept that driver
+      Then the response is 409
+      And the refusal says a person is required
+
+    Scenario: A person can accept a high risk
+      Given a task with a "high" reliability driver
+      When a person accepts that driver
+      Then the response is 200
+      And the driver is "accepted"
+      And it records who accepted it
+
+    Scenario: An agent can resolve a high risk
+      # Resolving is a claim evidence can check. Accepting is a decision.
+      Given a task with a "high" reliability driver
+      When an agent resolves that driver
+      Then the response is 200
+      And the driver is "resolved"
+
+    Scenario: Accepting re-judges the task immediately
+      # Leaving it until the next run would show a number contradicting the
+      # list underneath it.
+      Given a task with a "high" reliability driver
+      When a person accepts that driver
+      Then the reliability comes back with the reply
+
+    Scenario: A move the driver does not offer is refused with the ones it does
+      Given a task with a "high" reliability driver
+      And that driver has been resolved
+      When a person tries to resolve it again
+      Then the response is 409
+      And the refusal lists what it would accept
+
+    Scenario: Something that is not a driver action is refused
+      Given a task with a "high" reliability driver
+      When a person tries to "obliterate" that driver
+      Then the response is 400
+

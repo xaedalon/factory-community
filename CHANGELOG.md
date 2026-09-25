@@ -6,6 +6,325 @@ What changed, per release. The reasoning behind each decision lives in
 Versions follow [semantic versioning](https://semver.org). Until 1.0.0 the public surface — the
 plugin SDK, the scope layout, the HTTP API — may still move, and a minor bump is where it will move.
 
+## 0.2.0 — 2026-09-25
+
+**A task now says how much to trust it.** Factory could tell you a task was `done`. It could not
+tell you what that was worth. Every run is judged from what Factory observed — exit codes, refused
+commands, artifacts promised and delivered or not — and the task carries a score, the evidence
+coverage behind it, the findings holding it down and who should deal with each.
+
+Two numbers, never one. A 93 with 41% coverage is "nothing has gone wrong yet and we have barely
+looked"; a 93 with 96% is "we looked hard and it is good". The score can go *down*: a validation
+that finds a regression has learned something, and hiding that would remove the most useful thing
+here.
+
+*No agent ever sets the score.* An evaluator returns dimension assessments and findings — there is
+no field for a score, and none of the six MCP tools can set one. An agent may **resolve** a critical
+finding; only a person may **accept** one, the same separation `approve` already had.
+
+*What it costs:* nothing by default. The evaluator that always runs is deterministic and free. A
+second one that reads the work with an agent runs only where a project has named a model on its
+page, and only on runs that produced something worth reading.
+
+*Where to look:* the card, the graph and the drivers list on a task; `factory reliability <task>`,
+with `history`, `drivers`, `next` and `assess`; `GET /api/tasks/:id/reliability` and five more. The
+five-stage pipeline it was designed around ships as a bundle with one click on the project page.
+[`docs/reliability/`](docs/reliability/) is the whole of it, and says plainly that these are
+heuristics rather than calibrated odds.
+
+**A profile of your own, between Default and Full Access.** A Rust project's agent could not run
+`cargo test`; a Makefile project's could not run `make check`. The only lever was Full Access, which
+answers a question nobody asked. Now a repository can write down which commands its agents may run:
+
+```yaml
+kind: factory.profile/v1
+name: build-tools
+extends: default
+commands: [cargo, make, go]
+```
+
+It is a definition like any other — `.xaedalon/.factory/profiles/`, layered, editable on the board
+with the YAML preview, shareable in a bundle, and `factory run --dry-run --profile <name>` shows
+the argv it produces before you commit to it. Factory ships `build-tools.bundle.yaml` as a
+worked example.
+
+*What it cannot do:* a profile **widens which commands may run and never where they may write**. It
+is confined by construction, `extends: default` is the only base, and one that passes what Full
+Access passes is refused when it is saved — derived from each provider's own flags, so it stays true
+as they change. A project naming a profile no scope defines refuses to plan rather than falling
+back.
+
+*What it is honest about:* read-only commands are already allowed, so listing `cat` buys nothing.
+Only Claude Code can honour a command list — Copilot and Codex have no per-command concept, and
+Factory says so rather than letting you assume, for allowing and forbidding separately: a CLI can
+have an allow-list and no deny-list, and then the careful half of a profile is the half that goes
+missing. An interpreter warns, names the measurement, and
+then lets you, because the risk is the repository owner's to take.
+[`docs/security/profiles.md`](docs/security/profiles.md) is the whole of it.
+
+**You choose the agent that judges your work, not just its model.** Factory used whichever provider
+CLI happened to be registered first and available, and passed no effort at all — the one place that
+did not honour bring-your-own-AI. Now the installation names an agent, a model and an effort, and a
+project overrides any of the three on its own page.
+
+Inherited **field by field**, never as a trio: a project that had named a model keeps it and inherits
+the provider, which a whole-trio rule would have quietly stopped judging. Nothing is defaulted in
+Factory's source at either level, because a model named there would spend your tokens on a decision
+you never made.
+
+*If it cannot be asked:* a named CLI whose command is missing means no judgement and one warning, and
+Factory does **not** quietly ask a different one — honouring two thirds of the trio would ask Claude
+for a Codex model id. An effort a CLI has no flag for is ignored and says so, the same warning an
+agent step already gets. Nothing named anywhere behaves exactly as before.
+
+**A setting can now be cleared.** `null` in a settings patch removes a value; `undefined` still
+leaves it alone. Until now every setting had a default so there was nothing to un-set — an
+installation default nobody can un-set is a default they cannot stop paying for.
+
+**A task row says how much to trust it.** The score and the evidence coverage, together — a 93 with
+41% coverage is not the same claim as a 93 with 96%, and a row showing only the first would be the
+flattery the reliability card was written to avoid. A task nobody has judged shows an em dash, never
+a zero: a zero reads as a verdict rather than as silence. In the table, on the kanban card, and on a
+task an agent lists over MCP.
+
+One query for the whole board rather than three per row. The card assembles the newest assessment,
+the drivers and the runs, which is right for one task and would be a hundred and twenty statements
+for a board of forty; a list reads a two-field projection of the newest row instead, and parses none
+of the JSON columns a row never draws.
+
+**An agent can order its own work.** MCP could create tasks and write workflows, and then only
+describe the order they should run in — prose nothing reads. `factory_task_depends_on` makes one task
+wait for another, and `factory_workflow_needs` says what a workflow that already exists waits for
+(`factory_workflow_create` could always say it for one being written). Neither carries any rules: the
+store still refuses a ring, a task waiting for itself and a link across projects, and the sentence
+you get is the store's own. Writing `needs:` reads the workflow and writes it back against the etag,
+so a tool cannot overwrite an edit you made in your editor in between — it is told the file changed.
+
+The two dependency routes now read the initiator, as every other mutating task route already did.
+Not a new gate — an agent may order its own work — but a write recorded as coming from nobody is
+indistinguishable from yours, and MCP made an agent the caller.
+
+`docs/mcp.md`'s tool table is now checked against what is registered, in both directions. It said
+fifteen tools while there were twenty-two; a number nothing checks is a number that rots.
+
+**An API path the daemon does not serve is a 404, not the board.** The catch-all that lets
+`/tasks/abc` resolve in the app router was catching `/api/…` with it, so a page calling a route
+*this* daemon does not have got `index.html` with a **200** — and then failed on `undefined`
+somewhere else entirely, with a message naming neither the request nor the cause. An older daemon
+and a newer board is the ordinary way to be in that position. The board and the CLI now also refuse
+a non-JSON success outright rather than handing their callers nothing — naming the request and
+saying the daemon may be older than they are.
+
+**A task's dimension breakdown adds up to its score.** A finding moves the dimension it names, and
+the contribution lines showed the moved value — but the dimension map recorded beside them was the
+one from *before* the findings were applied. So a task read `implementation 60` next to a score
+computed from 48, and the breakdown could not explain the number above it. Both now come from the
+same place.
+
+**Clearing a field on the board now actually clears it.** Emptying a list — an agent's `args`, a
+phase's `variables`, a workflow's `needs` — or clearing a field back to its default looked like it
+saved and changed nothing: the writer does not emit an empty list, and the delete beside it was
+guarded on the value being absent, which an emptied list is not. So the key was neither written nor
+removed and the file kept its old line. The writer now asks whether the file still says what the
+value says, which keeps a default somebody wrote on purpose and removes what they actually cleared.
+
+**A refused argument says what you already have.** `args:` on a step is appended after the flags
+that confine the agent, so it is refused at plan time — but the common case is not somebody reaching
+for authority. It is somebody told that a step needs `args: ['--allowedTools', 'Bash(pnpm *)']` to
+run `pnpm`. It does not: the Default profile has passed exactly that since the package managers were
+measured, and `--allowedTools` is variadic, so the step's copy would have *replaced* the list and
+dropped `npm`, `yarn` and `bun`. The refusal now prints what the profile already passes for that
+flag, and points at a `shell` step — which an agent's allow-list does not govern — before it
+mentions Full Access.
+
+**An error is shown where it was caused.** A failure that belongs to a field is under that field;
+one that belongs to none is at the *top* of the form. It used to sit below every field, which on
+the project form is off the screen at the moment it appears.
+
+**Factory stops reporting success for work that did not happen.** A supervised run of ten tasks
+found the same shape four times: not a crash and not a wrong answer, but a tick beside work that
+never ran. Each of these was silent before, and each is loud now.
+
+**The Default profile can run your package manager again.** Claude Code auto-approves *edits* but
+not *commands*, so from 2.1.281 an agent under this profile could not run `pnpm install` at all —
+it was refused, carried on, exited 0 and wrote a report full of ticks. Factory now passes
+`--allowedTools` with `npm`, `pnpm`, `yarn` and `bun`, and nothing else.
+
+*This genuinely widens the profile, and [`docs/security/default-profile.md`](docs/security/default-profile.md)
+says so rather than implying otherwise:* `pnpm test` runs your project's own code, so the workspace
+boundary does not hold inside it. The list is package managers for that reason — an interpreter
+would be the same hole with none of the reason, and `Bash(node *)` was measured writing outside the
+workspace on the first attempt. If your check command is `cargo test` or `make check`, an *agent*
+asked to run it is still refused; the gate below is a shell step and is unaffected.
+
+**A refused command stops the run instead of disappearing into it.** The Claude descriptor now asks
+for `--output-format stream-json`, and Factory reads the transcript — so a refusal is a fact the CLI
+states rather than a sentence an agent paraphrases. A refused **command** moves the task to
+awaiting approval naming the command, whatever the exit code said, because an install that did not
+happen means everything reported after it was reported without it. A refused **path** behaves as
+before: the run may well have done the work somewhere else, so it is recorded and left alone.
+
+*Also:* the commands an agent runs are traced into the run's log as it goes, so a run that is
+thinking for six minutes is no longer silent. And `factory run` prints the refusals it had been
+collecting since profiles existed and never showing — a foreground run whose agent was refused a
+command now fails rather than printing `Completed.`
+
+**A project carries the command that checks its own work.** One setting — detected from a `test`
+script in `package.json` with the package manager read off the lockfile, from `Cargo.toml`,
+`go.mod`, or a `test:` target in a `Makefile` — editable on the project's page. It reaches a phase
+as `{{ project.check }}`, and the built-in **`project-check`** phase is exactly that one command, so
+a workflow ending in a real gate is one word in its phase list.
+
+*Why it matters:* an agent's report is a claim, and only a command is a result. A `validate`
+workflow made of an agent step alone can only ever tell you what the agent said.
+
+**A workflow or step that would run nothing is refused.** A workflow with no phases, or whose
+phases have no steps, used to finish `completed` in about three milliseconds with a tick beside it.
+It is now an error at plan time, a warning when the definition is parsed, and a `factory doctor`
+finding. So is any step whose command resolves to an empty string — `bash -c ''` exits 0, which is
+the same lie one level down.
+
+**A step cannot argue its way past its execution profile.** `args:` on a step or an agent file is
+appended to the agent's command line *after* the flags that confine it, and nothing checked it — so
+`args: ['--permission-mode', 'bypassPermissions']` in a file inside the repository meant Full Access
+with no setting changed and nothing said. It is refused at plan time now, naming the argument. What
+counts is derived from each provider's own Full Access flags, so it stays true as descriptors change
+and a third-party provider gets it without writing anything.
+
+*Upgrading:* if you added `--allowedTools` to an agent or step as a workaround for the first item
+above, remove it — it is refused now, and no longer needed.
+
+**Factory speaks the Model Context Protocol.** `factory mcp` serves it over stdio, so the coding
+agent you already have can resolve the project you are standing in, list what that project can run,
+create a task, queue it, follow the run and read what it produced. Point a client at it and there
+is nothing else to configure:
+
+```json
+{ "mcpServers": { "factory": { "command": "factory", "args": ["mcp"] } } }
+```
+
+It is a client of the same HTTP API the board and the CLI use, so every guarantee that was already
+there applies without a second copy: the disclaimer gate, the execution profile the project
+resolves to, the workspace boundary, and a task's own list of what it will accept next.
+[`docs/mcp.md`](docs/mcp.md) is the feature; [`docs/proposals/mcp.md`](docs/proposals/mcp.md) is
+what it is built against, including what is deliberately left out.
+
+*Or let your agent set it up:* **`/factory-mcp-install`** in Claude Code, "add Factory to my MCP
+servers" in Copilot. It asks whether you want Factory everywhere on this machine or only in one
+repository — everywhere by default — checks the daemon and its port first, and says what it wrote
+where. `/factory-mcp-uninstall` takes it back out, and removes no Factory data at all.
+
+*What it cannot do:* choose a profile — there is no parameter for one — accept the disclaimer for
+you, or approve anything. `approve` and `reject` are not offered at all, because Factory cannot
+tell your own session from an agent acting unasked inside it, and an approval an agent can give
+itself is not a gate.
+
+*Work that starts work is bounded.* An agent Factory launched could already reach the daemon;
+serving MCP makes it ergonomic, so there are now limits on it, enforced by the daemon rather than
+by the client asking. Every run records where it came from and how deep it is, every agent process
+is told which run and task it is in, and an agent may not act on the task it is running inside or
+approve what its own branch asked for.
+
+```yaml
+# ~/.xaedalon/.factory/settings.yaml — the defaults
+orchestration:
+  maxDepth: 3
+  maxTasksPerRun: 10
+```
+
+*Upgrading:* a migration adds four nullable columns and one with a default of 0. Nothing is deleted
+and nothing existing changes meaning — every run recorded before this was started by a person, and
+depth 0 says so. `POST /api/tasks` and `POST /api/tasks/:id/actions/:action` now accept an optional
+`initiator`, and `GET /api/projects/at?path=` is new: it answers which project a directory is in.
+
+**A task belongs to a project.** `project_id` is required, and removing a project that still has
+tasks in it is refused with the count rather than orphaning them. A task with no project ran
+wherever the daemon happened to be started, wrote its artifacts beside it, could not be queued as a
+batch or given a worktree, and disappeared from the board the moment any project was selected.
+
+*Upgrading:* the migration **deletes tasks that belong to no project**, and everything recorded
+about them — runs, logs, artifacts, history. It says how many at boot. Tasks that have a project
+keep everything. If you have project-less tasks worth keeping, give them a project before
+upgrading. `factory run` is unaffected; it never created a task.
+
+*Also:* adding a project now creates its `.xaedalon/.factory` directory if the repository has none,
+because everything a new project does needs it — the reply says whether one was created, and the
+board lists it with whatever was copied in. `POST /api/tasks` requires `projectId` and answers 400
+without one. `DELETE /api/projects/:id` answers 409 with the count while anything is left in the
+project. `factory task new` falls into the only project there is, and otherwise asks which.
+
+**Factory no longer puts anything in your `git status`.** The `.xaedalon/.gitignore` written when
+Factory creates that directory now contains `*`, so the directory — and that file with it — is
+invisible to git. Registering a project, or running `factory init`, leaves a repository exactly as
+it was. Most repositories that exist are not using Factory, and trying it on your own machine
+should not turn into a commit.
+
+*Sharing is the opt-in, and one edit:* replace the `*` with the three lines the file names —
+`.factory/tasks/`, `.factory/state/`, `.factory/.trash/` — and commit `.xaedalon`. Deleting the
+file does the same thing. A repository that already committed its definitions is untouched:
+Factory never writes an ignore file over a directory it did not create, and the narrow file it
+writes beside an existing one now covers the database and bundle backups as well as task output,
+neither of which was ignored before.
+
+*Two consequences worth knowing:* `git clean -xdf` deletes ignored files, so it now takes your
+definitions and the database if it lives in that repository — plain `git clean -fd` leaves them
+alone. And your editor probably hides ignored paths, so the notice the board shows after
+registering a project may be the only place you see the files named.
+
+**`factory doctor` shows what the daemon found.** Half the rules need the database the daemon owns
+— the ones about tasks, worktrees and what git can see of a project — and until now nothing printed
+them: the command built its own host without a database, and the board declares the endpoint and
+calls it from nowhere. It asks a running daemon and merges, deduplicating what both halves found,
+and says plainly when there is no daemon to ask.
+
+**Doctor reports what git can see of a project.** Silent for both coherent states — everything
+ignored, everything committed — and a finding for the two that are not: a task's artifacts or the
+database committed by accident, and definitions committed into a directory that has since been
+ignored, where the workflows already there keep working while every new one is invisible.
+
+**The event stream stopped naming its frames.** `GET /api/events` sent each event as an SSE frame
+named after the event, which only reaches a client that already knows to listen for that name — so
+every consumer kept its own copy of the event vocabulary, and the board's copy had 14 of the 23
+names in it. A name missing from such a list is not an error anywhere: the board simply stops
+updating for that event. Frames are ordinary `message` frames now, and the name is in the payload
+where it cannot go out of date. A client that filtered on the SSE event name should read
+`payload.name` instead.
+
+**Plugins can refuse or adjust a definition.** `validateDefinition` and `beforeDefinitionWrite`
+have been documented since the plugin host was built and were never called. They now run on the one
+path every definition takes to disk — the API, the CLI, a bundle import, and the copies a project
+is given when it turns worktrees on.
+
+**A task can be moved to another project.** `PATCH /api/tasks/:id` takes `projectId`, and `factory
+task move <id> <project>` takes the project by name. Refused while the task is in flight, and while
+anything depends on it — an edge may only join two tasks in the same project.
+
+**A step records the command it ran.** `run_steps.command` holds the rendered argv, shown on the
+task page above that step's output. "What did this agent run, and with what authority?" could only
+be answered by reading the phase file back, which is a different question once somebody has edited
+it. Not the environment: the profile already records how much of it the step could see.
+
+**Adding a project creates its scope.** A repository with no `.xaedalon/.factory` used to leave
+every write that asked for the project scope failing with a 500 — including the copies made as the
+project is registered. The reply says whether a scope was created, and the board lists it with the
+definitions that went inside.
+
+**Exporting a workflow follows `needs`,** not only `on_fail`, so a pipeline is one export rather
+than five and a merge by hand.
+
+**Doctor reports a task waiting for something that cannot finish** before it is queued.
+
+**Fixed.** The scheduler's lane and flag gates asked about the newest run's workflow rather than the
+one about to run, so a task whose first workflow had finished was admitted on the requirements of
+work that was over — agents ran in a project's own checkout, and two `merge` workflows could
+overlap; a sequential workflow anywhere but first in a task's list was never serialised at all, and
+an approval gate let two of them resume together. Removing a worktree ran inside the worktree it
+was removing, which left git with no current directory, so the prune never happened and
+`hasWorktree` was never cleared. Rejecting an approval left its run paused for ever, and a retry
+afterwards resumed past the gate that had just been refused. `stdin:` on a step was printed and
+never opened. A migration that rebuilds a table no longer takes every run, log and history row of
+every other task with it.
+
 ## 0.1.0 — 2026-09-21
 
 The first release. Factory runs other people's coding agents against your repositories, in an order

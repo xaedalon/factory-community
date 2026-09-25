@@ -1,0 +1,17 @@
+<!--
+  The mark the nav already draws: a rounded square on its corner, in the one
+  accent. Taken from the app rather than invented for the tab, so the thing in
+  the tab strip and the thing at the top of the page are the same object.
+
+  SVG, and no PNG beside it: this ships in Electron and is tested in Chrome, and
+  one file that scales beats three that drift.
+
+  The hue is the accent token's value written out, because a stylesheet's custom
+  properties are not in scope in a standalone file. If that token moves, this
+  moves with it. (Its name is not spelled here on purpose: an XML comment may
+  not contain a double hyphen, and the name begins with one. This file was
+  briefly unparseable for exactly that reason.)
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <rect x="8.5" y="8.5" width="15" height="15" rx="3.5" transform="rotate(45 16 16)" fill="#6d5cf5" />
+</svg>

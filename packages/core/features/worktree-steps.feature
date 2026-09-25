@@ -67,6 +67,12 @@ Feature: The worktree step kind
     Then the script removes the worktree
     And the script prunes git's record of it
     And the script does nothing when the directory is already gone
+    # Because the step usually runs *in* the worktree it is removing: the
+    # workspace is resolved when the plan is made, while it is still there.
+    # Removing the directory a process is sitting in leaves git with no
+    # current directory to read — "fatal: Unable to read current working
+    # directory" — and the prune that follows never happens.
+    And the script leaves the worktree before removing it
 
   Scenario: An action the kind does not have is a validation error
     Given the step:

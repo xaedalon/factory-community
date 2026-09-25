@@ -1,0 +1,212 @@
+# The five-stage lifecycle Reliability was designed around — as a bundle, so a
+# project opts in rather than inheriting it.
+#
+#     factory bundle import node_modules/@factory/core/examples/reliability.bundle.yaml
+#
+# Or from a project's page on the board, which does the same thing.
+#
+# Every workflow here declares a `reliability:` block. That block is not what
+# makes a run count — **every** run is judged, including ones you write yourself
+# and never tell Factory about. What it buys is precision: a workflow that names
+# the evidence it collects earns coverage for it, and one that names the
+# dimensions it touches has its findings attributed to them rather than spread.
+#
+# The shape is deliberate. Analysis and design produce documents; implementation
+# produces code and a build; validation runs the project's own checks and is the
+# stage that can *lower* the score, which is the feature working rather than
+# failing; verification is the independent look, which is the last cap to lift.
+#
+# `{{ project.check }}` is the project's own check command — set on the project's
+# page, or detected when it was added. A project that has not got one makes
+# `project-check` refuse to plan, which is louder and more honest than a gate
+# that passes because `bash -c ''` exits 0.
+kind: factory.bundle/v1
+metadata:
+  name: reliability
+  description: Analysis to verification, with a judgement after every stage.
+entry:
+  workflow: analysis
+workflows:
+  - kind: factory.workflow/v1
+    name: analysis
+    description: Work out what is actually being asked, and what would prove it.
+    reliability:
+      contributes:
+        - understanding
+        - precedent
+      expected_evidence:
+        - requirements_understood
+        - constraints_identified
+        - precedent_examined
+    phases:
+      - analyse
+
+  - kind: factory.workflow/v1
+    name: design
+    description: Decide how, and say what it would break.
+    needs:
+      - analysis
+    reliability:
+      contributes:
+        - design
+      expected_evidence:
+        - technical_approach
+        - compatibility_considered
+    phases:
+      - design
+
+  - kind: factory.workflow/v1
+    name: implement
+    description: Do the work, and make it build.
+    needs:
+      - design
+    reliability:
+      contributes:
+        - implementation
+      expected_evidence:
+        - implementation_exists
+        - build_success
+        - targeted_tests
+    phases:
+      - implement
+
+  - kind: factory.workflow/v1
+    name: validate
+    description: Run what the project already runs, and believe the result.
+    needs:
+      - implement
+    reliability:
+      contributes:
+        - regressionSafety
+      expected_evidence:
+        - integration_checks
+    phases:
+      - validate
+      - project-check
+
+  - kind: factory.workflow/v1
+    name: verify
+    description: Look again, with fresh eyes, against what was asked for.
+    needs:
+      - validate
+    reliability:
+      contributes:
+        - verification
+      expected_evidence:
+        - acceptance_criteria
+        - independent_review
+    phases:
+      - verify
+
+phases:
+  - kind: factory.phase/v1
+    name: analyse
+    description: Understand the problem before anybody proposes a solution.
+    steps:
+      - uses: agent
+        model: strong
+        session: task
+        artifact: analysis
+        prompt: |
+          Work out what "{{ task.name }}" actually requires.
+
+          {{ task.description }}
+
+          Write down, in this order:
+
+          - what is being asked for, in your words;
+          - the acceptance criteria — how anybody would know it was done;
+          - the constraints you found in the code, not the ones you assumed;
+          - anything already in this repository that solves something similar,
+            with file paths;
+          - every question you could not answer from the code.
+
+          That last list is the important one. Say what you do not know rather
+          than filling it in — an unknown you name becomes something somebody
+          can answer, and an unknown you paper over becomes a defect.
+
+  - kind: factory.phase/v1
+    name: design
+    description: Decide the approach, and be specific about what it touches.
+    steps:
+      - uses: agent
+        model: strong
+        session: task
+        artifact: design
+        prompt: |
+          Read {{ task.artifacts }}/analysis/analysis.md and decide how to do it.
+
+          Write down:
+
+          - the approach, and why it fits what is already here;
+          - every file you expect to change;
+          - what could break, and what would tell you it had;
+          - anything about compatibility — versions, interfaces, data — that you
+            checked rather than assumed;
+          - what you would need to see to believe this works.
+
+          If the analysis left a question open and you cannot answer it from the
+          code, say so here too rather than choosing quietly.
+
+  - kind: factory.phase/v1
+    name: implement
+    description: Do the work.
+    steps:
+      - uses: agent
+        model: strong
+        session: task
+        artifact: implementation
+        prompt: |
+          Carry out {{ task.artifacts }}/design/design.md.
+
+          Then write down what you actually did, which is rarely quite what was
+          planned: the files you changed, the commands you ran and what they
+          printed, and anything you could not do.
+
+          **Paste the output of what you ran.** A claim that the tests pass is
+          not evidence that the tests pass. If a command was refused or you
+          could not run it, say that instead — a reported success that did not
+          happen is worse than a reported failure that did.
+
+  - kind: factory.phase/v1
+    name: validate
+    description: Check the work against what the project already expects.
+    steps:
+      - uses: agent
+        model: balanced
+        session: task
+        artifact: validation
+        prompt: |
+          Check the work in this repository against
+          {{ task.artifacts }}/design/design.md.
+
+          Run whatever this project uses to check itself and paste the output.
+          Look for what the change might have broken rather than for what it was
+          meant to do.
+
+          Report what you found as findings, not as a verdict. "The checkout
+          redirect behaves differently" is useful; "looks good" is not. If you
+          found nothing, say what you looked at, so somebody can judge whether
+          that was enough.
+
+  - kind: factory.phase/v1
+    name: verify
+    description: An independent look, against what was asked rather than what was built.
+    steps:
+      - uses: agent
+        model: strong
+        # A fresh session on purpose: the point of this stage is a reader who
+        # has not spent the last hour convincing themselves the design was
+        # right.
+        session: phase
+        artifact: verification
+        prompt: |
+          Read {{ task.artifacts }}/analysis/analysis.md for what was asked, then
+          look at what is in the repository now.
+
+          Go through the acceptance criteria one at a time and say, for each,
+          what you checked and what you saw. Then say what you would still not
+          be willing to promise.
+
+          You have not seen the design or the implementation notes and that is
+          deliberate. Judge the work, not the account of it.

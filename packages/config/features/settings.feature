@@ -112,3 +112,102 @@ Feature: Settings Factory owns
       When the interface scale is set to 2
       Then it is refused
       And a problem says there is no user scope
+
+  Rule: a group the writer was never told about is still written
+
+    Settings are merged one level down, so that saving the interface scale does
+    not discard the execution profile. That merge used to name each group by
+    hand — `ui`, `security`, `plugins` — and the cost was hidden: a group not in
+    that list was written nowhere, and silently. The call succeeded, the file
+    was rewritten, and the value was gone. That is the shape the next top-level
+    group would have arrived in, and it is the shape an `x-` extension group
+    arrives in today: a plugin keeping its own settings beside Factory's had
+    them discarded by the next save of anything else.
+
+    It is written over the patch's own keys now, so there is no list to forget.
+
+    Scenario: A group the merge does not name lands anyway
+      Given an installation with the default settings
+      When a patch carries an extension group beside a known one
+      Then the file holds that group
+      And the known setting was saved too
+
+    Scenario: A group says only what it means to change
+      Given the execution profile is "full-access"
+      When the interface scale is set to 2
+      Then the profile is still "full-access"
+      And the scale is 2
+
+  Rule: what reads the work is an installation preference a project may override
+
+    The agent evaluator costs tokens, and the model worth spending them on is a
+    project's decision — but setting the same strong judge on every new project
+    is work nobody should have to repeat. So the installation carries a default
+    and a project overrides it.
+
+    Nothing is defaulted here. A model named in the source would spend somebody's
+    tokens on a decision nobody made, and the free deterministic evaluator always
+    runs regardless.
+
+    Scenario: A fresh installation names no judge
+      Given an installation with the default settings
+      Then no judging provider is named
+      And no judging model is named
+
+    Scenario: A judge can be named
+      Given an installation with the default settings
+      When the judge is set to "codex" using "strong" at "high"
+      Then the judging provider is "codex"
+      And the judging model is "strong"
+      And the judging effort is "high"
+
+    Scenario: Naming the judge leaves the interface alone
+      Given the interface scale is 2
+      When the judge is set to "codex" using "strong" at "high"
+      Then the scale is 2
+
+  Rule: a setting can be cleared, not only changed
+
+    `undefined` inside a group has always meant "not mentioned", so that a caller
+    spreading an optional field in could not erase what was already there. That
+    left no way to take a value back *out*, which did not matter while every
+    setting had a default — and matters now, because an installation default
+    nobody can un-set is a default they cannot stop paying for.
+
+    Scenario: Null takes a value back out of the file
+      Given an installation with the default settings
+      And the judge is set to "codex" using "strong" at "high"
+      When the judging model is cleared
+      Then no judging model is named
+      And the judging provider is "codex"
+
+    Scenario: Undefined still leaves a value alone
+      Given an installation with the default settings
+      And the judge is set to "codex" using "strong" at "high"
+      When a patch mentions the judge but names no model
+      Then the judging model is "strong"
+
+  Rule: how far work may start work is a setting
+
+    Factory can now be driven by an agent, and an agent Factory launched can
+    reach the daemon. The limits on how deep that may go belong here rather
+    than in the code, because the right number depends on what somebody is
+    doing — and belong here rather than in the client that is asking, because a
+    rule only one client enforces is advice.
+
+    Scenario: A fresh installation allows three levels and ten tasks a run
+      Given an installation with the default settings
+      Then work may start work three levels deep
+      And one run may ask for ten tasks
+
+    Scenario: The depth can be turned down to nothing
+      # A legitimate thing to want: only a person starts work here.
+      Given an installation with the default settings
+      When the orchestration depth is set to 0
+      Then work may start work zero levels deep
+
+    Scenario: A depth nobody could have meant is refused
+      Given an installation with the default settings
+      When the orchestration depth is set to 500
+      Then the settings are refused
+      And what is saved still allows three levels

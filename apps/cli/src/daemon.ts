@@ -55,10 +55,12 @@ export function createDaemonClient(env: Readonly<Record<string, string | undefin
 
       const text = await response.text()
       let body: unknown
+      let parsed = true
       try {
         body = text === '' ? undefined : JSON.parse(text)
       } catch {
         body = undefined
+        parsed = false
       }
       if (!response.ok) {
         const payload = (body ?? {}) as { error?: string }
@@ -66,6 +68,18 @@ export function createDaemonClient(env: Readonly<Record<string, string | undefin
           response.status,
           payload.error ?? `The daemon answered ${response.status}.`,
           body,
+        )
+      }
+      // A success that is not JSON is not a success. Returning `undefined` here
+      // made every caller fail on a property of it, somewhere else entirely,
+      // with a message naming neither the request nor the cause — which is what
+      // a daemon older than this CLI produces when its catch-all answers a
+      // route it does not know with the board's own HTML and a 200.
+      if (!parsed) {
+        throw new DaemonError(
+          response.status,
+          `The daemon's answer to ${path} was not JSON. It may be an older version ` +
+            `than this CLI, or something else is answering on ${url}.`,
         )
       }
       return body as T

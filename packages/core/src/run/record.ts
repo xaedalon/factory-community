@@ -77,6 +77,17 @@ export interface Run {
    * profiles existed, because nothing knew.
    */
   readonly profile?: ExecutionProfile
+  /**
+   * The run whose agent asked for this work, when an agent did.
+   *
+   * Absent for anything a person started, which is every run recorded before
+   * Factory served MCP. No foreign key behind it, deliberately: a lineage
+   * pointer that could cascade would let a tidy-up of one finished run delete
+   * the record of everything it started.
+   */
+  readonly originRunId?: string
+  /** How far from the person who started all this. 0 when they started it. */
+  readonly depth: number
   readonly startedAt: string
   readonly finishedAt?: string
   /** Why it ended the way it did, when that needs saying. */
@@ -93,6 +104,19 @@ export interface RunStep {
   readonly describe: string
   /** The registered step kind that ran it. */
   readonly uses: string
+  /**
+   * What it actually ran, as a line somebody could paste.
+   *
+   * Recorded rather than derived: "what did this agent run?" has to be
+   * answerable after the phase file has been edited, which is the same trap
+   * `runs.profile` and `session_provider` were recorded to avoid. The
+   * environment is deliberately not here — it is where the secrets are, and
+   * the profile already records how much of it the step could see.
+   *
+   * Absent for a step that ran no process, and for every step recorded before
+   * this existed.
+   */
+  readonly command?: string
   readonly state: StepState
   /** Times it ran. More than one means it was retried. */
   readonly attempts: number

@@ -5,9 +5,15 @@ import type {
   CapabilityLookup,
   Phase,
   Problem,
+  Profile,
   Workflow,
 } from '@factory/core'
-import { parseAgentFile, parsePhaseFile, parseWorkflowFile } from '@factory/core'
+import {
+  parseAgentFile,
+  parsePhaseFile,
+  parseProfileFile,
+  parseWorkflowFile,
+} from '@factory/core'
 import type { Scope, ScopeChain, ScopeKind } from './scopes.js'
 
 /**
@@ -21,7 +27,7 @@ import type { Scope, ScopeChain, ScopeKind } from './scopes.js'
  * prototype never had, and it is roughly fifteen lines.
  */
 
-export type DefinitionKind = 'workflow' | 'phase' | 'agent'
+export type DefinitionKind = 'workflow' | 'phase' | 'agent' | 'profile'
 
 /**
  * Where each kind's files live. The one table that decides it — adding a kind
@@ -35,6 +41,7 @@ const LAYOUT: Record<DefinitionKind, { directory: string; suffix: string }> = {
   workflow: { directory: 'workflows', suffix: '.workflow.yaml' },
   phase: { directory: 'phases', suffix: '.phase.yaml' },
   agent: { directory: 'agents', suffix: '.agent.yaml' },
+  profile: { directory: 'profiles', suffix: '.profile.yaml' },
 }
 
 /** Every kind, for the callers that have to enumerate them. */
@@ -132,6 +139,24 @@ export function resolveAgent(
 ): ResolvedDefinition<Agent> | undefined {
   return resolve(chain, 'agent', name, (text, file) => {
     const result = parseAgentFile(text, file)
+    return { value: result.value, problems: result.problems }
+  })
+}
+
+/**
+ * A profile, through the chain.
+ *
+ * Named `resolveProfileDefinition` because `resolveProfile` is taken: that one
+ * decides *which* profile applies — project, then installation, then default —
+ * and this one finds the file. Two functions, two questions, and one of them
+ * having the obvious name is better than both having confusing ones.
+ */
+export function resolveProfileDefinition(
+  chain: ScopeChain,
+  name: string,
+): ResolvedDefinition<Profile> | undefined {
+  return resolve(chain, 'profile', name, (text, file) => {
+    const result = parseProfileFile(text, file)
     return { value: result.value, problems: result.problems }
   })
 }

@@ -7,6 +7,7 @@ import { CapabilityHost } from '../src/host.js'
 import { builtinStepsPlugin } from '../src/builtins/steps.js'
 import {
   AGENT_FIELDS,
+  PROFILE_FIELDS,
   FIELD_TABLES,
   PHASE_FIELDS,
   WORKFLOW_FIELDS,
@@ -18,6 +19,7 @@ import { parseAgent } from '../src/schema/agent.js'
 import { workflowSchemaKeys } from '../src/schema/workflow.js'
 import { phaseSchemaKeys } from '../src/schema/phase.js'
 import { agentSchemaKeys } from '../src/schema/agent.js'
+import { parseProfile, profileSchemaKeys } from '../src/schema/profile.js'
 
 const feature = await loadFeature(
   fileURLToPath(new URL('./serializer-exhaustiveness.feature', import.meta.url)),
@@ -73,6 +75,18 @@ describeFeature(feature, ({ Scenario }) => {
     })
   })
 
+  Scenario('Every profile schema field has a writer rule', ({ When, Then, And }) => {
+    When('the profile field table is compared to the profile schema', () => {
+      compare('profile', profileSchemaKeys, PROFILE_FIELDS as readonly FieldSpec<never>[])
+    })
+    Then('no schema field is missing from the table', () => {
+      expect(difference(schemaKeys, tableKeys)).toEqual([])
+    })
+    And('no table entry names a field the schema does not accept', () => {
+      expect(difference(tableKeys, schemaKeys)).toEqual([])
+    })
+  })
+
   /**
    * The guard on the guard.
    *
@@ -108,6 +122,7 @@ describeFeature(feature, ({ Scenario }) => {
             'conditions: {requires: [hasWorktree]}',
             'on_fail: development-failure',
             'override: required',
+            'reliability: {contributes: [design], expected_evidence: [technical_approach]}',
             'phases: [analysis]',
           ].join('\n'),
         ),
@@ -137,6 +152,26 @@ describeFeature(feature, ({ Scenario }) => {
       ).phase
       expect(parsed).toBeDefined()
       const missing = PHASE_FIELDS.filter(
+        (spec) => spec.from !== null && spec.emit !== 'omit' && parsed?.[spec.from] === undefined,
+      ).map((spec) => spec.yaml)
+      expect(missing).toEqual([])
+    })
+    And('every profile table entry names a property the parser produces', () => {
+      const parsed = parseProfile(
+        parseYaml(
+          [
+            'kind: factory.profile/v1',
+            'name: development',
+            'description: everything',
+            'extends: default',
+            'commands: [cargo]',
+            'deny_commands: [git push]',
+            'providers: {claude: {args: [--add-dir, /opt]}}',
+          ].join('\n'),
+        ),
+      ).profile
+      expect(parsed).toBeDefined()
+      const missing = PROFILE_FIELDS.filter(
         (spec) => spec.from !== null && spec.emit !== 'omit' && parsed?.[spec.from] === undefined,
       ).map((spec) => spec.yaml)
       expect(missing).toEqual([])

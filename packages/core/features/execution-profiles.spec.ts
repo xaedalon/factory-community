@@ -1,7 +1,15 @@
 import { describeFeature, loadFeature } from '@amiceli/vitest-cucumber'
 import { expect } from 'vitest'
 import { fileURLToPath } from 'node:url'
-import { parseProviderDescriptor, distinguishesProfiles, permissionArgsFor } from '../src/providers/descriptor.js'
+import {
+  parseProviderDescriptor,
+  distinguishesProfiles,
+  permissionArgsFor,
+  profileWideningArgs,
+} from '../src/providers/descriptor.js'
+import claudePlugin from '@factory/provider-claude'
+import { CapabilityHost } from '../src/host.js'
+import { PROVIDER_KIND, type ProviderCapability } from '../src/providers/capability.js'
 import {
   EXECUTION_PROFILE_LABELS,
   EXECUTION_PROFILES,
@@ -242,6 +250,119 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario }) => {
         const declared = descriptor.permissionArgs as Record<string, readonly string[]>
         expect(declared['full-access']).toEqual(['--yolo'])
       })
+    })
+  })
+
+  Rule('a step cannot argue its way out of the profile it runs under', ({ RuleScenario }) => {
+    const parse = (fields: Record<string, unknown>) => {
+      const parsed = parseProviderDescriptor({
+        kind: 'factory.provider/v1',
+        id: 'probe',
+        displayName: 'Probe',
+        command: 'probe',
+        models: { strong: 'big', balanced: 'mid', fast: 'small' },
+        ...fields,
+      })
+      expect(parsed.error, JSON.stringify(parsed.error?.issues)).toBeUndefined()
+      return parsed.descriptor as NonNullable<typeof parsed.descriptor>
+    }
+    let subject: ReturnType<typeof parse>
+    let refused: readonly string[] = []
+
+    const fullAccessYolo = (): void => {
+      subject = parse({ permissionArgs: { default: ['--safe'], 'full-access': ['--yolo'] } })
+    }
+    const passes = (profile: ExecutionProfile, ...args: string[]) => (): void => {
+      refused = profileWideningArgs(subject, profile, args)
+    }
+    const nothingRefused = (): void => expect(refused).toEqual([])
+
+    RuleScenario("An argument from the provider's Full Access list is refused", ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a descriptor whose Full Access arguments are "--yolo"', fullAccessYolo)
+      When('a step under "default" passes "--yolo"', passes('default', '--yolo'))
+      Then('that argument is refused', () => expect(refused).toEqual(['--yolo']))
+    })
+
+    RuleScenario('The same argument under Full Access is not refused', ({ Given, When, Then }) => {
+      Given('a descriptor whose Full Access arguments are "--yolo"', fullAccessYolo)
+      When('a step under "full-access" passes "--yolo"', passes('full-access', '--yolo'))
+      Then('nothing is refused', nothingRefused)
+    })
+
+    RuleScenario('An ordinary argument is left alone', ({ Given, When, Then }) => {
+      Given('a descriptor whose Full Access arguments are "--yolo"', fullAccessYolo)
+      When('a step under "default" passes "--verbose"', passes('default', '--verbose'))
+      Then('nothing is refused', nothingRefused)
+    })
+
+    RuleScenario('An argument the confined profile already passes is not refused', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a descriptor that passes "--mode" under both profiles', () => {
+        subject = parse({
+          permissionArgs: { default: ['--mode', 'safe'], 'full-access': ['--mode', 'yolo'] },
+        })
+      })
+      When('a step under "default" passes "--mode"', passes('default', '--mode'))
+      Then('nothing is refused', nothingRefused)
+    })
+
+    RuleScenario('A flag written with "=" is the same flag', ({ Given, When, Then }) => {
+      Given('a descriptor whose Full Access arguments are "--yolo"', fullAccessYolo)
+      When('a step under "default" passes "--yolo=true"', passes('default', '--yolo=true'))
+      Then('that argument is refused', () => expect(refused).toEqual(['--yolo=true']))
+    })
+
+    RuleScenario('A descriptor may forbid more than derivation can see', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a descriptor that forbids "--allowedTools"', () => {
+        subject = parse({ forbiddenArgs: ['--allowedTools'] })
+      })
+      When('a step under "default" passes "--allowedTools"', passes('default', '--allowedTools'))
+      Then('that argument is refused', () => expect(refused).toEqual(['--allowedTools']))
+    })
+
+    RuleScenario('A provider that has measured nothing forbids nothing', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      Given('a descriptor with no permission arguments at all', () => {
+        subject = parse({})
+      })
+      When('a step under "default" passes "--yolo"', passes('default', '--yolo'))
+      Then('nothing is refused', nothingRefused)
+    })
+
+    RuleScenario('The provider Factory ships refuses the flag that started this', ({
+      Given,
+      When,
+      Then,
+    }) => {
+      // The real descriptor, not a copy of it. A copy would keep passing after
+      // somebody edited the shipped one.
+      Given('the descriptor Factory ships for Claude', async () => {
+        const host = new CapabilityHost()
+        await host.load(claudePlugin)
+        subject = (host.get<ProviderCapability>(PROVIDER_KIND, 'claude') as ProviderCapability)
+          .descriptor
+      })
+      When(
+        'a step under "default" passes "--permission-mode bypassPermissions"',
+        passes('default', '--permission-mode', 'bypassPermissions'),
+      )
+      Then('that argument is refused', () =>
+        expect(refused).toContain('bypassPermissions'),
+      )
     })
   })
 })

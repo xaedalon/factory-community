@@ -31,6 +31,21 @@ Feature: The task board
     And I go back to the board
     Then "Just an idea" does not offer "Queue"
 
+  Scenario: A finished task says which workflow ran
+    Given the task "Add due dates" exists on "hello"
+    And it has been run
+    When I open the tasks page
+    # Every `done` row drew an em dash, because the *current* workflow is the
+    # next one and a finished task has none — so the column read as missing
+    # data on exactly the rows where the answer is most obvious.
+    Then the workflow column for "Add due dates" says "hello"
+
+  Scenario: With no repository the board says what to add first
+    Given no repositories are registered
+    When I open the tasks page
+    Then the board asks for a repository
+    And it offers to add one
+
   Scenario: The summary counts what is there
     Given the task "Add due dates" exists on "hello"
     When I open the tasks page
@@ -80,6 +95,9 @@ Feature: The task board
     And I queue "Add due dates"
     And "Add due dates" becomes "done" without me reloading
     And I open "Add due dates"
+    # Nothing failed, so the steps arrive folded. Unfolding is the ordinary
+    # way to read a finished run.
+    And I unfold the steps
     Then the run for "hello" is listed
     And the step "echo hello" is listed
     And opening the step shows "hello"
@@ -123,12 +141,14 @@ Feature: The task board
     Then the task finishes
 
   Scenario: The setup page says what is still missing
+    Given no repositories are registered
     When I open the setup page
     Then "Add a repository" is a setup step
     And it is marked essential
     And the page says Factory cannot run work yet
 
   Scenario: A setup step offers the command that fixes it
+    Given no repositories are registered
     When I open the setup page
     Then a setup step offers a command to copy
 
@@ -148,6 +168,260 @@ Feature: The task board
     Given the daemon is not running
     When I open the tasks page
     Then the page says it cannot reach the daemon
+
+  Rule: the task page leads with the thing you came to do
+
+    Seven sections sat in a flat vertical stack at one rank, so what mattered
+    was wherever it happened to fall. A task waiting for a person put the
+    evidence to decide on sixth of seven, below the run list and the steps; a
+    task that had failed put the reason in one place and the failing step, shut,
+    in another.
+
+    The state already decides what matters. A band at the top says it in a
+    sentence and carries the buttons that act on it, the wide column is what is
+    happening now, and the facts that do not change while you read them are in
+    a rail beside it.
+
+    Scenario: A decision leads with the evidence
+      Given the project defines the workflow "review" that writes a report and asks for approval
+      And the task "Check it" exists on "review"
+      When I open the tasks page
+      And I queue "Check it"
+      And "Check it" becomes "awaiting_approval" without me reloading
+      And I open "Check it"
+      Then the band says this is waiting for you
+      And the evidence is above the steps
+
+    Scenario: A failure says what stopped it, at the top
+      Given the project defines the workflow "doomed" that fails
+      And the task "Will fail" exists on "doomed"
+      When I open the tasks page
+      And I queue "Will fail"
+      And "Will fail" becomes "blocked" without me reloading
+      And I open "Will fail"
+      Then the band says this stopped
+      And the failing step's output is already open
+
+    Scenario: The facts sit beside the work, not under it
+      Given the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I open "Add due dates"
+      Then the facts sit beside the work
+
+  Rule: the long sections are folded away until they are the reason you came
+
+    Steps and Evidence are the two that grow without limit — a phase's whole
+    log, a report somebody wrote — and on a finished task they pushed the
+    reliability drivers and the graph off the screen entirely. Both now start
+    folded.
+
+    Folded is not hidden, and the exception is the point: a failed step opens
+    itself, because "a step nobody expanded is a step nobody read" is why the
+    failing log was auto-opened in the first place, and a task waiting on a
+    decision opens its evidence, because that is the one moment the evidence is
+    what you came for.
+
+    Scenario: A finished task folds its steps away
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the steps are folded away
+      And I can unfold them
+
+    Scenario: A failure unfolds itself
+      Given the project defines the workflow "doomed" that fails
+      And the task "Will fail" exists on "doomed"
+      When I open the tasks page
+      And I queue "Will fail"
+      And "Will fail" becomes "blocked" without me reloading
+      And I open "Will fail"
+      Then the steps are not folded away
+      And the failing step's output is already open
+
+    Scenario: A decision unfolds its evidence
+      Given the project defines the workflow "review" that writes a report and asks for approval
+      And the task "Check it" exists on "review"
+      When I open the tasks page
+      And I queue "Check it"
+      And "Check it" becomes "awaiting_approval" without me reloading
+      And I open "Check it"
+      Then the evidence is not folded away
+      And the evidence is above the steps
+
+  Rule: the task page is read in the order the questions are asked
+
+    What is it doing, what is stopping it, how did it get here, what did it
+    produce, and only then the machinery. The sections are ranked by CSS rather
+    than by where they sit in the markup, so the reading order is a property of
+    the page and not of how it happened to be written.
+
+    Scenario: How it got here comes before the machinery
+      # The discriminating pair. Under the old ranking the steps sat third and
+      # the graph fifth, so a task with both put the log above the history.
+      Given a task judged four times, the third lower than the second
+      And that task has a finished run
+      When I open that task
+      Then how it got here comes before the steps
+
+    Scenario: The workflows still come first
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the workflows come before the steps
+
+  Rule: a row says how much to trust the task, in two numbers
+
+    A 93 with 41% coverage is not the same claim as a 93 with 96%, and a board
+    that showed only the first would be the flattery the reliability card was
+    written to avoid. Both numbers or neither — and neither is an em dash, never
+    a zero, because a zero on a row reads as a verdict rather than as silence.
+
+    Scenario: The row says the score and the coverage together
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      Then the row for "Add due dates" says 88 with 70% coverage
+
+    Scenario: A task nobody has judged shows an em dash rather than a zero
+      Given a task nobody has judged
+      When I open the tasks page
+      Then the row for "Add due dates" shows no score
+
+    Scenario: The card says them too
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      And I switch to the board view
+      Then the card for "Add due dates" says 88 with 70% coverage
+
+    Scenario: The table has a column for it
+      Given a task judged at 88 with 70% coverage
+      When I open the tasks page
+      Then the table has a "Trust" column
+
+  Rule: a count says what it counted
+
+    "6/6 phases" on a task with five workflows reads as a miscount until you
+    know that one workflow carries two phases. The page has the room to say
+    which, and the row in the list does not.
+
+    Scenario: The task page says how many workflows the phases came from
+      Given the project defines the workflow "hello" that prints "hello"
+      And the task "Add due dates" exists on "hello"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the progress does not say how many workflows it counted
+
+    Scenario: A task with more phases than workflows says so
+      Given the project defines the workflow "twostep" with two phases
+      And the task "Add due dates" exists on "twostep"
+      When I open the tasks page
+      And I queue "Add due dates"
+      And "Add due dates" becomes "done" without me reloading
+      And I open "Add due dates"
+      Then the progress says it counted 1 workflow
+
+  Rule: a project is created and edited on a page, not in the row it lives in
+
+    The projects page carried a seven-control strip above the list and then the
+    same settings again inside every row — as buttons labelled with the state
+    they would move to, so "Use worktrees" meant worktrees were off. Nothing
+    said what a path was for, and Remove destroyed a project on one click.
+
+    Name and branch were the two fields nobody could change at all: the only
+    way was to remove the project and add it again, which leaves every task
+    that ever ran in it pointing at nothing. The path stays fixed for that same
+    reason, and the page says so rather than leaving a box that refuses.
+
+    Scenario: The list offers no way to change a project in place
+      Given the project "work" is registered
+      When I open the projects page
+      Then no project setting can be changed from the list
+
+    Scenario: Opening a project shows what it is for
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the name field explains what it is for
+      And the path is shown as fixed
+
+    Scenario: A project can be renamed
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I rename the project to "work-core"
+      Then "work-core" is listed as a project
+
+    Scenario: The branch work starts from can be re-pointed
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I point it at the branch "develop"
+      Then "work" starts work from "develop"
+
+    Scenario: A name already taken is refused against the field
+      Given the project "work" is registered
+      And the project "other" is registered
+      When I open the projects page
+      And I open the project "other"
+      And I rename the project to "work"
+      Then the name field says the name is taken
+
+    Scenario: A project can choose its own square
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I choose colour 3 and the letters "wk"
+      Then the rail square for "work" says "WK"
+
+    Scenario: The square follows the name until it is chosen
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the square is on automatic
+
+    Scenario: Authority can be handed back to the installation
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      Then the authority field offers following the installation
+
+    Scenario: Removing a project takes two clicks
+      Given the project "work" is registered
+      When I open the projects page
+      And I open the project "work"
+      And I press remove once
+      Then the project is still there
+      When I confirm the removal
+      Then "work" is no longer listed
+
+    Scenario: Adding a repository says what it put in it
+      When I add a project at a repository with no Factory directory
+      # Not because a `git status` is coming — one is not, which is the point.
+      # Git ignores the directory Factory just created and the editor's file
+      # tree probably hides it, so this notice is the only place the files are
+      # named at all.
+      Then the page lists the scope it created
+      And the page lists the worktree definitions it copied in
+      And the page says git ignores all of it
+
+    Scenario: A project with work still in it is not removed
+      Given the project "work" is registered
+      And the task "Add due dates" exists in "work" on "hello"
+      When I open the projects page
+      And I open the project "work"
+      And I press remove once
+      And I confirm the removal
+      # Said on screen, with the count, rather than the project quietly
+      # vanishing and its task with it.
+      Then the page says 1 task is still in it
+      And "work" is still listed
 
   Rule: The rail says which project the board is about
 
@@ -226,6 +500,24 @@ Feature: The task board
       When I open the tasks page
       And I start a new task
       Then the new task page is open
+
+    Scenario: With no repository there is nowhere to put a task
+      Given no repositories are registered
+      When I open the new task page
+      # A task happens in a project. Rather than a form that refuses on submit,
+      # the one thing worth doing is offered.
+      Then the page says a task needs a project
+      And it offers to add a repository
+
+    Scenario: A refusal is shown at the top, not under the buttons
+      # The same reason the project form's banner moved. On a form with five
+      # fields and a workflow list, a message below all of them is off the
+      # screen at the moment it appears.
+      Given the daemon refuses the next task
+      When I open the new task page
+      And I try to create the task
+      Then the form says the task was refused
+      And it says so above the first field
 
     Scenario: Workflows keep the order they were added in
       Given the project defines the workflow "hello" that prints "hello"
@@ -1078,3 +1370,142 @@ Feature: The task board
       # A dependency between projects has no owner, and the store refuses one.
       # Offering it would be offering a refusal.
       And "Loose" cannot be chosen to wait for
+
+  Rule: the settings page is where an installation is configured
+
+    The theme and the interface scale are driven through this page by the
+    scenarios above, so it is opened — but the setting worth the most care had
+    no coverage at all: what agents may reach. It is the one a person is most
+    likely to change without knowing what it costs, and choosing the option
+    that removes the workspace boundary should never be quiet.
+
+    Background:
+      Given the project defines the workflow "hello" that prints "hello"
+      When I open the tasks page
+
+    Scenario: The page says where the settings file is
+      When I open the settings page
+      Then it names the file it writes
+      And the file is in the user scope
+
+    Scenario: The execution profile is chosen here and stays chosen
+      When I open the settings page
+      And I choose Full Access
+      Then Full Access is marked as chosen
+      And the page warns what Full Access costs
+      When the page is reloaded
+      Then Full Access is marked as chosen
+
+    Scenario: Confining agents again takes the warning away
+      When I open the settings page
+      And I choose Full Access
+      And I choose the default profile
+      Then the page does not warn about Full Access
+
+  Rule: a task says how much to trust it, and what is still uncertain
+
+    "Is it done" is answered by the state. "How much should I trust that" was
+    the question this page could not answer at all.
+
+    Two numbers, always together: a 93 with 20% coverage is not the same claim
+    as a 93 with 96%, and showing only the first is how a confidence number
+    becomes flattery.
+
+    Scenario: A task nobody has judged says so rather than showing a zero
+      Given a task nobody has judged
+      When I open that task
+      Then the reliability card says it is not assessed
+      And it offers to assess it
+
+    Scenario: A judged task shows the score and the coverage together
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the reliability card shows 88
+      And it shows the coverage
+
+    Scenario: A fall is shown with an arrow, not with colour alone
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the card shows a downward arrow
+
+    Scenario: The breakdown is there for anybody who wants it
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      And I show the breakdown
+      Then every dimension is listed
+
+    Scenario: A ceiling says what applied it
+      Given a task capped at 70 by a critical risk
+      When I open that task
+      Then the card says what capped it
+
+    Scenario: A stale judgement says so
+      Given a task whose judgement is stale
+      When I open that task
+      Then the card says it is stale
+
+    Scenario: The card sits beside the work, not under it
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the reliability card is in the rail
+
+  Rule: the graph shows the score falling, because that is the useful part
+
+    A validation that finds a regression has learned something. A graph that
+    could only rise would hide the most valuable thing this feature produces.
+
+    Scenario: A history of several judgements is drawn
+      Given a task judged four times, the third lower than the second
+      When I open that task
+      Then the graph is drawn
+      And it has 4 points
+
+    Scenario: The fall is visible in the drawing
+      # Read off the geometry, not off a label: a point that fell is lower on
+      # the screen, and a graph that normalised that away would pass a test
+      # that only read the numbers back.
+      Given a task judged four times, the third lower than the second
+      When I open that task
+      Then the third point is below the second
+
+    Scenario: A point says why it moved
+      Given a task judged four times, the third lower than the second
+      When I look at the third point
+      Then it says what changed
+
+    Scenario: One judgement is not a graph
+      Given a task judged once
+      When I open that task
+      Then no graph is drawn
+
+  Rule: the drivers say who should deal with them
+
+    Scenario: A driver is listed with its owner
+      Given a task with a high driver the agent can resolve
+      When I open that task
+      Then the drivers list names it
+      And it says the agent can resolve it
+
+    Scenario: The worst thing is listed first
+      Given a task with a critical driver and a low one
+      When I open that task
+      Then the critical group comes before the low group
+
+    Scenario: A resolved driver moves out of the way
+      Given a task with a high driver the agent can resolve
+      When I resolve that driver
+      Then it is no longer in the list
+      And it is counted among the ones dealt with
+
+    Scenario: Accepting a risk asks why first
+      # An acceptance nobody explained is indistinguishable afterwards from one
+      # nobody meant.
+      Given a task with a high driver the agent can resolve
+      When I click to accept that risk
+      Then it asks why
+
+    Scenario: A task with nothing outstanding says so
+      Given a task judged at 88 with 70% coverage
+      When I open that task
+      Then the drivers list is not drawn
+

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
-import { expect } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 import { createBdd } from 'playwright-bdd'
 import { test } from './fixtures.js'
 
@@ -633,9 +633,59 @@ Given(
   },
 )
 
+/**
+ * A workflow that fails, so the blocked case has something real to draw.
+ *
+ * A step that exits non-zero rather than a step that is missing: the page has
+ * to show the reason and the output, and only a step that actually ran produces
+ * either.
+ */
+Given(
+  'the project defines the workflow {string} that fails',
+  async ({ world }, name: string) => {
+    world.workflow(world.projectScope, name, HELLO_WORKFLOW.replace('hello', name))
+    world.phase(
+      world.projectScope,
+      'greet',
+      'name: greet\nsteps: [{run: "echo trying && exit 3"}]\n',
+    )
+    world.withShell = true
+  },
+)
+
 Given('the task {string} exists on {string}', async ({ world }, name: string, workflow: string) => {
   await world.startDaemon()
-  await world.createTask(name, [workflow])
+  lastTaskId = await world.createTask(name, [workflow])
+})
+
+/** Kept so a following step can queue the task this one made. */
+let lastTaskId = ''
+
+/**
+ * Queued and finished, not merely settled.
+ *
+ * `runTask` returns on `done` *or* `blocked`, and a blocked task still has
+ * every workflow ticked — so a scenario about what a finished task shows would
+ * pass against one that failed to start at all.
+ */
+Given('it has been run', async ({ world }) => {
+  await world.runTask(lastTaskId)
+  const response = await fetch(world.api(`/api/tasks/${lastTaskId}`))
+  const body = (await response.json()) as { task: { state: string } }
+  expect(body.task.state).toBe('done')
+})
+
+Then('the workflow column for {string} says {string}', async ({ page }, name: string, workflow: string) => {
+  await expect(page.getByTestId(`workflow-${name}`)).toHaveText(workflow)
+})
+
+Then('the board asks for a repository', async ({ page }) => {
+  await expect(page.getByTestId('tasks-need-project')).toContainText('No repositories yet')
+})
+
+Then('it offers to add one', async ({ page }) => {
+  await page.getByTestId('tasks-add-project').click()
+  await expect(page).toHaveURL(/\/projects\/new$/)
 })
 
 When('I open the tasks page', async ({ world, page }) => {
@@ -725,11 +775,15 @@ Then('the card for {string} says {string}', async ({ page }, name: string, text:
  *
  * A bar rendered at 0% and a bar that was never drawn look identical on
  * screen, so asserting it exists would pass on either.
+ *
+ * Matched inside the attribute rather than against the whole of it. The bar
+ * also carries the state's colour now, and an equality check on `style` made
+ * this step fail over a second declaration it was never about.
  */
 Then('its bar is {int}% full', async ({ page }, percent: number) => {
   await expect(page.getByTestId(/^card-progress-fill-/)).toHaveAttribute(
     'style',
-    `width: ${percent}%;`,
+    new RegExp(`(^|;)\\s*width:\\s*${percent}%\\s*(;|$)`),
   )
 })
 
@@ -776,21 +830,26 @@ When('I open the projects page', async ({ world, page }) => {
   await page.goto('/projects')
 })
 
+// Adding is a page of its own now, reached from the list the same way a
+// person reaches it. The steps go through the button rather than jumping to
+// the URL, so a broken route fails here rather than silently passing.
 When(
   'I add the project {string} at the project directory',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(world.workDir)
-    await page.getByTestId('create-project').click()
+    await page.getByTestId('save-project').click()
   },
 )
 
 When(
   'I add the project {string} at a path that does not exist',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(`${world.root}/nowhere`)
-    await page.getByTestId('create-project').click()
+    await page.getByTestId('save-project').click()
   },
 )
 
@@ -809,8 +868,104 @@ Then('{string} is listed as a project', async ({ page }, name: string) => {
   await expect(page.getByTestId(`project-${name}`)).toBeVisible()
 })
 
+When('I open the project {string}', async ({ page }, name: string) => {
+  await page.getByTestId(`open-project-${name}`).click()
+  await expect(page.getByTestId('project-form')).toBeVisible()
+})
+
+When('I rename the project to {string}', async ({ page }, to: string) => {
+  await page.getByTestId('project-name').fill(to)
+  await page.getByTestId('save-project').click()
+})
+
+When('I point it at the branch {string}', async ({ page }, branch: string) => {
+  await page.getByTestId('project-branch').fill(branch)
+  await page.getByTestId('save-project').click()
+})
+
+Then('{string} starts work from {string}', async ({ page }, name: string, branch: string) => {
+  await expect(page.getByTestId(`project-${name}`)).toContainText(branch)
+})
+
+/**
+ * The list is a list.
+ *
+ * Asserting the absence of the old controls rather than the presence of the new
+ * ones: the failure this guards against is somebody adding a convenient toggle
+ * back into a row, which no positive assertion would ever notice.
+ */
+Then('no project setting can be changed from the list', async ({ page }) => {
+  await expect(page.getByTestId('add-project')).toHaveCount(0)
+  await expect(page.getByTestId(/^toggle-worktrees-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^toggle-environments-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^profile-/)).toHaveCount(0)
+  await expect(page.getByTestId(/^remove-/)).toHaveCount(0)
+})
+
+Then('the name field explains what it is for', async ({ page }) => {
+  await expect(page.getByText('The rail derives its square')).toBeVisible()
+})
+
+Then('the path is shown as fixed', async ({ page }) => {
+  await expect(page.getByTestId('project-path-fixed')).toBeVisible()
+  await expect(page.getByTestId('project-path')).toHaveCount(0)
+})
+
+Then('the name field says the name is taken', async ({ page }) => {
+  await expect(page.getByTestId('field-error-name')).toContainText('already exists')
+})
+
+When('I choose colour 3 and the letters {string}', async ({ page }, letters: string) => {
+  await page.getByTestId('tone-3').click()
+  await page.getByTestId('project-initials').fill(letters)
+  await page.getByTestId('save-project').click()
+})
+
+// Through the rail rather than the page's own preview: the rail is the surface
+// the choice exists for, and it reads the project from a different store.
+Then('the rail square for {string} says {string}', async ({ page }, name: string, letters: string) => {
+  await expect(page.getByTestId(`project-button-${name}`)).toHaveText(letters)
+})
+
+Then('the square is on automatic', async ({ page }) => {
+  await expect(page.getByTestId('tone-auto')).toHaveAttribute('aria-pressed', 'true')
+})
+
+/**
+ * The third position has to be reachable.
+ *
+ * `default` and unset are different things — a project that states nothing
+ * follows the installation, so changing the installation changes it, while
+ * `default` pins it. A select with only the two named profiles showed
+ * "default" for a project that had chosen nothing.
+ */
+Then('the authority field offers following the installation', async ({ page }) => {
+  const select = page.getByTestId('project-profile')
+  await expect(select).toHaveValue('')
+  await expect(select.locator('option[value=""]')).toHaveText('Follows the installation')
+})
+
+When('I press remove once', async ({ page }) => {
+  await page.getByTestId('remove-project').click()
+})
+
+Then('the project is still there', async ({ page }) => {
+  await expect(page.getByTestId('remove-project-confirm')).toBeVisible()
+  await expect(page.getByTestId('project-form')).toBeVisible()
+})
+
+When('I confirm the removal', async ({ page }) => {
+  await page.getByTestId('remove-project-confirm').click()
+})
+
+Then('{string} is no longer listed', async ({ page }, name: string) => {
+  await expect(page.getByTestId(`project-${name}`)).toHaveCount(0)
+})
+
+// Against the path box, not in a banner at the top of the form. A refusal that
+// does not say which field it means makes you check all of them.
 Then('the page explains that there is nothing at that path', async ({ page }) => {
-  await expect(page.getByTestId('error')).toContainText('there is nothing at')
+  await expect(page.getByTestId('field-error-path')).toContainText('there is nothing at')
 })
 
 Then('{string} shows the project {string}', async ({ page }, task: string, project: string) => {
@@ -818,6 +973,22 @@ Then('{string} shows the project {string}', async ({ page }, task: string, proje
 })
 
 /* -------------------------------------------------------------- evidence */
+
+Given(
+  'the project defines the workflow {string} with two phases',
+  async ({ world }, name: string) => {
+    // Two phases in one workflow is how a task ends up with more phases than
+    // workflows — the thing "6/6 phases" on five workflows was hiding.
+    world.workflow(world.projectScope, name, `name: ${name}\nphases: [first, second]\n`)
+    for (const phase of ['first', 'second']) {
+      world.phase(
+        world.projectScope,
+        phase,
+        `name: ${phase}\nsteps: [{uses: shell, run: echo ${phase}}]\n`,
+      )
+    }
+  },
+)
 
 Given(
   'the project defines the workflow {string} that writes a report and asks for approval',
@@ -922,6 +1093,66 @@ Then('the task finishes', async ({ page }) => {
 
 /* ------------------------------------------------------------------ setup */
 
+// The daemon registers one at startup, because a task cannot be created
+// without it. These scenarios are about the installation before any of that.
+Given('no repositories are registered', async ({ world }) => {
+  await world.startDaemon()
+  await world.removeEveryProject()
+})
+
+When('I open the new task page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/tasks/new')
+})
+
+Then('the page says a task needs a project', async ({ page }) => {
+  await expect(page.getByTestId('new-task-needs-project')).toContainText('happens in a project')
+})
+
+Then('it offers to add a repository', async ({ page }) => {
+  await page.getByTestId('new-task-add-project').click()
+  await expect(page).toHaveURL(/\/projects\/new$/)
+})
+
+Then('the page says {int} task is still in it', async ({ page }, count: number) => {
+  await expect(page.getByTestId('error')).toContainText(`${count} task still in it`)
+})
+
+Then('{string} is still listed', async ({ page }, name: string) => {
+  await page.getByTestId('nav-projects').click()
+  await expect(page.getByTestId(`project-${name}`)).toBeVisible()
+})
+
+/* --------------------------------------------------------------- settings */
+
+Then('it names the file it writes', async ({ page }) => {
+  await expect(page.getByTestId('settings-file')).toContainText('settings.json')
+})
+
+Then('the file is in the user scope', async ({ page }) => {
+  await expect(page.getByTestId('settings-file')).toContainText('.xaedalon/.factory')
+})
+
+When('I choose Full Access', async ({ page }) => {
+  await page.getByTestId('profile-full-access').click()
+})
+
+When('I choose the default profile', async ({ page }) => {
+  await page.getByTestId('profile-default').click()
+})
+
+Then('Full Access is marked as chosen', async ({ page }) => {
+  await expect(page.getByTestId('profile-full-access')).toHaveAttribute('aria-pressed', 'true')
+})
+
+Then('the page warns what Full Access costs', async ({ page }) => {
+  await expect(page.getByTestId('full-access-warning')).toContainText('removes the workspace')
+})
+
+Then('the page does not warn about Full Access', async ({ page }) => {
+  await expect(page.getByTestId('full-access-warning')).toHaveCount(0)
+})
+
 When('I open the setup page', async ({ world, page }) => {
   await world.startDaemon()
   await page.goto('/setup')
@@ -951,15 +1182,20 @@ Then('a setup step offers a command to copy', async ({ page }) => {
 When(
   'I add the project {string} at the project directory, without worktrees',
   async ({ world, page }, name: string) => {
+    await page.getByTestId('new-project').click()
     await page.getByTestId('project-name').fill(name)
     await page.getByTestId('project-path').fill(world.workDir)
-    await page.getByTestId('project-worktrees').uncheck()
-    await page.getByTestId('create-project').click()
+    // The switch is a real checkbox behind a drawn one, so `uncheck` still
+    // works and the keyboard still does.
+    await page.getByTestId('project-worktrees-field').getByRole('checkbox').uncheck()
+    await page.getByTestId('save-project').click()
   },
 )
 
 When('I switch {string} to working in the repository', async ({ page }, name: string) => {
-  await page.getByTestId(`toggle-worktrees-${name}`).click()
+  await page.getByTestId(`open-project-${name}`).click()
+  await page.getByTestId('project-worktrees-field').getByRole('checkbox').uncheck()
+  await page.getByTestId('save-project').click()
 })
 
 Then(
@@ -1144,6 +1380,144 @@ When('I rename it to {string}', async ({ page }, name: string) => {
   await page.getByTestId('task-name-input').press('Enter')
 })
 
+Then('the band says this is waiting for you', async ({ page }) => {
+  await expect(page.getByTestId('task-band')).toContainText('waiting for you')
+})
+
+Then('the band says this stopped', async ({ page }) => {
+  await expect(page.getByTestId('task-band')).toContainText('This stopped')
+})
+
+/**
+ * Reading order, not presence.
+ *
+ * The evidence and the steps were both on the page before; the evidence was
+ * simply below the steps and the run list, on the one page where a person is
+ * being asked to decide something from it. Compared by position so that
+ * reordering them back would fail here.
+ */
+Then('the evidence is above the steps', async ({ page }) => {
+  const evidence = await page.getByTestId('evidence').boundingBox()
+  const steps = await page.getByText('Steps', { exact: true }).boundingBox()
+  expect(evidence).not.toBeNull()
+  expect(steps).not.toBeNull()
+  expect((evidence as { y: number }).y).toBeLessThan((steps as { y: number }).y)
+})
+
+/**
+ * Folded, not gone.
+ *
+ * `toBeHidden()` on the content, the way the token-list scenario reads a closed
+ * `<details>` — the heading stays rendered on purpose, because the geometry
+ * assertions measure against it and because a section that vanished would read
+ * as a section that is missing.
+ */
+Then(
+  'the row for {string} says {int} with {int}% coverage',
+  async ({ page }, name: string, score: number, coverage: number) => {
+    const cell = page.getByTestId(`reliability-${name}`)
+    await expect(cell).toContainText(String(score))
+    await expect(cell).toContainText(`${coverage}% evidence`)
+  },
+)
+
+Then('the row for {string} shows no score', async ({ page }, name: string) => {
+  // An em dash, not a zero. The testid is on both branches so this asserts what
+  // is drawn rather than that nothing could be found.
+  await expect(page.getByTestId(`reliability-${name}`)).toHaveText('—')
+})
+
+Then(
+  'the card for {string} says {int} with {int}% coverage',
+  async ({ page }, name: string, score: number, coverage: number) => {
+    const block = page.getByTestId(`card-reliability-${name}`)
+    await expect(block).toContainText(String(score))
+    await expect(block).toContainText(`${coverage}% evidence`)
+  },
+)
+
+Then('the table has a {string} column', async ({ page }, heading: string) => {
+  await expect(page.getByTestId('task-table').locator('th', { hasText: heading })).toBeVisible()
+})
+
+Then('the steps are folded away', async ({ page }) => {
+  await expect(page.getByTestId('steps')).toBeVisible()
+  await expect(page.getByTestId('steps').locator('ul')).toBeHidden()
+})
+
+When('I unfold the steps', async ({ page }) => {
+  await page.getByTestId('steps-toggle').click()
+  await expect(page.getByTestId('steps').locator('ul')).toBeVisible()
+})
+
+Then('I can unfold them', async ({ page }) => {
+  await page.getByTestId('steps-toggle').click()
+  await expect(page.getByTestId('steps').locator('ul')).toBeVisible()
+})
+
+Then('the steps are not folded away', async ({ page }) => {
+  await expect(page.getByTestId('steps').locator('ul')).toBeVisible()
+})
+
+Then('the evidence is not folded away', async ({ page }) => {
+  await expect(page.getByTestId('evidence').locator('pre').first()).toBeVisible()
+})
+
+Given('that task has a finished run', async ({ world }) => {
+  await world.finishedRun(judged, 'validate')
+})
+
+const topOf = async (page: Page, testid: string): Promise<number> => {
+  const box = await page.getByTestId(testid).boundingBox()
+  expect(box, `${testid} is not on the page`).not.toBeNull()
+  return (box as { y: number }).y
+}
+
+Then('how it got here comes before the steps', async ({ page }) => {
+  expect(await topOf(page, 'reliability-graph')).toBeLessThan(await topOf(page, 'steps'))
+})
+
+Then('the workflows come before the steps', async ({ page }) => {
+  expect(await topOf(page, 'task-plan')).toBeLessThan(await topOf(page, 'steps'))
+})
+
+Then('the progress does not say how many workflows it counted', async ({ page }) => {
+  await expect(page.getByTestId('task-progress-text')).not.toContainText('across')
+})
+
+Then('the progress says it counted {int} workflow', async ({ page }, count: number) => {
+  await expect(page.getByTestId('task-progress-text')).toContainText(`across ${count} workflow`)
+})
+
+Then("the failing step's output is already open", async ({ page }) => {
+  // No click first. A step nobody expanded is a step nobody read, and the
+  // failing one is the reason the page was opened.
+  await expect(page.getByTestId(/^log-/).first()).toBeVisible()
+})
+
+/**
+ * Beside, not under.
+ *
+ * Asserts the geometry rather than the membership, because "in the rail" is
+ * satisfied by a rail stacked below the work — which is the arrangement this
+ * replaced. `waits for` is the probe: unlike the workspace it is rendered for
+ * every task, including a draft that has never run and so has no workspace at
+ * all.
+ */
+Then('the facts sit beside the work', async ({ page }) => {
+  const rail = page.getByTestId('task-rail')
+  await expect(rail.getByTestId('task-dependencies')).toBeVisible()
+  const railBox = await rail.boundingBox()
+  const work = await page.getByTestId('task-plan').boundingBox()
+  expect(railBox).not.toBeNull()
+  expect(work).not.toBeNull()
+  const r = railBox as { x: number; y: number }
+  const w = work as { x: number; y: number }
+  expect(r.x).toBeGreaterThan(w.x)
+  // Same band of the page, not below it.
+  expect(Math.abs(r.y - w.y)).toBeLessThan(80)
+})
+
 Then('the task is called {string}', async ({ page }, name: string) => {
   await expect(page.getByRole('heading', { name })).toBeVisible()
 })
@@ -1320,7 +1694,9 @@ When('I open the environments page', async ({ world, page }) => {
 })
 
 When('I turn environments on for {string}', async ({ page }, name: string) => {
-  await page.getByTestId(`toggle-environments-${name}`).click()
+  await page.getByTestId(`open-project-${name}`).click()
+  await page.getByTestId('project-environments-field').getByRole('checkbox').check()
+  await page.getByTestId('save-project').click()
 })
 
 Then('the environments page is empty', async ({ page }) => {
@@ -1329,6 +1705,27 @@ Then('the environments page is empty', async ({ page }) => {
 
 Then('{string} says it gives each task an environment', async ({ page }, name: string) => {
   await expect(page.getByTestId(`environments-${name}`)).toBeVisible()
+})
+
+When('I add a project at a repository with no Factory directory', async ({ world, page }) => {
+  await world.startDaemon()
+  const repository = world.makeRepository('fresh')
+  await page.goto('/projects/new')
+  await page.getByTestId('project-name').fill('fresh')
+  await page.getByTestId('project-path').fill(repository)
+  await page.getByTestId('save-project').click()
+})
+
+Then('the page says git ignores all of it', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded-hidden')).toContainText('git status')
+})
+
+Then('the page lists the worktree definitions it copied in', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded')).toContainText('worktree-create')
+})
+
+Then('the page lists the scope it created', async ({ page }) => {
+  await expect(page.getByTestId('scaffolded')).toContainText('.xaedalon/.factory')
 })
 
 Then('the page lists what it copied in', async ({ page }) => {
@@ -1938,4 +2335,494 @@ Then('{string} cannot be chosen to wait for', async ({ page }, name: string) => 
   await expect(page.locator('[data-testid="blocker-choice"] option', { hasText: name })).toHaveCount(
     0,
   )
+})
+
+/** The task these scenarios judged, so the navigation steps can find it. */
+let judged = ''
+
+/* ---- reliability ---------------------------------------------------- */
+
+Given('a task nobody has judged', async ({ world }) => {
+  await world.startDaemon()
+  judged = await world.createTask('Add due dates', [])
+})
+
+Given('a task judged at 88 with 70% coverage', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: -3, workflow: 'validate' }])
+  judged = id
+})
+
+Given('a task capped at 70 by a critical risk', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [
+    {
+      score: 70,
+      coverage: 70,
+      delta: -20,
+      workflow: 'validate',
+      caps: [{ type: 'criticalOpenDriver', value: 70, reason: 'A critical risk is still open.' }],
+    },
+  ])
+  judged = id
+})
+
+Given('a task whose judgement is stale', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  // The assessment considered a run that no longer is the newest, which is what
+  // staleness means — derived, never stored. So both runs have to exist: the
+  // one it looked at, and the one that finished after it.
+  const considered = await world.finishedRun(id, 'validate')
+  await world.judge(id, [
+    { score: 88, coverage: 70, delta: 0, workflow: 'validate', consideredRunId: considered },
+  ])
+  await world.finishedRun(id, 'verify')
+  judged = id
+})
+
+Given('a task judged four times, the third lower than the second', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [
+    { score: 70, coverage: 30, delta: 70, workflow: 'analysis' },
+    { score: 84, coverage: 60, delta: 14, workflow: 'implement' },
+    { score: 76, coverage: 85, delta: -8, workflow: 'validate', causes: [{ summary: 'checkout regression', amount: -8 }] },
+    { score: 92, coverage: 100, delta: 16, workflow: 'verify' },
+  ])
+  judged = id
+})
+
+Given('a task judged once', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: 88, workflow: 'analysis' }])
+  judged = id
+})
+
+Given('a task with a high driver the agent can resolve', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 88, coverage: 70, delta: 0, workflow: 'validate' }])
+  await world.addDriver(id, { title: 'checkout regression', severity: 'high', owner: 'agent' })
+  judged = id
+})
+
+Given('a task with a critical driver and a low one', async ({ world }) => {
+  await world.startDaemon()
+  const id = await world.createTask('Add due dates', [])
+  await world.judge(id, [{ score: 70, coverage: 70, delta: 0, workflow: 'validate' }])
+  await world.addDriver(id, { title: 'a low note', severity: 'low', owner: 'agent' })
+  await world.addDriver(id, { title: 'unsafe redirect', severity: 'critical', owner: 'developer' })
+  judged = id
+})
+
+When('I open that task', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await expect(page.getByTestId('reliability-card')).toBeVisible()
+})
+
+When('I show the breakdown', async ({ page }) => {
+  await page.getByTestId('reliability-breakdown-toggle').click()
+})
+
+When('I look at the third point', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-point-2').hover()
+})
+
+When('I resolve that driver', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-drivers').getByRole('button', { name: 'Resolved' }).click()
+})
+
+When('I click to accept that risk', async ({ page }) => {
+  await page.goto(`/tasks/${judged}`)
+  await page.getByTestId('reliability-drivers').getByRole('button', { name: 'Accept the risk' }).click()
+})
+
+Then('the reliability card says it is not assessed', async ({ page }) => {
+  await expect(page.getByTestId('reliability-unassessed')).toBeVisible()
+})
+
+Then('it offers to assess it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-assess')).toBeVisible()
+})
+
+Then('the reliability card shows 88', async ({ page }) => {
+  await expect(page.getByTestId('reliability-score')).toHaveText('88')
+})
+
+Then('it shows the coverage', async ({ page }) => {
+  await expect(page.getByTestId('reliability-coverage')).toContainText('70%')
+})
+
+Then('the card shows a downward arrow', async ({ page }) => {
+  // The arrow, not the colour: this has to read for somebody who cannot tell
+  // red from green.
+  await expect(page.getByTestId('reliability-delta')).toContainText('↓')
+})
+
+Then('every dimension is listed', async ({ page }) => {
+  const breakdown = page.getByTestId('reliability-breakdown')
+  await expect(breakdown).toBeVisible()
+  await expect(breakdown.locator('dt')).toHaveCount(6)
+})
+
+Then('the card says what capped it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-cap')).toContainText('critical risk is still open')
+})
+
+Then('the card says it is stale', async ({ page }) => {
+  await expect(page.getByTestId('reliability-stale')).toBeVisible()
+})
+
+Then('the reliability card is in the rail', async ({ page }) => {
+  // Geometry, the way `the facts sit beside the work` reads it: the card is to
+  // the right of the plan and roughly level with it.
+  const card = await page.getByTestId('reliability-card').boundingBox()
+  const plan = await page.getByTestId('task-plan').boundingBox()
+  expect(card).not.toBeNull()
+  expect(plan).not.toBeNull()
+  expect((card as { x: number }).x).toBeGreaterThan((plan as { x: number }).x)
+})
+
+Then('the graph is drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-graph')).toBeVisible()
+  await expect(page.getByTestId('reliability-line')).toBeVisible()
+})
+
+Then('it has {int} points', async ({ page }, count: number) => {
+  await expect(page.getByTestId('reliability-graph').locator('circle')).toHaveCount(count)
+})
+
+Then('the third point is below the second', async ({ page }) => {
+  // On screen, in pixels. A graph that normalised a fall away would pass a
+  // check that only read the numbers back.
+  const second = await page.getByTestId('reliability-point-1').boundingBox()
+  const third = await page.getByTestId('reliability-point-2').boundingBox()
+  expect(second).not.toBeNull()
+  expect(third).not.toBeNull()
+  expect((third as { y: number }).y).toBeGreaterThan((second as { y: number }).y)
+})
+
+Then('it says what changed', async ({ page }) => {
+  await expect(page.getByTestId('reliability-causes')).toContainText('checkout regression')
+})
+
+Then('no graph is drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-graph')).toHaveCount(0)
+})
+
+Then('the drivers list names it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toContainText('checkout regression')
+})
+
+Then('it says the agent can resolve it', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toContainText('the agent can resolve this')
+})
+
+Then('the critical group comes before the low group', async ({ page }) => {
+  const critical = await page.getByTestId('reliability-group-critical').boundingBox()
+  const low = await page.getByTestId('reliability-group-low').boundingBox()
+  expect(critical).not.toBeNull()
+  expect(low).not.toBeNull()
+  expect((critical as { y: number }).y).toBeLessThan((low as { y: number }).y)
+})
+
+Then('it is no longer in the list', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers-empty')).toBeVisible()
+})
+
+Then('it is counted among the ones dealt with', async ({ page }) => {
+  await expect(page.getByTestId('reliability-settled')).toContainText('1 already dealt with')
+})
+
+Then('it asks why', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers').locator('input')).toBeVisible()
+})
+
+Then('the drivers list is not drawn', async ({ page }) => {
+  await expect(page.getByTestId('reliability-drivers')).toHaveCount(0)
+})
+
+/* ---- the bundles Factory ships, and who judges a project ------------- */
+
+/** The project these scenarios open. Registered, not the suite's default one. */
+let settingsProject = ''
+/** Its directory, so a definition can be written into that repository's own scope. */
+let settingsRepo = ''
+
+Given('a project', async ({ world }) => {
+  await world.startDaemon()
+  settingsRepo = world.makeRepository('judged')
+  settingsProject = await world.addProject('judged', settingsRepo)
+})
+
+When("I open that project's settings", async ({ page }) => {
+  await page.goto(`/projects/${settingsProject}`)
+  await expect(page.getByTestId('save-project')).toBeVisible()
+})
+
+Then('it offers to add the reliability workflows', async ({ page }) => {
+  await expect(page.getByTestId('import-reliability')).toBeVisible()
+})
+
+Then('it offers to add the build tools profile', async ({ page }) => {
+  await expect(page.getByTestId('import-build-tools')).toBeVisible()
+})
+
+When('I add the reliability workflows', async ({ page }) => {
+  await page.getByTestId('import-reliability').click()
+})
+
+Then('it says what was written', async ({ page }) => {
+  await expect(page.getByTestId('import-bundle-done')).toBeVisible()
+})
+
+Then('the workflow {string} is in the project', async ({ page }, name: string) => {
+  // Read off what the page says was written, not off the workflows list: the
+  // list shows the daemon's own chain, and this landed in the project's scope —
+  // which is the whole point of importing it against a project.
+  await expect(page.getByTestId('import-bundle-done')).toContainText(`${name}.workflow.yaml`)
+})
+
+Then('no judging model is named', async ({ page }) => {
+  await expect(page.getByTestId('project-judge-model')).toHaveValue('')
+})
+
+When('I name {string} as the judging model', async ({ page }, model: string) => {
+  await page.getByTestId('project-judge-model').fill(model)
+})
+
+When('I save the project', async ({ page }) => {
+  await page.getByTestId('save-project').click()
+  await expect(page).toHaveURL(/\/projects$/)
+})
+
+When('I choose {string} as the judging agent', async ({ page }, provider: string) => {
+  await page.getByTestId('project-judge-provider').selectOption(provider)
+})
+
+Then('the judging agent is {string}', async ({ page }, provider: string) => {
+  await expect(page.getByTestId('project-judge-provider')).toHaveValue(provider)
+})
+
+Then('{string} is offered as a judging model', async ({ page }, model: string) => {
+  // The datalist the combo offers, which carries the chosen provider's own model
+  // roles and ids rather than a list written on this page. Options have a value
+  // and no text, so this reads the attribute.
+  const values = await page
+    .getByTestId('project-judge-model-options')
+    .locator('option')
+    .evaluateAll((nodes) => nodes.map((node) => (node as HTMLOptionElement).value))
+  expect(values).toContain(model)
+})
+
+Then("it says that agent's command was not found", async ({ page }) => {
+  await expect(page.getByTestId('project-judge-provider-unavailable')).toBeVisible()
+})
+
+Then('the judging model is {string}', async ({ page }, model: string) => {
+  await expect(page.getByTestId('project-judge-model')).toHaveValue(model)
+})
+
+/* ---- what a failure looks like, and where ---------------------------- */
+
+Given('the daemon refuses to hand over the bundle', async ({ page }) => {
+  await page.route('**/api/bundles/examples/*', (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'The bundle could not be read.' }),
+    }),
+  )
+})
+
+Given('the daemon answers that request with a page instead of JSON', async ({ page }) => {
+  // Exactly what an older daemon did: its catch-all served the board's own
+  // shell for an API path it did not know, with a 200 on it.
+  await page.route('**/api/bundles/examples/*', (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><title>Factory</title><div id="app"></div>',
+    }),
+  )
+})
+
+Given('the daemon refuses the next save', async ({ page }) => {
+  await page.route('**/api/projects/*', (route) =>
+    route.request().method() === 'PATCH'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'The daemon could not write that.' }),
+        })
+      : route.continue(),
+  )
+})
+
+Then('the field says what went wrong', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('could not be read')
+})
+
+Then("the form's banner says nothing", async ({ page }) => {
+  await expect(page.getByTestId('error')).toHaveCount(0)
+})
+
+Then('the field says the daemon was not understood', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('not JSON')
+})
+
+Then('it names the request that failed', async ({ page }) => {
+  await expect(page.getByTestId('field-error-add-to-this-repo')).toContainText('/api/bundles/examples/')
+})
+
+When('I try to save the project', async ({ page }) => {
+  // Deliberately not the step above: that one waits for the list, and a save
+  // that is refused never gets there. A scenario about a refusal must not
+  // depend on the success path's navigation.
+  await page.getByTestId('save-project').click()
+})
+
+Then('the form says what went wrong', async ({ page }) => {
+  await expect(page.getByTestId('error')).toContainText('could not write that')
+})
+
+Then('it says so above the first field', async ({ page }) => {
+  // Geometry, the way the rail is read, and against whichever form is open:
+  // the banner sits above that form's first box, so it is on the screen when
+  // the button that produced it is. Asking the page for "the first input" rather
+  // than naming one keeps this step usable by every form.
+  const banner = await page.getByTestId('error').boundingBox()
+  const first = await page.locator('form input').first().boundingBox()
+  expect(banner).not.toBeNull()
+  expect(first).not.toBeNull()
+  expect((banner as { y: number }).y).toBeLessThan((first as { y: number }).y)
+})
+
+Given('the daemon refuses the next task', async ({ page }) => {
+  await page.route('**/api/tasks', (route) =>
+    route.request().method() === 'POST'
+      ? route.fulfill({
+          status: 500,
+          contentType: 'application/json',
+          body: JSON.stringify({ error: 'The daemon could not make that task.' }),
+        })
+      : route.continue(),
+  )
+})
+
+When('I try to create the task', async ({ page }) => {
+  await page.getByTestId('task-name').fill('Add due dates')
+  await page.getByTestId('create-task').click()
+})
+
+Then('the form says the task was refused', async ({ page }) => {
+  await expect(page.getByTestId('error')).toContainText('could not make that task')
+})
+
+/* ---- profiles ------------------------------------------------------- */
+
+Given('the project defines the profile {string}', async ({ world }, name: string) => {
+  world.profile(
+    world.projectScope,
+    name,
+    `kind: factory.profile/v1\nname: ${name}\ncommands: [cargo]\n`,
+  )
+})
+
+When('I open the profiles page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/profiles')
+})
+
+Then('the profile {string} is listed', async ({ page }, name: string) => {
+  await expect(page.getByTestId(`row-${name}`)).toBeVisible()
+})
+
+When('I open the new profile page', async ({ world, page }) => {
+  await world.startDaemon()
+  await page.goto('/profiles/new')
+})
+
+When('I name it {string}', async ({ page }, name: string) => {
+  await page.locator('#pr-name').fill(name)
+})
+
+When('I allow the command {string}', async ({ page }, command: string) => {
+  // Typed into the draft box, then added — the list editor keeps the two apart
+  // so an unfinished entry is never part of the value.
+  await page.getByTestId('profile-commands-input').fill(command)
+  await page.getByTestId('profile-commands-add').click()
+})
+
+When('I save it', async ({ page }) => {
+  await page.getByTestId('save').click()
+  await expect(page).toHaveURL(/\/profiles$/)
+})
+
+When('I look at the YAML', async ({ page }) => {
+  await page.getByTestId('view-yaml').click()
+})
+
+Then('the preview says {string}', async ({ page }, text: string) => {
+  await expect(page.getByTestId('yaml-preview')).toContainText(text)
+})
+
+Then('it warns that the command runs whatever it is given', async ({ page }) => {
+  await expect(page.getByTestId('profile-interpreter-warning')).toBeVisible()
+})
+
+Then('it does not warn', async ({ page }) => {
+  await expect(page.getByTestId('profile-interpreter-warning')).toHaveCount(0)
+})
+
+When('I deny the command {string}', async ({ page }, command: string) => {
+  await page.getByTestId('profile-deny-commands-input').fill(command)
+  await page.getByTestId('profile-deny-commands-add').click()
+})
+
+Then('it names a provider that cannot allow one command', async ({ page }) => {
+  await expect(page.getByTestId('profile-unsupported')).toBeVisible()
+})
+
+Then('it names a provider that cannot forbid one command', async ({ page }) => {
+  await expect(page.getByTestId('profile-deny-unsupported')).toBeVisible()
+})
+
+Then('it says nothing about deny-lists', async ({ page }) => {
+  await expect(page.getByTestId('profile-deny-unsupported')).toHaveCount(0)
+})
+
+When('I add the build tools profile', async ({ page }) => {
+  await page.getByTestId('import-build-tools').click()
+})
+
+Then('the profile {string} is in the project', async ({ page }, name: string) => {
+  await expect(page.getByTestId('import-bundle-done')).toContainText(`${name}.profile.yaml`)
+})
+
+Then('it says a profile is chosen on a project', async ({ page }) => {
+  const said = page.getByTestId('profile-how-to-use')
+  await expect(said).toBeVisible()
+  await expect(said).toContainText('Authority')
+})
+
+Given('that project defines the profile {string}', async ({ world }, name: string) => {
+  // Into the *project's* own scope, which is the whole point of the scenario:
+  // a profile in the daemon's scopes would pass for the wrong reason.
+  world.profile(
+    `${settingsRepo}/.xaedalon/.factory`,
+    name,
+    `kind: factory.profile/v1\nname: ${name}\ncommands: [cargo]\n`,
+  )
+})
+
+Then('{string} can be chosen as the authority', async ({ page }, name: string) => {
+  const options = page.locator('[data-testid="project-profile"] option')
+  await expect(options.filter({ hasText: name }).first()).toHaveCount(1)
 })

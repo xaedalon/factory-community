@@ -62,12 +62,41 @@ session:
 #   --permission-mode dontAsk  means "do not ask, and deny" — Write was refused
 #                              session-wide.
 #
+# Re-measured against 2.1.281 on 2026-09-24, after a supervised run found that
+# an agent could no longer install dependencies or run tests. `--tools` still
+# grants Bash — that part never changed — but `acceptEdits` auto-approves
+# *edits* and not arbitrary commands, so a command needs approval, and
+# `--permission-prompts none` turns needing approval into being denied. The
+# agent then exits 0 and writes a report full of ticks for work it never did.
+#
+#   node --version      allowed      read-only commands were always fine
+#   pnpm --version      DENIED       "…this session has no approval surface…"
+#
+# Hence `--allowedTools`, and hence the shape of it. Each entry was measured:
+#
+#   --allowedTools "Bash(pnpm *)"   pnpm runs; a write outside is still REFUSED
+#   --allowedTools Bash             pnpm runs; a write outside SUCCEEDS
+#   --allowedTools "Bash(node *)"   node runs; node -e writeFileSync ESCAPES
+#
+# So: prefix rules, never a bare tool name, and **no interpreters**.
+# `--restricted` confines Factory's file tools and the shell's own redirection;
+# it cannot confine what a child process does with its own syscalls, so any
+# entry that runs arbitrary code hands that entry the whole filesystem.
+#
+# Package managers are on the list with open eyes. `pnpm test` runs the
+# project's own code, and `pnpm exec` runs anything at all — so this widens the
+# Default profile, and `docs/security/default-profile.md` says so rather than
+# implying a boundary that is not there. The alternative was an agent that
+# cannot run your tests, which is an agent nobody keeps confined for long.
+#
 # What the flags below were measured to do, in a neutral directory:
 #   write a file in the workspace      OK
 #   run a shell command                OK
+#   install dependencies, run tests    OK   (2.1.281, via --allowedTools)
 #   write a file outside the workspace REFUSED ("--restricted confines the file
 #                                      tools to the working directory")
 #   shell redirection outside it       REFUSED
+#   node -e "…writeFileSync('/tmp/x')" REFUSED (node is not on the list)
 # and the run never hung, which is what `--permission-prompts none` buys:
 # anything that would prompt is denied instead of waiting for a person who
 # is not there.
@@ -85,14 +114,77 @@ permissionArgs:
     - 'acceptEdits'
     - '--permission-prompts'
     - 'none'
+    # Package managers only — see the measurements above. A bare `Bash` or any
+    # interpreter here removes the workspace boundary entirely.
+    #
+    # One flag with a comma-separated value, not four flags: `--help` declares
+    # it `<tools...>`, and a repeated variadic option replaces rather than
+    # appends — four flags would leave only the last one in force, which is the
+    # kind of mistake that looks like it works.
+    - '--allowedTools'
+    - 'Bash(npm *),Bash(pnpm *),Bash(yarn *),Bash(bun *)'
   full-access: ['--permission-mode', 'bypassPermissions']
+
+# Arguments a step may not pass under a confined profile, on top of the ones
+# derived from `full-access` above.
+#
+# `--allowedTools` is the dangerous one and the reason this field exists.
+# `--help` declares it `<tools...>`, and a repeated variadic option *replaces*
+# rather than appends — so a step passing it does not add to Factory's
+# allow-list, it becomes the allow-list, and `--allowedTools Bash` was measured
+# writing outside the workspace. The rest set authority directly.
+# How a custom profile reaches this CLI.
+#
+# `--help` gives the form: `--allowedTools <tools...>` with the example
+# `"Bash(git *) Edit"`. Measured 2026-09-24: `Bash(git status:*)` is accepted as
+# a sub-command rule, and `--disallowedTools` exists alongside it with the same
+# grammar.
+#
+# One flag with a comma-separated value, never repeated — the same reason the
+# Default list above is one flag: a repeated variadic option *replaces* rather
+# than appends, so two flags would leave only the second in force.
+#
+# What a profile can and cannot buy here is worth knowing before writing one:
+# read-only commands are auto-approved whatever this list says, so `git status`
+# and `cat` already work under Default. An allow-list entry buys commands with
+# *side effects* — `cargo`, `make`, `docker` — which is what a profile is for.
+# `docs/security/providers.md` has the measurements.
+commandAllowFlag: '--allowedTools'
+commandDenyFlag: '--disallowedTools'
+commandPattern: 'Bash({command} *)'
+commandSeparator: ','
+
+forbiddenArgs:
+  - '--allowedTools'
+  # A step passing this could take back what the project's profile granted, and
+  # quietly: the run would look configured and behave as though it were not.
+  - '--disallowedTools'
+  - '--permission-mode'
+  - '--permission-prompts'
+  - '--dangerously-skip-permissions'
+  - '--tools'
 
 # Measured to extend the confinement: a file in the added directory was written
 # and a third directory was still refused. Factory uses it for the artifacts
 # root, which lives under the project rather than the worktree.
 directoryFlag: '--add-dir'
 
-extraArgs: []
+# The transcript, as events rather than as a final paragraph.
+#
+# This is what makes a refused command visible. Measured on 2.1.281: a run whose
+# `git --version` was denied still ended
+#   {"type":"result","subtype":"success","is_error":false}
+# and exited 0. In the same stream the CLI had already said, in an event of its
+# own, exactly what happened:
+#   {"type":"system","subtype":"permission_denied","tool_use_id":"toolu_…"}
+# — a kind of event, not a sentence, which is the point. The wording changes
+# between the CLI and the agent's own summary of it; the event kind does not.
+#
+# `--verbose` is required: without it `--output-format stream-json` is refused
+# in print mode. `src/stream.ts` is the reader, and it passes anything that is
+# not JSON straight through, so removing these two flags degrades to the old
+# behaviour rather than to a wall of nothing.
+extraArgs: ['--output-format', 'stream-json', '--verbose']
 
 # How a refusal reads, taken verbatim from probes run on 2026-09-15 rather than
 # from documentation. The Default profile works by handing the CLI the flags

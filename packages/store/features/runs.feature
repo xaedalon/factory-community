@@ -259,3 +259,27 @@ Feature: Runs, steps and the output they produced
       And it pauses at phase 2
       And it is resumed
       Then the run's profile is "default"
+
+  Rule: a step records what it actually ran
+
+    A step stored what it said it would do — `describe`, in a person's words —
+    and the kind that ran it. What it *actually executed* was nowhere, so "what
+    did this agent run, and with what authority?" could only be answered by
+    reading the phase file back, which an edit since then makes a different
+    question. That is the first thing an audit asks, and the same trap the
+    profile and the session provider were recorded to avoid.
+
+    The argv, rendered the way `--dry-run` prints it and the way a terminal
+    tool offers it — one string, quoted so it can be pasted. Not the
+    environment: it is where the secrets are, and the profile already records
+    how much of it the step could see.
+
+    Scenario: A step keeps the command that was run
+      When the step "install" runs "npm ci"
+      Then the step's command is "npm ci"
+
+    Scenario: A step that ran nothing records nothing
+      When the step "install" of phase "setup" runs and succeeds
+      # A step recorded before this existed, and a skipped one, which never had
+      # a command to run.
+      Then the step states no command

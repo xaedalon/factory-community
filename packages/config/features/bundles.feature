@@ -25,6 +25,23 @@ Feature: Sharing a workflow as one file
     And the bundle contains the workflows "development, development-failure"
     And the bundle contains the phases "analysis, implement, diagnose"
 
+  Scenario: Export follows what the workflow needs
+    Given "development" needs "analysis-first"
+    When I export "development"
+    # A pipeline of five workflows was five exports and a merge by hand, and
+    # the merge is where a mistake lands unnoticed. `needs` is the other half
+    # of "everything it needs": phases were followed from the start, and the
+    # workflows that must run before it were not.
+    Then the export succeeds
+    And the bundle contains the workflows "development, analysis-first"
+
+  Scenario: A cycle in what workflows need terminates
+    Given "development" needs "analysis-first"
+    And "analysis-first" needs "development"
+    When I export "development"
+    Then the export succeeds
+    And the bundle contains 2 workflows
+
   Scenario: A cycle in the on_fail chain terminates
     Given "development" fails over to "development-failure" with phase "diagnose"
     And "development-failure" fails back to "development"
@@ -116,3 +133,29 @@ Feature: Sharing a workflow as one file
     And the user scope has the workflow "development"
     And the user scope has the phase "review"
     And nothing it wrote fails to validate
+
+  Rule: a bundle can carry a profile, and need not carry a workflow
+
+    Nothing references a profile the way a step references an agent — a project
+    chooses one — so a profile never arrives by being pulled in. It travels
+    because somebody put it in the bundle, which is how the shipped example
+    ships. That also means a bundle with no workflow at all is a real thing, and
+    requiring an entry workflow would have meant naming one that is not in the
+    file.
+
+    Scenario: A bundle of only a profile reads
+      Given the bundle Factory ships for build tools
+      When it is read
+      Then reading succeeds
+      And it carries the profile "build-tools"
+      And it names no entry workflow
+
+    Scenario: Importing it writes the profile into the scope
+      Given the bundle Factory ships for build tools
+      When I import it into the user scope
+      Then the profile "build-tools" is in the user scope
+
+    Scenario: A prefix renames the profile on the way in
+      Given the bundle Factory ships for build tools
+      When I import it into the user scope with the prefix "acme-"
+      Then the profile "acme-build-tools" is in the user scope

@@ -19,10 +19,36 @@ supports:
 # Copilot's `--model` takes a concrete id, not a tier alias, so these need
 # checking when GitHub retires one — the CLI validates the value and exits
 # immediately, which at least fails fast and clearly.
+#
+# `claude-opus-5` was retired by GitHub, reported 2026-09-25. Its replacement was
+# first written `claude-opus-5-5`, which the CLI refused outright:
+#
+#   Error: Model "claude-opus-5-5" from --model flag is not available.
+#
+# **A point release dots the minor version here; it does not hyphenate it.**
+# GitHub's own SDK says so — `copilot-sdk/types.d.ts`, shipped inside the CLI,
+# documents the field as:
+#
+#   Model identifier for this agent (e.g. "claude-haiku-4.5").
+#
+# and the ids this machine's sessions have recorded agree: `gpt-5.4-nano`,
+# `gpt-5.6-sol`, `gpt-5.6-terra`, every one dotting the minor version while
+# hyphenating the name. `claude-opus-5` and `claude-sonnet-5` have no minor part,
+# which is why nothing here showed the convention until one was needed — and why
+# `fast` carried a hyphenated `claude-haiku-4-5` that would have failed the first
+# time anybody used it.
+#
+# These ids **cannot be checked from a terminal**. There is no `models`
+# subcommand, `--help` says only `--model <model>`, and the CLI will not validate
+# the flag without an interactive session — probed with a scrubbed environment,
+# with Factory's own argv, and under a pty, exiting before reading the flag every
+# time. `/model` inside a session lists display names, not ids. So they are read
+# off the SDK's types and off what sessions have recorded, and confirmed by
+# running it.
 models:
-  strong: claude-opus-5
+  strong: claude-opus-5.5
   balanced: claude-sonnet-5
-  fast: claude-haiku-4-5
+  fast: claude-haiku-4.5
 
 promptFlag: '-p'
 modelFlag: '--model'
@@ -59,6 +85,15 @@ session:
 permissionArgs:
   default: ['--allow-all-tools']
   full-access: ['--allow-all']
+
+# Arguments a step may not pass under a confined profile, on top of `--allow-all`
+# derived from the list above.
+#
+# These are the two the Default profile deliberately stopped passing. A step
+# that passed one itself would put back exactly the confinement this provider
+# was changed to stop switching off — and it would do it from a file in the
+# repository, with no setting changed and nothing said.
+forbiddenArgs: ['--allow-all-paths', '--allow-all-urls']
 
 # Documented as "Allow file access to a directory"; Factory uses it for the
 # artifacts root, which lives outside the worktree by design.

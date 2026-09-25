@@ -3,7 +3,9 @@ import type { Capability } from '../capabilities.js'
 import type { CapabilityLookup } from '../host.js'
 import type { Problem } from '../problems.js'
 import type { ExecutionProfile } from '../security/profile.js'
+import type { Profile } from './profile.js'
 import type { DenialPattern } from '../security/denials.js'
+import type { StreamReaderFactory } from '../providers/stream.js'
 import { closedWithExtensions, problemsFromZod, slug } from './common.js'
 
 /**
@@ -70,6 +72,14 @@ export interface PlanStepContext {
    * command can ignore it.
    */
   readonly profile?: ExecutionProfile
+  /**
+   * The profile's definition, when the profile is a custom one.
+   *
+   * What a kind rendering a command for something else needs in order to honour
+   * it: the profile's name says *which*, and this says *what*. Absent under a
+   * built-in, and a kind that runs its own command can ignore it.
+   */
+  readonly profileDefinition?: Profile
   /**
    * Directories outside `cwd` this step may reach, as the project granted them.
    *
@@ -151,6 +161,15 @@ export interface PlannedStep {
    * reads the output, and it has no business knowing that providers exist.
    */
   readonly denialPatterns?: readonly DenialPattern[]
+  /**
+   * How to read this command's output, when it emits a structured transcript.
+   *
+   * Travels with the step for the same reason `denialPatterns` does: the runner
+   * is what reads the pipe, and it has no business knowing that providers
+   * exist. Absent means the output is text and is passed through as it always
+   * was — a shell step, a provider with no reader, a `--dry-run`.
+   */
+  readonly stream?: StreamReaderFactory
   /**
    * argv for a second and later attempt, when the first attempt changed the
    * world in a way that makes running it again wrong.

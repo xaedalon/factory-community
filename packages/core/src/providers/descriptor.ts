@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { closedWithExtensions, slug } from '../schema/common.js'
-import type { ExecutionProfile } from '../security/profile.js'
+import {
+  DEFAULT_PROFILE,
+  isBuiltInProfile,
+  isConfined,
+  type ExecutionProfile,
+} from '../security/profile.js'
 import { MODEL_ROLES } from '../model-roles.js'
 
 /**
@@ -131,6 +136,39 @@ const descriptorShape = {
     .default([]),
 
   /**
+   * How this CLI is told that one more command is allowed, if it can be.
+   *
+   * The seam a **custom profile** is rendered through. Declared here rather
+   * than decided in core, so a third party's provider gets it by writing YAML —
+   * the same rule that makes adding a provider a file rather than a patch.
+   *
+   * ```yaml
+   * commandAllowFlag: '--allowedTools'
+   * commandDenyFlag: '--disallowedTools'
+   * commandPattern: 'Bash({command} *)'
+   * commandSeparator: ','
+   * ```
+   *
+   * **Absent means this CLI cannot express it**, and that is a real answer
+   * rather than a gap: Copilot has four coarse switches and Codex has nothing,
+   * so a profile's commands mean nothing to either. What must not happen is the
+   * absence being *silent* — `unsupportedBy` below is how it is reported, and
+   * the planner turns that into a warning on the run.
+   *
+   * One flag with a separated value, never repeated: `--allowedTools` is
+   * variadic and a repeated variadic option **replaces** rather than appends,
+   * so four flags would leave only the last in force. That has cost this
+   * project time twice and is why the pattern and the separator are declared
+   * rather than assumed.
+   */
+  commandAllowFlag: z.string().min(1).optional(),
+  commandDenyFlag: z.string().min(1).optional(),
+  /** How one command becomes a rule. `{command}` is replaced; anything else is literal. */
+  commandPattern: z.string().min(1).default('{command}'),
+  /** What joins the rules into one value. */
+  commandSeparator: z.string().default(','),
+
+  /**
    * The flag that grants access to one more directory, if this CLI has one.
    *
    * Needed because a task's **artifacts do not live in its workspace**.
@@ -199,6 +237,25 @@ const descriptorShape = {
     .default([]),
 
   /**
+   * Arguments a step may never pass under a confined profile.
+   *
+   * The derivation below catches the obvious case — an argument out of this
+   * provider's own `full-access` list — and it is not enough on its own. Two
+   * shapes it cannot see:
+   *
+   * - a flag that grants authority without appearing in either list, such as
+   *   `--dangerously-skip-permissions`;
+   * - a flag Factory already passes whose *repetition replaces* what Factory
+   *   said. `--allowedTools` is declared `<tools...>`, so a step passing it
+   *   again does not add to the allow-list, it becomes the allow-list.
+   *
+   * Names only, and a bare flag matches `--flag=value` too. Additive: the
+   * derived set is always in force as well, so a descriptor cannot widen a
+   * profile by leaving this empty.
+   */
+  forbiddenArgs: z.array(z.string().min(1)).default([]),
+
+  /**
    * True when this descriptor has not been checked against the real CLI.
    * `doctor` says so out loud rather than letting someone discover it when a
    * run fails with an unrecognised flag.
@@ -235,13 +292,224 @@ export function permissionArgsFor(
 ): readonly string[] {
   const declared = descriptor.permissionArgs
   if (Array.isArray(declared)) return declared
-  // No `?? []` here, and that is deliberate rather than an oversight: both keys
-  // carry `.default([])` in the schema, so a map naming one profile parses with
-  // the other one present and empty. A fallback would be unreachable code — and
-  // worse, the obvious fallback is "use the other profile's list", which for
-  // `default` would quietly mean Full Access. The schema is the guarantee, and
-  // it has a scenario of its own.
-  return declared[profile]
+
+  // A built-in is indexed straight, with no `?? []`, and that is deliberate
+  // rather than an oversight: both keys carry `.default([])` in the schema, so
+  // a map naming one profile parses with the other one present and empty. A
+  // fallback would be unreachable — and worse, the obvious fallback is "use the
+  // other profile's list", which for `default` would quietly mean Full Access.
+  if (isBuiltInProfile(profile)) return declared[profile]
+
+  // A custom profile is somebody's definition, and no descriptor will ever name
+  // it. It gets the **confined** list, because a custom profile extends Default
+  // and is confined by construction: whatever it adds is added on top of this,
+  // by the renderer, never instead of it. Falling back the other way — or to
+  // nothing — would be a profile that quietly ran unconfined or with no flags
+  // at all, and both are the failure this function's comment already warns of.
+  return declared[DEFAULT_PROFILE]
+}
+
+/**
+ * What a custom profile adds, resolved for one provider.
+ *
+ * Handed in already narrowed: `args` is *this* provider's share of the
+ * profile's `providers:` map, picked by whoever knows which provider is about
+ * to run. The renderer stays dumb, which is what keeps one profile from being
+ * interpreted two ways.
+ */
+export interface ProfileGrants {
+  readonly commands: readonly string[]
+  readonly denyCommands: readonly string[]
+  readonly args: readonly string[]
+}
+
+/** Nothing added. What a built-in profile grants. */
+export const NO_GRANTS: ProfileGrants = { commands: [], denyCommands: [], args: [] }
+
+/** One command as this CLI's rule. `git push` with `Bash({command} *)` is `Bash(git push *)`. */
+const asRule = (descriptor: ProviderDescriptor, command: string): string =>
+  descriptor.commandPattern.replace('{command}', command)
+
+/**
+ * The flags that carry a profile's commands, if this CLI can carry them.
+ *
+ * Returned as whole flag-and-value pairs rather than merged into
+ * `permissionArgs`, because the merging has to happen *before* the argv is
+ * built: the allow flag may already be in the confined list, and a second one
+ * would replace the first rather than extend it. `render` is the one place that
+ * knows both halves, so it is the one place that joins them.
+ */
+export function commandArgsFor(
+  descriptor: ProviderDescriptor,
+  grants: ProfileGrants,
+  existing: readonly string[] = [],
+): readonly string[] {
+  const args: string[] = []
+
+  if (descriptor.commandAllowFlag !== undefined && grants.commands.length > 0) {
+    const at = existing.indexOf(descriptor.commandAllowFlag)
+    // What the confined profile already allows, kept: a profile that wanted
+    // `cargo` must not cost the project its package managers.
+    const already = at === -1 ? '' : (existing[at + 1] ?? '')
+    const rules = grants.commands.map((command) => asRule(descriptor, command))
+    const joined = [already, ...rules].filter((part) => part !== '').join(descriptor.commandSeparator)
+    args.push(descriptor.commandAllowFlag, joined)
+  }
+
+  if (descriptor.commandDenyFlag !== undefined && grants.denyCommands.length > 0) {
+    const at = existing.indexOf(descriptor.commandDenyFlag)
+    const already = at === -1 ? '' : (existing[at + 1] ?? '')
+    const rules = grants.denyCommands.map((command) => asRule(descriptor, command))
+    const joined = [already, ...rules].filter((part) => part !== '').join(descriptor.commandSeparator)
+    args.push(descriptor.commandDenyFlag, joined)
+  }
+
+  return [...args, ...grants.args]
+}
+
+/**
+ * The tokens that separate Full Access from Default, for this provider.
+ *
+ * What a **profile** may not pass, and deliberately *not* the same set a step
+ * may not pass: `forbiddenArgs` forbids `--allowedTools` and `--tools` to a
+ * step, and a profile's whole job is to set them. The two surfaces are
+ * different, so they are derived differently.
+ *
+ * Derived rather than listed, so it stays true as a descriptor changes, and
+ * always against Default — the subtraction filters out what the confined
+ * profile already passes, so deriving it against the profile being checked
+ * would let that profile remove the very token that would have caught it.
+ *
+ * Empty for a provider that cannot tell the profiles apart. There is nothing to
+ * derive, and saying "this is fine" would be a claim rather than the truth.
+ */
+export function fullAccessOnlyArgs(descriptor: ProviderDescriptor): readonly string[] {
+  const confined = new Set(permissionArgsFor(descriptor, DEFAULT_PROFILE))
+  return permissionArgsFor(descriptor, 'full-access').filter(
+    (argument) => !confined.has(argument),
+  )
+}
+
+/**
+ * Which of these arguments would reach Full Access.
+ *
+ * Tokens, not flags. Claude's Full Access is `--permission-mode
+ * bypassPermissions` and Default passes `--permission-mode` too, so the
+ * subtraction above leaves the bare *value* — and a check that only looked at
+ * flags would miss it entirely. `--flag=value` is split and both halves are
+ * checked, because a CLI that accepts one accepts the other.
+ */
+export function reachesFullAccess(
+  descriptor: ProviderDescriptor,
+  args: readonly string[],
+): readonly string[] {
+  const separating = new Set(fullAccessOnlyArgs(descriptor))
+  if (separating.size === 0) return []
+  return args.filter((argument) => {
+    if (separating.has(argument)) return true
+    const equals = argument.indexOf('=')
+    if (equals <= 0) return false
+    return separating.has(argument.slice(0, equals)) || separating.has(argument.slice(equals + 1))
+  })
+}
+
+/** One thing a provider was asked for and cannot do. */
+export interface UnsupportedGrant {
+  readonly provider: string
+  readonly what: 'commands' | 'deny_commands'
+  readonly entries: readonly string[]
+  readonly message: string
+}
+
+/**
+ * What this provider cannot honour, said out loud.
+ *
+ * A profile is portable and the three CLIs are not: Claude has an allow-list,
+ * Copilot has coarse switches, Codex has nothing. Silence about that is the
+ * failure — an agent running under a profile that means nothing to its CLI,
+ * with everybody believing otherwise. Raw `args` are never unsupported, because
+ * there is nothing to translate.
+ */
+export function unsupportedBy(
+  descriptor: ProviderDescriptor,
+  grants: ProfileGrants,
+): readonly UnsupportedGrant[] {
+  const found: UnsupportedGrant[] = []
+  if (grants.commands.length > 0 && descriptor.commandAllowFlag === undefined) {
+    found.push({
+      provider: descriptor.id,
+      what: 'commands',
+      entries: grants.commands,
+      message:
+        `${descriptor.id} has no way to allow one command rather than all of them, so this ` +
+        `profile's commands (${grants.commands.join(', ')}) do not reach it. Its runs behave as ` +
+        `they do under the Default profile.`,
+    })
+  }
+  if (grants.denyCommands.length > 0 && descriptor.commandDenyFlag === undefined) {
+    found.push({
+      provider: descriptor.id,
+      what: 'deny_commands',
+      entries: grants.denyCommands,
+      message:
+        `${descriptor.id} has no deny-list, so this profile's denied commands ` +
+        `(${grants.denyCommands.join(', ')}) do not reach it.`,
+    })
+  }
+  return found
+}
+
+/**
+ * Arguments this step is not allowed to pass, given the profile it runs under.
+ *
+ * `Agent.args` and `AgentStep.args` are appended to the argv *after*
+ * `permissionArgs`, and for a long time nothing checked them — so a project's
+ * own agent file containing `args: ['--permission-mode', 'bypassPermissions']`
+ * got Full Access under the Default profile, silently, by editing a file in
+ * the repository the agent itself can write to.
+ *
+ * Derived rather than listed. What widens a profile is whatever that CLI's own
+ * `full-access` arguments are, minus whatever the confined profile already
+ * passes — so it stays correct when a descriptor is edited, and a third-party
+ * provider gets the same protection without naming anything. `forbiddenArgs`
+ * adds the cases derivation cannot see.
+ *
+ * Nothing is forbidden under Full Access: there is no boundary left to widen.
+ * A provider whose `full-access` list is empty derives nothing, which is the
+ * honest answer for a descriptor that has never been measured — `doctor`
+ * already says that provider distinguishes no profiles.
+ */
+export function forbiddenArgsFor(
+  descriptor: ProviderDescriptor,
+  profile: ExecutionProfile,
+): readonly string[] {
+  if (!isConfined(profile)) return []
+  const confined = new Set(permissionArgsFor(descriptor, profile))
+  const widening = permissionArgsFor(descriptor, 'full-access').filter(
+    (argument) => !confined.has(argument),
+  )
+  return [...new Set([...widening, ...descriptor.forbiddenArgs])]
+}
+
+/**
+ * Which of a step's arguments would widen the profile it runs under.
+ *
+ * `--flag=value` is compared on the flag, because a CLI that accepts one
+ * accepts the other and a guard that could tell them apart is a guard with a
+ * hole in it.
+ */
+export function profileWideningArgs(
+  descriptor: ProviderDescriptor,
+  profile: ExecutionProfile,
+  args: readonly string[],
+): readonly string[] {
+  const forbidden = new Set(forbiddenArgsFor(descriptor, profile))
+  if (forbidden.size === 0) return []
+  return args.filter((argument) => {
+    if (forbidden.has(argument)) return true
+    const equals = argument.indexOf('=')
+    return equals > 0 && forbidden.has(argument.slice(0, equals))
+  })
 }
 
 /**

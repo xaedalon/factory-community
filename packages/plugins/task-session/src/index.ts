@@ -35,7 +35,9 @@ export const openSessionTool: TaskToolCapability = {
   order: 20,
   offer: (context) => {
     if (context.workspace === undefined) {
-      return { unavailable: 'This task belongs to no project, so there is nowhere to open.' }
+      return {
+        unavailable: 'Factory cannot find the project this task belongs to, so there is nowhere to open.',
+      }
     }
     const session = context.task.session
     if (session === undefined) return { unavailable: NO_SESSION_YET }

@@ -14,7 +14,7 @@ const props = defineProps<{ scope: ScopeKind }>()
 const tone = computed(
   () =>
     ({
-      project: 'text-[var(--color-accent)] border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10',
+      project: 'text-[var(--color-accent-text)] border-[var(--color-accent)]/40 bg-[var(--color-accent)]/10',
       user: 'text-[var(--color-info)] border-[var(--color-info)]/40 bg-[var(--color-info)]/10',
       builtin: 'text-[var(--color-ink-faint)] border-[var(--color-line-strong)] bg-[var(--color-veil-weak)]',
     })[props.scope],
@@ -23,7 +23,7 @@ const tone = computed(
 
 <template>
   <span
-    class="inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10px] tracking-widest uppercase"
+    class="inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-label uppercase"
     :class="tone"
     :data-testid="`scope-${scope}`"
   >

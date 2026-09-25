@@ -27,6 +27,7 @@ const PROJECT: Project = {
   usesWorktrees: false,
   usesEnvironments: false,
   grantedDirectories: [],
+  reliabilityEnabled: true,
   createdAt: '2026-01-01T00:00:00.000Z',
 }
 
@@ -34,6 +35,7 @@ const TASK: Task = {
   id: 't-1',
   name: 'Add due dates',
   description: '',
+  projectId: 'project-1',
   state: 'done',
   workflows: [],
   flags: [],
@@ -250,13 +252,13 @@ describeFeature(feature, ({ Background, Rule, BeforeEachScenario }) => {
       )
     })
 
-    RuleScenario('A tool on a task with no project says no directory', ({
+    RuleScenario('A tool on a task whose project is missing says no directory', ({
       Given,
       And,
       When,
       Then,
     }) => {
-      Given('the task belongs to no project', () => {
+      Given("the task's project is not in the database", () => {
         workspace = undefined
       })
       And('a tool "jira" that runs "open https://example.test"', () =>

@@ -8,6 +8,8 @@ import { useDefinitions } from '../stores/definitions.js'
 import { useProjects } from '../stores/projects.js'
 import ScopeBadge from './ScopeBadge.vue'
 import ShadowNotice from './ShadowNotice.vue'
+import AppIcon from './AppIcon.vue'
+import Tooltip from './Tooltip.vue'
 import PageHeader from './PageHeader.vue'
 
 const props = defineProps<{ kind: DefinitionKind; title: string; subtitle: string }>()
@@ -101,25 +103,30 @@ watch(() => chosen.projectId, reload)
     </span>
   </p>
 
-  <div class="flex items-center justify-end gap-3 px-8 pt-4">
-    <RouterLink
-      v-if="kind === 'workflow'"
-      to="/bundles/import"
-      class="text-sm text-[var(--color-ink-muted)] hover:text-[var(--color-ink)]"
-      data-testid="go-import"
-    >
-      Import a bundle
-    </RouterLink>
-    <RouterLink
-      :to="`/${kind}s/new`"
-      class="rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white"
-      :data-testid="`new-${kind}`"
-    >
-      New {{ kind }}
-    </RouterLink>
+  <div class="flex items-center justify-end gap-3 px-8 pt-6">
+    <Tooltip v-if="kind === 'workflow'" label="Bring in workflows and phases from a shared bundle">
+      <RouterLink
+        to="/bundles/import"
+        class="inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm text-[var(--color-ink-muted)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-ink)]"
+        data-testid="go-import"
+      >
+        <AppIcon name="import" />
+        Import a bundle
+      </RouterLink>
+    </Tooltip>
+    <Tooltip :label="`Author a new ${kind} in a scope you choose`">
+      <RouterLink
+        :to="`/${kind}s/new`"
+        class="inline-flex items-center gap-1.5 rounded-md bg-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[var(--color-accent)]/85"
+        :data-testid="`new-${kind}`"
+      >
+        <AppIcon name="add" />
+        New {{ kind }}
+      </RouterLink>
+    </Tooltip>
   </div>
 
-  <div class="px-8 py-6">
+  <div class="page-body pt-4">
     <div
       v-if="exportError"
       class="mb-4 rounded-lg border border-[var(--color-danger)]/40 bg-[var(--color-danger)]/5 px-4 py-3 text-sm text-[var(--color-danger)]"
@@ -163,7 +170,7 @@ watch(() => chosen.projectId, reload)
       class="mb-8 last:mb-0"
       :data-testid="`${kind}-group-${group.key}`"
     >
-      <h2 class="mb-2 font-mono text-[10px] tracking-widest text-[var(--color-ink-faint)] uppercase">
+      <h2 class="mb-2 font-mono text-label text-[var(--color-ink-faint)] uppercase">
         {{ group.title }}
         <span v-if="group.key === 'builtin'" class="normal-case tracking-normal">
           — ships with Factory; saving one writes your own copy
@@ -175,7 +182,7 @@ watch(() => chosen.projectId, reload)
           <th
             v-for="heading in ['Name', 'Scope', '', 'Location', '']"
             :key="heading"
-            class="pb-2 font-mono text-[10px] font-normal tracking-widest text-[var(--color-ink-faint)] uppercase"
+            class="pb-2 font-mono text-label font-normal text-[var(--color-ink-faint)] uppercase"
           >
             {{ heading }}
           </th>
@@ -185,7 +192,7 @@ watch(() => chosen.projectId, reload)
         <tr
           v-for="item in group.rows"
           :key="item.name"
-          class="border-b border-[var(--color-line)]/60 transition-colors hover:bg-[var(--color-veil-weak)]"
+          class="border-b border-[var(--color-line)] transition-colors hover:bg-[var(--color-veil-weak)]"
           :data-testid="`row-${item.name}`"
         >
           <td class="py-3 pr-4">
@@ -201,7 +208,7 @@ watch(() => chosen.projectId, reload)
                  someone hunting for a file the tool can see and they cannot. -->
             <span
               v-if="!item.valid"
-              class="ml-2 font-mono text-[10px] text-[var(--color-danger)]"
+              class="ml-2 font-mono text-meta text-[var(--color-danger)]"
               :data-testid="`invalid-${item.name}`"
             >
               does not validate
@@ -210,30 +217,36 @@ watch(() => chosen.projectId, reload)
                  it cannot do is be added to a task here, and a row that simply
                  vanished from the picker with no explanation is the kind of
                  thing you end up reading the daemon to understand. -->
-            <span
+            <Tooltip
               v-if="item.unavailable"
-              class="ml-2 font-mono text-[10px] text-[var(--color-ink-faint)]"
-              :data-testid="`unavailable-${item.name}`"
-              :title="`Nothing provides ${item.unavailable.flag} here.`"
+              :label="`Nothing provides ${item.unavailable.flag} here, so a task cannot pick this up.`"
             >
-              needs {{ item.unavailable.setting }}
-            </span>
+              <span
+                class="ml-2 inline-flex items-center gap-1 font-mono text-meta text-[var(--color-ink-faint)]"
+                :data-testid="`unavailable-${item.name}`"
+              >
+                <AppIcon name="alert" :size="10" />
+                needs {{ item.unavailable.setting }}
+              </span>
+            </Tooltip>
           </td>
           <td class="py-3 pr-4"><ScopeBadge :scope="item.winner.scope" /></td>
           <td class="py-3 pr-4"><ShadowNotice :shadowed="item.shadowed" /></td>
-          <td class="py-3 font-mono text-[11px] text-[var(--color-ink-faint)]">
+          <td class="py-3 font-mono text-meta text-[var(--color-ink-faint)]">
             {{ item.winner.file }}
           </td>
           <td class="py-3 pl-4 text-right">
-            <button
-              v-if="kind === 'workflow'"
-              type="button"
-              class="font-mono text-[10px] text-[var(--color-ink-faint)] hover:text-[var(--color-accent)]"
-              :data-testid="`export-${item.name}`"
-              @click="exportWorkflow(item.name)"
-            >
-              export
-            </button>
+            <Tooltip v-if="kind === 'workflow'" label="Download this workflow and its phases as a bundle">
+              <button
+                type="button"
+                class="inline-flex items-center gap-1 rounded-md px-1.5 py-1 font-mono text-meta text-[var(--color-ink-faint)] transition-colors hover:bg-[var(--color-veil-weak)] hover:text-[var(--color-accent-text)]"
+                :data-testid="`export-${item.name}`"
+                @click="exportWorkflow(item.name)"
+              >
+                <AppIcon name="export" :size="11" />
+                export
+              </button>
+            </Tooltip>
           </td>
         </tr>
       </tbody>

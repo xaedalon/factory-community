@@ -21,7 +21,7 @@ defineEmits<{ 'update:modelValue': [value: 'form' | 'yaml'] }>()
       :key="view"
       type="button"
       :data-testid="`view-${view}`"
-      class="px-3 py-1 font-mono text-[11px] tracking-wide transition-colors"
+      class="px-3 py-1 font-mono text-label transition-colors"
       :class="
         view === modelValue
           ? 'bg-[var(--color-accent-soft)] text-[var(--color-ink)]'

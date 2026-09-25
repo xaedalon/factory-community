@@ -223,4 +223,148 @@ describeFeature(feature, ({ Scenario, Rule, BeforeEachScenario, AfterEachScenari
       )
     })
   })
+  Rule('a group the writer was never told about is still written', ({ RuleScenario }) => {
+    RuleScenario('A group the merge does not name lands anyway', ({ Given, When, Then, And }) => {
+      Given('an installation with the default settings', givenUserScope())
+      // An `x-` group, which the schema allows and the old merge dropped: a
+      // plugin keeping its settings beside Factory's lost them to the next
+      // save of anything else. Cast in because `SettingsPatch` names the
+      // groups Factory itself writes, which is also the shape the next
+      // top-level group would arrive in.
+      When('a patch carries an extension group beside a known one', () => {
+        problems = writeSettings(chain, {
+          ui: { scale: 2 },
+          'x-telemetry': { enabled: false },
+        } as unknown as Parameters<typeof writeSettings>[1]).problems
+      })
+      Then('the file holds that group', () => {
+        expect(problems).toEqual([])
+        expect(JSON.parse(readFileSync(file(), 'utf8'))['x-telemetry']).toEqual({ enabled: false })
+      })
+      And('the known setting was saved too', () => {
+        read()
+        expect(settings.ui.scale).toBe(2)
+      })
+    })
+
+    RuleScenario('A group says only what it means to change', ({ Given, When, Then, And }) => {
+      Given('the execution profile is "full-access"', () => {
+        givenUserScope()()
+        writeSettings(chain, { security: { profile: 'full-access' } })
+      })
+      When('the interface scale is set to 2', save({ ui: { scale: 2 } }))
+      Then('the profile is still "full-access"', () => {
+        read()
+        expect(settings.security.profile).toBe('full-access')
+      })
+      And('the scale is 2', () => expect(settings.ui.scale).toBe(2))
+    })
+  })
+  Rule('what reads the work is an installation preference a project may override', ({
+    RuleScenario,
+  }) => {
+    const judge = () => settings.reliability
+    const nameJudge = save({
+      reliability: { provider: 'codex', model: 'strong', effort: 'high' },
+    })
+
+    RuleScenario('A fresh installation names no judge', ({ Given, Then, And }) => {
+      Given('an installation with the default settings', () => {
+        givenUserScope()()
+        read()
+      })
+      Then('no judging provider is named', () => expect(judge().provider).toBeUndefined())
+      And('no judging model is named', () => expect(judge().model).toBeUndefined())
+    })
+
+    RuleScenario('A judge can be named', ({ Given, When, Then, And }) => {
+      Given('an installation with the default settings', givenUserScope())
+      When('the judge is set to "codex" using "strong" at "high"', () => {
+        nameJudge()
+        read()
+      })
+      Then('the judging provider is "codex"', () => expect(judge().provider).toBe('codex'))
+      And('the judging model is "strong"', () => expect(judge().model).toBe('strong'))
+      And('the judging effort is "high"', () => expect(judge().effort).toBe('high'))
+    })
+
+    RuleScenario('Naming the judge leaves the interface alone', ({ Given, When, Then }) => {
+      Given('the interface scale is 2', () => {
+        givenUserScope()()
+        save({ ui: { scale: 2 } })()
+      })
+      When('the judge is set to "codex" using "strong" at "high"', () => {
+        nameJudge()
+        read()
+      })
+      Then('the scale is 2', scaleIs(2))
+    })
+  })
+
+  Rule('a setting can be cleared, not only changed', ({ RuleScenario }) => {
+    const judge = () => settings.reliability
+    const nameJudge = save({
+      reliability: { provider: 'codex', model: 'strong', effort: 'high' },
+    })
+
+    RuleScenario('Null takes a value back out of the file', ({ Given, And, When, Then }) => {
+      Given('an installation with the default settings', givenUserScope())
+      And('the judge is set to "codex" using "strong" at "high"', nameJudge)
+      When('the judging model is cleared', () => {
+        save({ reliability: { model: null } })()
+        read()
+      })
+      Then('no judging model is named', () => expect(judge().model).toBeUndefined())
+      // The other two are untouched: clearing one is not clearing the group.
+      And('the judging provider is "codex"', () => expect(judge().provider).toBe('codex'))
+    })
+
+    RuleScenario('Undefined still leaves a value alone', ({ Given, And, When, Then }) => {
+      Given('an installation with the default settings', givenUserScope())
+      And('the judge is set to "codex" using "strong" at "high"', nameJudge)
+      When('a patch mentions the judge but names no model', () => {
+        save({ reliability: { effort: 'low' } })()
+        read()
+      })
+      Then('the judging model is "strong"', () => expect(judge().model).toBe('strong'))
+    })
+  })
+
+  Rule('how far work may start work is a setting', ({ RuleScenario }) => {
+    RuleScenario('A fresh installation allows three levels and ten tasks a run', ({
+      Given,
+      Then,
+      And,
+    }) => {
+      Given('an installation with the default settings', () => {
+        givenUserScope()()
+        read()
+      })
+      Then('work may start work three levels deep', () =>
+        expect(settings.orchestration.maxDepth).toBe(3),
+      )
+      And('one run may ask for ten tasks', () =>
+        expect(settings.orchestration.maxTasksPerRun).toBe(10),
+      )
+    })
+
+    RuleScenario('The depth can be turned down to nothing', ({ Given, When, Then }) => {
+      Given('an installation with the default settings', givenUserScope())
+      When('the orchestration depth is set to 0', save({ orchestration: { maxDepth: 0 } }))
+      Then('work may start work zero levels deep', () => {
+        read()
+        expect(settings.orchestration.maxDepth).toBe(0)
+      })
+    })
+
+    RuleScenario('A depth nobody could have meant is refused', ({ Given, When, Then, And }) => {
+      Given('an installation with the default settings', givenUserScope())
+      When('the orchestration depth is set to 500', save({ orchestration: { maxDepth: 500 } }))
+      Then('the settings are refused', () => expect(problems.length).toBeGreaterThan(0))
+      And('what is saved still allows three levels', () => {
+        read()
+        expect(settings.orchestration.maxDepth).toBe(3)
+      })
+    })
+  })
 })

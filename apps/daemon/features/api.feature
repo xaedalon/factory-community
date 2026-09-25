@@ -95,6 +95,16 @@ Feature: The definitions API
     When I DELETE "/api/phases/analysis"
     Then the response is 200
 
+  Scenario: Saving into a scope that is not in the chain says so
+    Given the project scope has been taken away
+    When I POST a workflow named "release"
+    # It answered 500 with "No project scope in this chain", which is a fault
+    # the caller cannot act on. The condition is ordinary — a repository
+    # registered before Factory started creating a scope for one — and the
+    # message already knows enough to say it.
+    Then the response is 400
+    And the response names the scope that is missing
+
   Scenario: A definition that does not validate is refused
     When I POST a workflow with an invalid mode
     Then the response is 400
@@ -112,6 +122,34 @@ Feature: The definitions API
     When I POST "/api/workflows/development/export"
     Then the response is 200
     And the bundle contains the phase "analysis"
+
+  Scenario: The bundles Factory ships can be listed
+    # Findable at all, which they were not: the only way to import one was to
+    # know a path inside node_modules and type it at a terminal.
+    When I GET "/api/bundles/examples"
+    Then the response is 200
+    And the bundle "reliability" is offered
+    And it says how many workflows it carries
+
+  Scenario: A shipped bundle can be read
+    When I GET "/api/bundles/examples/reliability"
+    Then the response is 200
+    And the text is a bundle carrying the workflow "analysis"
+
+  Scenario: A bundle Factory does not ship is a 404
+    When I GET "/api/bundles/examples/nonesuch"
+    Then the response is 404
+
+  Scenario: A name that is a path is refused rather than resolved
+    # `../../etc/passwd` is a filename Factory does not ship, and the refusal
+    # has to come before the filesystem is asked anything at all.
+    When I GET a shipped bundle named "../../../etc/passwd"
+    Then the response is 400
+
+  Scenario: The shipped bundle goes in through the same door a person's file does
+    When I import the shipped bundle "reliability" into the user scope
+    Then the response is 200
+    And the workflow "analysis" is in the user scope
 
   Scenario: Importing is previewed without writing
     Given the project defines the workflow "development"
@@ -141,6 +179,17 @@ Feature: The definitions API
     When I GET "/api/registries/providers"
     Then the response is 200
     And "claude" is listed
+
+  Scenario: The provider registry says which half of a profile a CLI can honour
+    # The profile editor's two honesty notes are computed from these flags, so a
+    # projection that carries one and drops the other leaves a gap the editor
+    # cannot mention. Allowing and forbidding are separate questions with
+    # separate answers: Claude answers both, Codex neither.
+    When I GET "/api/registries/providers"
+    Then the response is 200
+    And "claude" can be told one command is allowed
+    And "claude" can be told one command is forbidden
+    And "codex" can be told neither
 
   Scenario: Doctor reports findings in the body, not the status
     Given the project defines a workflow naming a missing phase
@@ -184,6 +233,63 @@ Feature: The definitions API
     # gets the explanation.
     Then the response is 404
 
+  Scenario: An API path the daemon does not serve is a JSON 404, not the board
+    # The board's catch-all exists so `/tasks/abc` resolves in the app router
+    # rather than 404ing. It was catching `/api/…` too, so a client calling a
+    # route this daemon does not have got `index.html` with a 200 — and every
+    # caller then failed on `undefined`, somewhere else entirely, saying
+    # nothing about the request. An older daemon and a newer board is the
+    # ordinary way to be in exactly that position.
+    Given a built board
+    When I GET "/api/bundles/examples/nothing-like-this"
+    Then the response is 404
+    And the response is JSON
+    And the board's page is not returned
+
+  Scenario: A page whose name merely begins with those letters is still a page
+    # The guard is on the path segment, not on the three characters. `/apiary`
+    # is a route the app may hold, and refusing it because it starts with "api"
+    # would break a page for a reason nobody could guess from the name.
+    Given a built board
+    When I GET "/apiary"
+    Then the board's page is returned
+
+  Scenario: An unknown API path is a 404 even where there is no board to serve
+    When I GET "/api/nothing-like-this"
+    Then the response is 404
+    And the response is JSON
+
+
+  Rule: a profile goes in and out through the same routes as everything else
+
+    A profile is a definition, so it gets the six routes every kind gets from one
+    row in the layout table. Worth asserting rather than assuming: the row is the
+    only thing that makes it true, and a kind that half-arrived would fail
+    somewhere nobody was looking.
+
+    Scenario: A profile can be written and read back
+      When I POST a profile named "development"
+      Then the response is 201
+      And reading it back returns what was written
+      And the file was written as a profile
+
+    Scenario: Previewing a profile shows the YAML it would write
+      When I preview a profile named "development"
+      Then the response is 200
+      And the preview reads as a profile
+
+    Scenario: A profile that would reach Full Access is refused
+      # The upper bound, enforced where every write passes through rather than
+      # in one client. `--permission-mode bypassPermissions` is what Claude's
+      # Full Access passes, so a profile passing it is Full Access with a
+      # friendlier name and no warning banner.
+      When I POST a profile that passes "bypassPermissions" to claude
+      Then the response is 400
+      And the refusal names Full Access
+
+    Scenario: A profile that allows an ordinary build tool is written
+      When I POST a profile allowing "cargo"
+      Then the response is 201
 
   Rule: plugins can be listed and switched
 
@@ -355,3 +461,88 @@ Feature: The definitions API
       When I send an empty settings patch
       Then the response is 400
       And the response mentions the profile
+
+  Rule: a plugin can refuse a definition, or adjust it on its way to disk
+
+    Two hooks have been on the plugin SDK since the host was built —
+    `validateDefinition` and `beforeDefinitionWrite` — and neither was ever
+    called. A plugin could register one, see it counted in its own conformance
+    report, read it in the documentation, and have it never run: exactly the
+    shape this codebase keeps paying for, a seam that validates and lies.
+
+    They run where every write goes through, so the API, the CLI, a bundle
+    import and scaffolding a project all get the same answer. The file is still
+    read back afterwards, which is what stops a hook that adjusted a definition
+    into something Factory cannot load.
+
+    Scenario: A plugin can refuse a definition
+      Given a plugin that refuses any workflow called "forbidden"
+      When I POST a workflow named "forbidden"
+      Then the response is 400
+      And the response carries the plugin's reason
+      And the workflow "forbidden" was not written
+
+    Scenario: A plugin that refuses one name leaves the others alone
+      Given a plugin that refuses any workflow called "forbidden"
+      When I POST a workflow named "allowed"
+      Then the response is 201
+
+    Scenario: A plugin can adjust what is written
+      Given a plugin that describes every workflow it is shown
+      When I POST a workflow named "allowed"
+      Then the response is 201
+      And the stored workflow carries the description the plugin gave it
+
+    Scenario: A plugin can refuse the write itself
+      Given a plugin that refuses to write anything
+      When I POST a workflow named "allowed"
+      Then the response is 400
+      And the workflow "allowed" was not written
+
+    Scenario: A hook that throws refuses rather than writing half of it
+      Given a plugin whose write hook throws
+      When I POST a workflow named "allowed"
+      # A transform that threw was in the middle of deciding. Carrying on would
+      # write the value it may have been about to refuse.
+      Then the response is 400
+      And the workflow "allowed" was not written
+
+  Rule: the installation-wide profile stays one of the two Factory ships
+
+    A custom profile is resolved through the chain of the project that names it,
+    and a profile written in one repository does not exist for any other. An
+    installation-wide setting naming one would refuse to plan everywhere except
+    where it was written — a footgun shaped exactly like a setting that works.
+
+    Scenario: A custom profile is refused as the installation's default
+      Given the user scope defines the profile "buildtools"
+      When I set the installation profile to "buildtools"
+      Then the response is 400
+
+    Scenario: The built-ins are still accepted
+      When I set the installation profile to "full-access"
+      Then the response is 200
+
+  Rule: the installation can name the judge a project inherits
+
+    The agent evaluator costs tokens, so the model is a project's decision — but
+    setting the same one on every new project is work nobody should repeat. The
+    installation carries a default and a project overrides it.
+
+    Scenario: A judge can be named for the installation
+      When I PATCH "/api/settings" with a judge of "claude" using "strong"
+      Then the response is 200
+      And the installation's judging provider is "claude"
+
+    Scenario: A provider nobody registered is refused
+      # Read back later it would look like "nobody has said" and fall through to
+      # whatever is installed, judging with a CLI nobody chose.
+      When I PATCH "/api/settings" with a judge of "nonesuch"
+      Then the response is 400
+
+    Scenario: Clearing the model returns the installation to naming nothing
+      Given the installation judges with "claude" using "strong"
+      When I PATCH "/api/settings" clearing the judging model
+      Then the response is 200
+      And the installation names no judging model
+      And the installation's judging provider is "claude"

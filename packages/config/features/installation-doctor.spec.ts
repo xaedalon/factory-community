@@ -269,4 +269,37 @@ describeFeature(feature, ({ Background, Rule }) => {
       })
     })
   })
+  Rule('a workflow that lists no phases is reported', ({ RuleScenario }) => {
+    const emptyWorkflow = () => {
+      box.workflow(userRoot, 'design', 'name: design\nphases: []\n')
+    }
+
+    RuleScenario('A workflow with no phases is a warning naming it', ({
+      Given,
+      When,
+      Then,
+      And,
+    }) => {
+      Given('the user scope has a workflow "design" with no phases', emptyWorkflow)
+      When('doctor runs', run)
+      Then('a warning says "design" will do nothing', () => {
+        const found = about('doctor.emptyWorkflow')
+        expect(found).toHaveLength(1)
+        expect(found[0]?.severity).toBe('warning')
+        expect(found[0]?.message).toContain('"design"')
+      })
+      And('it says a task that runs it is refused', () => expect(anySays('refused')).toBe(true))
+    })
+
+    RuleScenario('A workflow with a phase is not reported', ({ Given, When, Then }) => {
+      Given('the user scope has a workflow "design" with a phase', () => {
+        box.phase(userRoot, 'design', 'name: design\nsteps: [{run: echo hello}]\n')
+        box.workflow(userRoot, 'design', 'name: design\nphases: [design]\n')
+      })
+      When('doctor runs', run)
+      Then('nothing is reported about empty workflows', () =>
+        expect(about('doctor.emptyWorkflow')).toEqual([]),
+      )
+    })
+  })
 })

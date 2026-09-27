@@ -4,8 +4,8 @@ The Reliability specification asks for an audit before any code is written (§76
 fastest way to get this wrong is to build a second copy of something Factory already does. This is
 that audit: every component the feature touches, what it is today, and what happens to it.
 
-Read with [`../../Reliability-System-Plan-CLAUDE.md`](../../Reliability-System-Plan-CLAUDE.md),
-which is the adapted plan and records where it departs from the specification.
+Where the build departs from the specification, [`implementation-summary.md`](implementation-summary.md)
+says so and why.
 
 **Classification:** `REUSE` — used as it is · `EXTEND` — gains something · `NEW` — did not exist ·
 `OUT_OF_SCOPE` — deliberately untouched.
@@ -131,8 +131,8 @@ which is precisely the score.
 | **What it is** | `SCOPE_DIR = '.xaedalon/.factory'`. Scopes layer project → user → builtin, first match per name, and every resolution carries what it shadows. **Every path in the product flows from `scopes.ts`**, enforced by an eslint ban on `process.cwd()`, `os.homedir()` and `os.tmpdir()` everywhere else. |
 | **Verdict** | `REUSE` |
 
-The specification's suggested `.xaedalon/factory/tasks/<id>/reliability.json` is not adopted — see the
-plan's decision table. The database already sits under this scope at `state/factory.db`.
+The specification's suggested `.xaedalon/factory/tasks/<id>/reliability.json` is not adopted: the
+database already sits under this scope at `state/factory.db`.
 
 ---
 

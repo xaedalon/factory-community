@@ -40,3 +40,6 @@ logs/
 improvements.md
 learnings.md
 memory.md
+# An agent's implementation plan for the reliability work. What it decided is in
+# `docs/reliability/`, written for readers; the plan itself was a working file.
+Reliability-System-Plan-CLAUDE.md

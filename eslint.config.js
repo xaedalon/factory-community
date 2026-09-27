@@ -73,7 +73,8 @@ export default tseslint.config(
   // The two lists that must agree: anything `.gitignore` excludes is not ours to
   // lint. `build/` and `release/` hold Pro's packaged desktop output — a working
   // tree may hold both repositories — and `test-results/` and
-  // `playwright-report/` are a failed run's leftovers. Walking into any of them
+  // `playwright-report/` are a failed run's leftovers, and `logs/` is whatever a
+  // local run left behind — scripts included. Walking into any of them
   // fails the gate on code that is not part of this repository.
   {
     ignores: [
@@ -85,6 +86,7 @@ export default tseslint.config(
       '**/release/**',
       '**/test-results/**',
       '**/playwright-report/**',
+      'logs/**',
     ],
   },
   js.configs.recommended,

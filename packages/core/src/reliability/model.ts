@@ -14,8 +14,8 @@
  * coverage, and neither is a thing to build out of real runs to find out what
  * happens.
  *
- * `Reliability-System-Plan-CLAUDE.md` is the adapted plan, and it records where
- * this departs from the product specification and why.
+ * `docs/reliability/implementation-summary.md` records where this departs from
+ * the product specification and why.
  */
 
 /**

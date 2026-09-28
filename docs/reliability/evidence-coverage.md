@@ -54,8 +54,7 @@ credited against an artifact actually arriving; the rest are credited once the
 run completes. So a workflow that declares one key and writes no artifact earns
 nothing, and the same workflow declaring two earns the second. The artifact is
 the strongest evidence a workflow produces, and the first key is the one attached
-to it. Whether that asymmetry should survive is
-[recorded as an improvement](../../improvements.md).
+to it. Whether that asymmetry should survive is a known open question.
 
 ## A failed check is evidence *about* the code
 

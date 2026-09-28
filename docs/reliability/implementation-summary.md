@@ -1,9 +1,7 @@
 # What was built
 
-The specification is `Xaedalon Factory Reliability System.md`, 86 sections. The
-adaptation to the Factory that exists is `Reliability-System-Plan-CLAUDE.md` at
-the repository root, which carries a decision table for every departure. This is
-what came out.
+The specification is `Xaedalon Factory Reliability System.md`, 86 sections. This
+is what it became against the Factory that exists, including where it departs.
 
 ## Built
 
@@ -69,8 +67,7 @@ POST .../drivers/<id>/accept  with an agent initiator
 
 ## Departures from the specification
 
-Each is in the plan's decision table with its reasoning; these are the ones a
-reader of the spec will notice.
+These are the ones a reader of the spec will notice, each with its reasoning.
 
 | Spec says | Factory does | Why |
 |---|---|---|
